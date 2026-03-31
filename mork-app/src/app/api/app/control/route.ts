@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getAppControlState,
+  setExecutionAuthority,
+  setPersonaGuidelines,
+  setPersonaMode,
+  setSelectedOllamaModel,
+  setStartupCompleted,
   setControlFlag,
   startArb,
   startSherpa,
@@ -13,7 +18,12 @@ type Action =
   | "arb.stop"
   | "sherpa.start"
   | "sherpa.stop"
-  | "controls.set";
+  | "controls.set"
+  | "persona.mode.set"
+  | "persona.guidelines.set"
+  | "ollama.model.set"
+  | "startup.completed.set"
+  | "execution.authority.set";
 
 export async function GET() {
   return NextResponse.json({ ok: true, state: await getAppControlState() });
@@ -49,7 +59,8 @@ export async function POST(req: NextRequest) {
       if (
         key !== "memoryEnabled" &&
         key !== "plannerEnabled" &&
-        key !== "messagingEnabled" &&
+        key !== "telegramEnabled" &&
+        key !== "xEnabled" &&
         key !== "walletAutoRefreshEnabled"
       ) {
         return NextResponse.json(
@@ -59,6 +70,73 @@ export async function POST(req: NextRequest) {
       }
 
       await setControlFlag(key, value);
+    } else if (action === "persona.mode.set") {
+      const channel = body?.channel;
+      const mode = body?.mode;
+      if (
+        (channel !== "app" && channel !== "telegram" && channel !== "x") ||
+        typeof mode !== "string"
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "persona.mode.set requires channel and mode" },
+          { status: 400 }
+        );
+      }
+      await setPersonaMode(channel, mode.trim());
+    } else if (action === "persona.guidelines.set") {
+      const channel = body?.channel;
+      const guidelines = body?.guidelines;
+      if (
+        (channel !== "app" && channel !== "telegram" && channel !== "x") ||
+        typeof guidelines !== "string"
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "persona.guidelines.set requires channel and guidelines" },
+          { status: 400 }
+        );
+      }
+      await setPersonaGuidelines(channel, guidelines);
+    } else if (action === "ollama.model.set") {
+      const model = body?.model;
+      if (typeof model !== "string" || !model.trim()) {
+        return NextResponse.json(
+          { ok: false, error: "ollama.model.set requires model" },
+          { status: 400 }
+        );
+      }
+      await setSelectedOllamaModel(model.trim());
+    } else if (action === "startup.completed.set") {
+      const value = body?.value;
+      if (typeof value !== "boolean") {
+        return NextResponse.json(
+          { ok: false, error: "startup.completed.set requires boolean value" },
+          { status: 400 }
+        );
+      }
+      await setStartupCompleted(value);
+    } else if (action === "execution.authority.set") {
+      const mode = body?.mode;
+      const maxTradeUsd = body?.maxTradeUsd;
+      const mintAllowlist = body?.mintAllowlist;
+      const cooldownMinutes = body?.cooldownMinutes;
+      if (
+        (mode !== "user_only" && mode !== "agent_assisted" && mode !== "emergency_stop") ||
+        typeof maxTradeUsd !== "number" ||
+        !Array.isArray(mintAllowlist) ||
+        !mintAllowlist.every((value) => typeof value === "string") ||
+        typeof cooldownMinutes !== "number"
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "execution.authority.set requires valid gate settings" },
+          { status: 400 }
+        );
+      }
+      await setExecutionAuthority({
+        mode,
+        maxTradeUsd,
+        mintAllowlist,
+        cooldownMinutes,
+      });
     } else {
       return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
     }

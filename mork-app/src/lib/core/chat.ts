@@ -2,7 +2,7 @@ import { z } from "zod";
 import { prisma } from "./prisma";
 import { ollama } from "./ollama";
 import { buildContext } from "./context";
-import { isMemoryEnabled, isMessagingEnabled } from "./appControl";
+import { getAppControlState, isChannelEnabled, isMemoryEnabled } from "./appControl";
 
 const RespondSchema = z.object({
   channel: z.string().default("system"),
@@ -55,10 +55,10 @@ export async function respondToChat(input: unknown) {
   const { channel, handle, message, maxChars } = parsed.data;
   const trimmedMessage = message.trim();
 
-  if (!(await isMessagingEnabled())) {
+  if (!(await isChannelEnabled(channel))) {
     return {
       ok: true,
-      response: "Messaging is currently disabled in app controls.",
+      response: `${channel.toUpperCase()} channel is currently disabled in app controls.`,
       status: 200,
     };
   }
@@ -93,9 +93,11 @@ export async function respondToChat(input: unknown) {
     ctxParts.push(builtContext);
   }
 
+  const controlState = await getAppControlState();
   let modeInstruction = "";
 
   if (handle === "frontend-coding") {
+    const customGuidelines = controlState.controls.appPersonaGuidelines.trim();
     modeInstruction =
       `You are Mork inside a coding workbench.\n` +
       `If the user asks for code, debugging, math, architecture, or implementation help, respond directly and usefully.\n` +
@@ -103,17 +105,42 @@ export async function respondToChat(input: unknown) {
       `Do not invent debugging scenarios.\n` +
       `Do not assume every message is a coding request.\n` +
       `Only output code when the user asks for code or it is clearly useful.\n` +
-      `For simple math or factual questions, answer directly instead of giving programming examples.\n`;
+      `For simple math or factual questions, answer directly instead of giving programming examples.\n` +
+      `Persona mode: ${controlState.controls.appPersonaMode}.\n`;
+    if (customGuidelines) {
+      modeInstruction += `Custom guidelines:\n${customGuidelines}\n`;
+    }
   } else if (channel === "telegram") {
+    const customGuidelines = controlState.controls.telegramPersonaGuidelines.trim();
     modeInstruction =
       `You are replying on Telegram.\n` +
-      `Be polished, professional, concise, and competent.\n`;
+      `Be polished, professional, concise, and competent.\n` +
+      `Persona mode: ${controlState.controls.telegramPersonaMode}.\n`;
+    if (customGuidelines) {
+      modeInstruction += `Custom guidelines:\n${customGuidelines}\n`;
+    }
   } else if (channel === "x") {
+    const customGuidelines = controlState.controls.xPersonaGuidelines.trim();
     modeInstruction =
       `You are composing for X.\n` +
-      `Be reflective, literary, artistic, and thoughtful.\n`;
+      `Be reflective, literary, artistic, and thoughtful.\n` +
+      `Persona mode: ${controlState.controls.xPersonaMode}.\n`;
+    if (customGuidelines) {
+      modeInstruction += `Custom guidelines:\n${customGuidelines}\n`;
+    }
   } else {
     modeInstruction = `Be useful, clear, and grounded.\n`;
+  }
+
+  if (controlState.controls.executionAuthority.mode === "emergency_stop") {
+    modeInstruction +=
+      "Execution authority is in EMERGENCY STOP. Decline any request to execute or suggest immediate wallet transactions.\n";
+  } else if (controlState.controls.executionAuthority.mode === "agent_assisted") {
+    modeInstruction +=
+      `Execution authority is AGENT-ASSISTED. Any trade plan must stay under $${controlState.controls.executionAuthority.maxTradeUsd} per action, respect mint allowlist (${controlState.controls.executionAuthority.mintAllowlist.join(", ") || "none configured"}), and cooldown ${controlState.controls.executionAuthority.cooldownMinutes} minutes.\n`;
+  } else {
+    modeInstruction +=
+      "Execution authority is USER-ONLY. Offer analysis and ask the user to explicitly confirm before any execution steps.\n";
   }
 
   if (handle === "frontend-coding" && isCasualMessage(trimmedMessage)) {
