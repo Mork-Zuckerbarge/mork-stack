@@ -1,23 +1,27 @@
+import { getAppControlState } from "./appControl";
 let hasLoggedOllamaConfig = false;
 
 type OllamaMode = "coding" | "telegram" | "x" | "default";
 
-function pickModel(mode: OllamaMode) {
+async function pickModel(mode: OllamaMode) {
+  const controlState = await getAppControlState();
+  const selectedModel = controlState.controls.selectedOllamaModel.trim();
+
   if (mode === "coding") {
-    return process.env.OLLAMA_MODEL_CODING || process.env.OLLAMA_MODEL || "llama3.1:8b";
+    return process.env.OLLAMA_MODEL_CODING || selectedModel || process.env.OLLAMA_MODEL || "llama3.1:8b";
   }
   if (mode === "telegram") {
-    return process.env.OLLAMA_MODEL_TELEGRAM || process.env.OLLAMA_MODEL || "llama3.1:8b";
+    return process.env.OLLAMA_MODEL_TELEGRAM || selectedModel || process.env.OLLAMA_MODEL || "llama3.1:8b";
   }
   if (mode === "x") {
-    return process.env.OLLAMA_MODEL_X || process.env.OLLAMA_MODEL || "llama3.1:8b";
+    return process.env.OLLAMA_MODEL_X || selectedModel || process.env.OLLAMA_MODEL || "llama3.1:8b";
   }
-  return process.env.OLLAMA_MODEL || "llama3.1:8b";
+  return selectedModel || process.env.OLLAMA_MODEL || "llama3.1:8b";
 }
 
 export async function ollama(prompt: string, mode: OllamaMode = "default") {
   const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
-  const model = pickModel(mode);
+  const model = await pickModel(mode);
   const ctx = Number(process.env.OLLAMA_CTX || 8192);
 
   if (!hasLoggedOllamaConfig) {
