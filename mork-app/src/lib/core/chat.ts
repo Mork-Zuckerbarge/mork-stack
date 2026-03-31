@@ -2,7 +2,8 @@ import { z } from "zod";
 import { prisma } from "./prisma";
 import { ollama } from "./ollama";
 import { buildContext } from "./context";
-import { getAppControlState, isChannelEnabled, isMemoryEnabled } from "./appControl";
+import { getAppControlState } from "./appControl";
+import { isChannelEnabled, isMemoryEnabled, updateHealth } from "./orchestrator";
 
 const RespondSchema = z.object({
   channel: z.string().default("system"),
@@ -176,7 +177,9 @@ export async function respondToChat(input: unknown) {
       `${ctxParts.join("\n\n")}\n\nTASK:\n${instruction}\n\nREPLY:`,
       ollamaMode
     );
+    updateHealth("chat", "healthy", "last response generated");
   } catch {
+    updateHealth("chat", "degraded", "model call failed");
     if (handle === "frontend-coding") {
       responseText =
         "Model call failed, but the app path is live. Ask again in a moment.";

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { getWalletState } from "@/lib/core/wallet";
-import { getAppControlState } from "@/lib/core/appControl";
+import { getOrchestratorState, updateHealth } from "@/lib/core/orchestrator";
 
 export async function GET() {
-  const app = await getAppControlState();
+  const orchestrator = await getOrchestratorState();
 
   try {
     const wallet = await getWalletState();
+    updateHealth("wallet", "healthy", "wallet query succeeded");
 
     return NextResponse.json({
       agent: {
@@ -14,17 +15,26 @@ export async function GET() {
         status: "active",
         model: process.env.OLLAMA_MODEL || "llama3.2:3b",
       },
-      app,
+      app: orchestrator.app,
+      orchestrator: {
+        health: orchestrator.health,
+        runtimeFlagOwner: orchestrator.runtimeFlagOwner,
+      },
       wallet,
     });
   } catch {
+    updateHealth("wallet", "degraded", "wallet query failed");
     return NextResponse.json({
       agent: {
         name: "Mork Zuckerbarge",
         status: "offline",
         model: process.env.OLLAMA_MODEL || "llama3.2:3b",
       },
-      app,
+      app: orchestrator.app,
+      orchestrator: {
+        health: orchestrator.health,
+        runtimeFlagOwner: orchestrator.runtimeFlagOwner,
+      },
       wallet: {
         address: null,
         sol: 0,

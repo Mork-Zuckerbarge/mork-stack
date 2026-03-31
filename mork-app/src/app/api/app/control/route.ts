@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getAppControlState,
-  setExecutionAuthority,
-  setPersonaGuidelines,
-  setPersonaMode,
-  setSelectedOllamaModel,
-  setStartupCompleted,
-  setControlFlag,
-  startArb,
-  startSherpa,
-  stopArb,
-  stopSherpa,
-} from "@/lib/core/appControl";
+  getOrchestratorState,
+  startOrchestrator,
+  stopOrchestrator,
+  setRuntimeExecutionAuthority,
+  setRuntimeFlag,
+  setRuntimeModel,
+  setRuntimePersonaGuidelines,
+  setRuntimePersonaMode,
+  setRuntimeStartupCompleted,
+  startRuntime,
+  stopRuntime,
+} from "@/lib/core/orchestrator";
 
 type Action =
+  | "orchestrator.start"
+  | "orchestrator.stop"
   | "arb.start"
   | "arb.stop"
   | "sherpa.start"
@@ -26,7 +28,15 @@ type Action =
   | "execution.authority.set";
 
 export async function GET() {
-  return NextResponse.json({ ok: true, state: await getAppControlState() });
+  const orchestrator = await getOrchestratorState();
+  return NextResponse.json({
+    ok: true,
+    state: orchestrator.app,
+    orchestrator: {
+      health: orchestrator.health,
+      runtimeFlagOwner: orchestrator.runtimeFlagOwner,
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -41,10 +51,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (action === "arb.start") await startArb();
-    else if (action === "arb.stop") await stopArb();
-    else if (action === "sherpa.start") await startSherpa();
-    else if (action === "sherpa.stop") await stopSherpa();
+    if (action === "orchestrator.start") await startOrchestrator();
+    else if (action === "orchestrator.stop") await stopOrchestrator();
+    else if (action === "arb.start") await startRuntime("arb");
+    else if (action === "arb.stop") await stopRuntime("arb");
+    else if (action === "sherpa.start") await startRuntime("sherpa");
+    else if (action === "sherpa.stop") await stopRuntime("sherpa");
     else if (action === "controls.set") {
       const key = body?.key;
       const value = body?.value;
@@ -69,7 +81,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      await setControlFlag(key, value);
+      await setRuntimeFlag(key, value);
     } else if (action === "persona.mode.set") {
       const channel = body?.channel;
       const mode = body?.mode;
@@ -82,7 +94,7 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      await setPersonaMode(channel, mode.trim());
+      await setRuntimePersonaMode(channel, mode.trim());
     } else if (action === "persona.guidelines.set") {
       const channel = body?.channel;
       const guidelines = body?.guidelines;
@@ -95,7 +107,7 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      await setPersonaGuidelines(channel, guidelines);
+      await setRuntimePersonaGuidelines(channel, guidelines);
     } else if (action === "ollama.model.set") {
       const model = body?.model;
       if (typeof model !== "string" || !model.trim()) {
@@ -104,7 +116,7 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      await setSelectedOllamaModel(model.trim());
+      await setRuntimeModel(model.trim());
     } else if (action === "startup.completed.set") {
       const value = body?.value;
       if (typeof value !== "boolean") {
@@ -113,7 +125,7 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      await setStartupCompleted(value);
+      await setRuntimeStartupCompleted(value);
     } else if (action === "execution.authority.set") {
       const mode = body?.mode;
       const maxTradeUsd = body?.maxTradeUsd;
@@ -131,7 +143,7 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      await setExecutionAuthority({
+      await setRuntimeExecutionAuthority({
         mode,
         maxTradeUsd,
         mintAllowlist,
@@ -141,7 +153,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true, state: await getAppControlState() });
+    const orchestrator = await getOrchestratorState();
+    return NextResponse.json({
+      ok: true,
+      state: orchestrator.app,
+      orchestrator: {
+        health: orchestrator.health,
+        runtimeFlagOwner: orchestrator.runtimeFlagOwner,
+      },
+    });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "control update failed";
     return NextResponse.json(
