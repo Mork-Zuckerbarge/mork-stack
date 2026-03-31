@@ -3,7 +3,7 @@ import { getWalletState } from "@/lib/core/wallet";
 import { getAppControlState } from "@/lib/core/appControl";
 
 export async function GET() {
-  const app = getAppControlState();
+  const app = await getAppControlState();
 
   try {
     const wallet = await getWalletState();

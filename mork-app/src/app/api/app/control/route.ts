@@ -16,7 +16,7 @@ type Action =
   | "controls.set";
 
 export async function GET() {
-  return NextResponse.json({ ok: true, state: getAppControlState() });
+  return NextResponse.json({ ok: true, state: await getAppControlState() });
 }
 
 export async function POST(req: NextRequest) {
@@ -31,10 +31,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (action === "arb.start") startArb();
-    else if (action === "arb.stop") stopArb();
-    else if (action === "sherpa.start") startSherpa();
-    else if (action === "sherpa.stop") stopSherpa();
+    if (action === "arb.start") await startArb();
+    else if (action === "arb.stop") await stopArb();
+    else if (action === "sherpa.start") await startSherpa();
+    else if (action === "sherpa.stop") await stopSherpa();
     else if (action === "controls.set") {
       const key = body?.key;
       const value = body?.value;
@@ -58,12 +58,12 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      setControlFlag(key, value);
+      await setControlFlag(key, value);
     } else {
       return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true, state: getAppControlState() });
+    return NextResponse.json({ ok: true, state: await getAppControlState() });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "control update failed";
     return NextResponse.json(

@@ -16,9 +16,9 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: e?.message || "relationship save failed" },
+      { ok: false, error: e instanceof Error ? e.message : "relationship save failed" },
       { status: 500 }
     );
   }
