@@ -4,7 +4,7 @@ import { isWalletAutoRefreshEnabled } from "@/lib/core/appControl";
 
 export async function POST() {
   try {
-    if (!isWalletAutoRefreshEnabled()) {
+    if (!(await isWalletAutoRefreshEnabled())) {
       return NextResponse.json({
         ok: false,
         error: "wallet auto refresh is disabled in app controls",

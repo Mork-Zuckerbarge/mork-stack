@@ -9,9 +9,9 @@ export async function GET() {
       ok: true,
       wallet,
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: e?.message || "wallet state failed" },
+      { ok: false, error: e instanceof Error ? e.message : "wallet state failed" },
       { status: 500 }
     );
   }

@@ -48,12 +48,12 @@ export async function buildContext({
   channel,
   message,
 }: BuildContextArgs) {
-  if (!isMemoryEnabled()) {
+  if (!(await isMemoryEnabled())) {
     return `CURRENT MESSAGE:\n${message}`;
   }
 
   const technical = isTechnicalMessage(message);
-  const plannerEnabled = isPlannerEnabled();
+  const plannerEnabled = await isPlannerEnabled();
 
   const [recentChat, walletMemory, tradeMemory, reflection, relationshipMemory] =
     await Promise.all([

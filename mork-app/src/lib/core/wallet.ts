@@ -1,4 +1,5 @@
 import { Connection, PublicKey } from "@solana/web3.js";
+import type { ParsedAccountData } from "@solana/web3.js";
 import { prisma } from "./prisma";
 
 const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
@@ -30,7 +31,7 @@ async function getSplBalance(
   let total = 0;
 
   for (const acc of accounts.value) {
-    const parsed: any = acc.account.data.parsed;
+    const parsed = (acc.account.data as ParsedAccountData).parsed;
     const amount = parsed?.info?.tokenAmount?.uiAmount;
     total += Number(amount || 0);
   }

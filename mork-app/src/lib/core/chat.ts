@@ -55,7 +55,7 @@ export async function respondToChat(input: unknown) {
   const { channel, handle, message, maxChars } = parsed.data;
   const trimmedMessage = message.trim();
 
-  if (!isMessagingEnabled()) {
+  if (!(await isMessagingEnabled())) {
     return {
       ok: true,
       response: "Messaging is currently disabled in app controls.",
@@ -63,7 +63,7 @@ export async function respondToChat(input: unknown) {
     };
   }
 
-  if (isMemoryEnabled()) {
+  if (await isMemoryEnabled()) {
     await prisma.memory.create({
       data: {
         type: "event",
@@ -184,7 +184,7 @@ export async function respondToChat(input: unknown) {
     responseText = responseText.slice(0, maxChars);
   }
 
-  if (isMemoryEnabled()) {
+  if (await isMemoryEnabled()) {
     await prisma.memory.create({
       data: {
         type: "event",

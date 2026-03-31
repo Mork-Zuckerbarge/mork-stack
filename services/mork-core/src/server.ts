@@ -4,6 +4,7 @@ import express from "express";
 import { z } from "zod";
 import cron from "node-cron";
 import { PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.2:3b";
@@ -35,8 +36,12 @@ async function ollamaGenerate(prompt: string): Promise<string> {
     throw new Error(`ollama ${r.status}: ${text.slice(0, 300)}`);
   }
 
-  const j: any = await r.json();
-  return String(j?.response ?? "").trim();
+  const j: unknown = await r.json();
+  const response =
+    typeof j === "object" && j !== null && "response" in j
+      ? (j as { response?: unknown }).response
+      : "";
+  return String(response ?? "").trim();
 }
 
 async function ollama(prompt: string) {
@@ -74,24 +79,26 @@ app.post("/memory/ingest", async (req, res) => {
 // --- Arb policy + market-sense organ (Step 3)
 function nowMs() { return Date.now(); }
 
-function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+function clamp(n: number, a: number, b: number) { return Math.max(a, Math.min(b, n)); }
 
-function mintKey(mint) {
+function mintKey(mint: unknown) {
   return String(mint || "").trim();
 }
 
-function parseJsonSafe(s) {
+function parseJsonSafe(s: string) {
   try { return JSON.parse(s); } catch { return null; }
 }
 
-async function getPolicy(prisma, mint) {
+type ArbPolicy = Record<string, unknown>;
+
+async function getPolicy(prisma: PrismaClient, mint: unknown): Promise<ArbPolicy | null> {
   const m = mintKey(mint);
   if (!m) return null;
   const row = await prisma.arbPolicy.findUnique({ where: { mint: m } });
-  return row?.policy || null;
+  return (row?.policy as ArbPolicy | null) || null;
 }
 
-async function setPolicy(prisma, mint, patch) {
+async function setPolicy(prisma: PrismaClient, mint: unknown, patch: ArbPolicy) {
   const m = mintKey(mint);
   if (!m) return null;
 
@@ -105,7 +112,7 @@ async function setPolicy(prisma, mint, patch) {
   });
 }
 
-function scoreRouteResearch(evt) {
+function scoreRouteResearch(evt: ArbPolicy) {
   const q1Impact = Number(evt?.q1?.priceImpactPct ?? 0);
   const q2Impact = Number(evt?.q2?.priceImpactPct ?? 0);
   const hops = Number((evt?.q1?.hops ?? 0) + (evt?.q2?.hops ?? 0));
@@ -121,7 +128,7 @@ function scoreRouteResearch(evt) {
   return score;
 }
 
-async function applyMarketSense(prisma, evt) {
+async function applyMarketSense(prisma: PrismaClient, evt: ArbPolicy) {
   const mint = mintKey(evt?.mint);
   if (!mint) return;
 
@@ -260,7 +267,7 @@ app.get("/memory/query", async (req, res) => {
   const q = String(req.query.q ?? "").trim();
   const limit = Math.min(Number(req.query.limit ?? 20), 50);
 
-  const where: any = {};
+  const where: Prisma.MemoryWhereInput = {};
   if (q) where.content = { contains: q };
 
   const items = await prisma.memory.findMany({
@@ -290,8 +297,8 @@ app.get("/wallet/state", async (_req, res) => {
         requirementMet: wallet.requirementMet ?? false,
       },
     });
-  } catch (e: any) {
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  } catch (e: unknown) {
+    return res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 });
 
@@ -392,8 +399,8 @@ app.post("/chat/respond", async (req, res) => {
     });
 
     res.json({ ok: true, response: responseText });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  } catch (e: unknown) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 });
 app.post("/wallet/refresh", async (_req, res) => {
@@ -415,8 +422,8 @@ app.post("/wallet/refresh", async (_req, res) => {
     });
 
     return res.json({ ok: true, wallet });
-  } catch (e: any) {
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  } catch (e: unknown) {
+    return res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 });
 
@@ -444,8 +451,8 @@ app.post("/arb/event", async (req, res) => {
 
     res.json({ ok: true });
 
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  } catch (e: unknown) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 });
 
@@ -518,8 +525,8 @@ app.post("/arb/reflect", async (_req, res) => {
   try {
     const out = await arbReflect();
     res.json({ ok: true, ...out });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  } catch (e: unknown) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 });
 app.post("/chat/respond_v2", async (req, res) => {

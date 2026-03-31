@@ -13,9 +13,9 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(result, { status: result.status || 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: e?.message || "chat route failed" },
+      { ok: false, error: e instanceof Error ? e.message : "chat route failed" },
       { status: 500 }
     );
   }
