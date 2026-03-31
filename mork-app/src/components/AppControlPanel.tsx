@@ -81,13 +81,24 @@ export default function AppControlPanel() {
   }
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-      <h2 className="mb-3 text-lg font-semibold">App Control</h2>
+    <div className="rounded-3xl border border-cyan-300/20 bg-gradient-to-b from-cyan-400/10 to-transparent p-5">
+      <h2 className="mb-1 text-lg font-semibold">System</h2>
+      <p className="mb-3 text-xs text-white/60">Status, orchestration, and channel switches.</p>
 
       {!state ? (
         <p className="text-sm text-white/60">Unable to load app controls.</p>
       ) : (
         <div className="space-y-4 text-sm">
+          <div className="grid grid-cols-1 gap-2 rounded-2xl bg-black/35 p-3">
+            <InfoLine label="Status" value="ONLINE" ok />
+            <InfoLine label="Model" value="Ollama / OpenAI" />
+            <InfoLine
+              label="Memory"
+              value={state.controls.memoryEnabled ? "Active" : "Paused"}
+              ok={state.controls.memoryEnabled}
+            />
+          </div>
+
           <StatusRow
             label="Arb"
             status={state.arb.status}
@@ -103,7 +114,8 @@ export default function AppControlPanel() {
             busy={busy}
           />
 
-          <div className="grid grid-cols-1 gap-2">
+          <div className="grid grid-cols-1 gap-2 rounded-2xl bg-black/35 p-3">
+            <div className="mb-1 text-xs uppercase tracking-wide text-white/60">Research + Controls</div>
             <FlagToggle
               label="Memory"
               enabled={state.controls.memoryEnabled}
@@ -141,13 +153,13 @@ export default function AppControlPanel() {
             />
           </div>
 
-          <button
-            onClick={refreshWalletMemory}
-            disabled={busy}
-            className="rounded-xl border border-white/10 px-3 py-2"
-          >
-            Refresh Wallet Memory
-          </button>
+          <div className="rounded-2xl bg-black/35 p-3">
+            <div className="mb-2 text-xs uppercase tracking-wide text-white/60">Channels</div>
+            <div className="grid grid-cols-2 gap-2">
+              <ChannelBadge label="Telegram" on={state.controls.messagingEnabled} />
+              <ChannelBadge label="Twitter / X" on={state.controls.messagingEnabled} />
+            </div>
+          </div>
 
           <div className="rounded-2xl bg-black/30 p-3 text-xs text-white/70">
             <div>
@@ -161,9 +173,43 @@ export default function AppControlPanel() {
             </div>
           </div>
 
+          <button
+            onClick={refreshWalletMemory}
+            disabled={busy}
+            className="w-full rounded-xl border border-cyan-300/30 bg-cyan-200/10 px-3 py-2"
+          >
+            Refresh Wallet Memory
+          </button>
+
           {statusText ? <p className="text-xs text-white/60">{statusText}</p> : null}
         </div>
       )}
+    </div>
+  );
+}
+
+function InfoLine({
+  label,
+  value,
+  ok = false,
+}: {
+  label: string;
+  value: string;
+  ok?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-white/60">{label}</span>
+      <span className={ok ? "text-emerald-300" : "text-white"}>{value}</span>
+    </div>
+  );
+}
+
+function ChannelBadge({ label, on }: { label: string; on: boolean }) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-white/10 px-3 py-2">
+      <span>{label}</span>
+      <span className={on ? "text-emerald-300" : "text-white/60"}>{on ? "ON" : "OFF"}</span>
     </div>
   );
 }

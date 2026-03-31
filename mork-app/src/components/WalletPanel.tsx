@@ -24,16 +24,19 @@ export default function WalletPanel() {
   }
 
   useEffect(() => {
-    loadState();
+    const timer = window.setTimeout(() => {
+      void loadState();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+    <div className="rounded-3xl border border-emerald-300/20 bg-gradient-to-b from-emerald-400/10 to-transparent p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Wallet</h2>
         <button
           onClick={loadState}
-          className="rounded-xl border border-white/10 px-3 py-1 text-sm"
+          className="rounded-xl border border-white/20 px-3 py-1 text-sm"
         >
           Refresh
         </button>
@@ -46,6 +49,10 @@ export default function WalletPanel() {
           <div>
             <div className="text-white/50">Address</div>
             <div className="break-all">{wallet.address || "Not configured"}</div>
+          </div>
+
+          <div className="rounded-2xl bg-black/35 p-3 text-xs text-white/70">
+            Full control is user-custodied; agent actions are constrained by active runtime and your configured wallet.
           </div>
 
           <div className="grid grid-cols-3 gap-3">
@@ -63,9 +70,18 @@ export default function WalletPanel() {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <span className="rounded-full bg-white/10 px-3 py-1 text-center">
+              User Control: {wallet.address ? "Enabled" : "Needs Wallet"}
+            </span>
+            <span className="rounded-full bg-white/10 px-3 py-1 text-center">
+              Agent Control: {wallet.address ? "Enabled" : "Locked"}
+            </span>
+          </div>
+
           <div>
             <span className="rounded-full bg-white/10 px-3 py-1 text-xs">
-              {wallet.requirementMet ? "1000 BBQ requirement met" : "Below 1000 BBQ"}
+              {wallet.requirementMet ? "BBQ requirement met ✅" : "Below BBQ threshold"}
             </span>
           </div>
         </div>

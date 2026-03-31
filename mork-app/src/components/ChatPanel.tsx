@@ -42,12 +42,13 @@ export default function ChatPanel() {
             `Chat failed (${res.status})`,
         },
       ]);
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Something broke between thought and speech.";
       setMessages([
         ...next,
         {
           role: "agent",
-          content: e?.message || "Something broke between thought and speech.",
+          content: message,
         },
       ]);
     } finally {
@@ -57,8 +58,9 @@ export default function ChatPanel() {
   }
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-      <h1 className="text-2xl font-semibold mb-4">Mork Console</h1>
+    <div className="rounded-3xl border border-fuchsia-300/20 bg-gradient-to-b from-fuchsia-500/10 to-transparent p-5">
+      <h1 className="mb-1 text-2xl font-semibold">Vibecode Session</h1>
+      <p className="mb-4 text-sm text-white/70">Fast iterations for app logic, prompts, and runbook-level commands.</p>
 
       <div className="h-[60vh] overflow-y-auto rounded-2xl bg-black/30 p-4 space-y-3">
         {messages.map((m, i) => (
@@ -72,6 +74,22 @@ export default function ChatPanel() {
           >
             {m.content}
           </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-xs">
+        {[
+          "Ship a safer trade flow",
+          "Draft Telegram CEO-style update",
+          "Write cynical X thread",
+        ].map((preset) => (
+          <button
+            key={preset}
+            onClick={() => setInput(preset)}
+            className="rounded-full border border-white/15 bg-white/5 px-3 py-1"
+          >
+            {preset}
+          </button>
         ))}
       </div>
 
