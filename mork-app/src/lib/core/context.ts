@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { isMemoryEnabled, isPlannerEnabled } from "./appControl";
 
 type BuildContextArgs = {
   handle?: string;
@@ -47,7 +48,12 @@ export async function buildContext({
   channel,
   message,
 }: BuildContextArgs) {
+  if (!isMemoryEnabled()) {
+    return `CURRENT MESSAGE:\n${message}`;
+  }
+
   const technical = isTechnicalMessage(message);
+  const plannerEnabled = isPlannerEnabled();
 
   const [recentChat, walletMemory, tradeMemory, reflection, relationshipMemory] =
     await Promise.all([
@@ -79,10 +85,12 @@ export async function buildContext({
           })
         : Promise.resolve(null),
 
-      prisma.memory.findFirst({
-        where: { type: "reflection" },
-        orderBy: { createdAt: "desc" },
-      }),
+      plannerEnabled
+        ? prisma.memory.findFirst({
+            where: { type: "reflection" },
+            orderBy: { createdAt: "desc" },
+          })
+        : Promise.resolve(null),
 
       handle
         ? prisma.memory.findFirst({

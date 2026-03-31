@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "./prisma";
 import { ollama } from "./ollama";
 import { buildContext } from "./context";
+import { isMemoryEnabled, isMessagingEnabled } from "./appControl";
 
 const RespondSchema = z.object({
   channel: z.string().default("system"),
@@ -54,18 +55,28 @@ export async function respondToChat(input: unknown) {
   const { channel, handle, message, maxChars } = parsed.data;
   const trimmedMessage = message.trim();
 
-  await prisma.memory.create({
-    data: {
-      type: "event",
-      content: `[IN/${channel}${handle ? `:${handle}` : ""}] ${trimmedMessage}`,
-      entities: [
-        `channel:${channel}`,
-        handle ? `handle:${handle}` : "",
-      ].filter(Boolean),
-      importance: 0.25,
-      source: handle === "frontend-coding" ? "frontend-coding" : channel,
-    },
-  });
+  if (!isMessagingEnabled()) {
+    return {
+      ok: true,
+      response: "Messaging is currently disabled in app controls.",
+      status: 200,
+    };
+  }
+
+  if (isMemoryEnabled()) {
+    await prisma.memory.create({
+      data: {
+        type: "event",
+        content: `[IN/${channel}${handle ? `:${handle}` : ""}] ${trimmedMessage}`,
+        entities: [
+          `channel:${channel}`,
+          handle ? `handle:${handle}` : "",
+        ].filter(Boolean),
+        importance: 0.25,
+        source: handle === "frontend-coding" ? "frontend-coding" : channel,
+      },
+    });
+  }
 
   const prime = process.env.MORK_PRIME_DIRECTIVE || "";
   const ctxParts: string[] = [];
@@ -173,18 +184,20 @@ export async function respondToChat(input: unknown) {
     responseText = responseText.slice(0, maxChars);
   }
 
-  await prisma.memory.create({
-    data: {
-      type: "event",
-      content: `[OUT/${channel}${handle ? `:${handle}` : ""}] ${responseText}`,
-      entities: [
-        `channel:${channel}`,
-        handle ? `handle:${handle}` : "",
-      ].filter(Boolean),
-      importance: 0.2,
-      source: "mork-app",
-    },
-  });
+  if (isMemoryEnabled()) {
+    await prisma.memory.create({
+      data: {
+        type: "event",
+        content: `[OUT/${channel}${handle ? `:${handle}` : ""}] ${responseText}`,
+        entities: [
+          `channel:${channel}`,
+          handle ? `handle:${handle}` : "",
+        ].filter(Boolean),
+        importance: 0.2,
+        source: "mork-app",
+      },
+    });
+  }
 
   return {
     ok: true,
