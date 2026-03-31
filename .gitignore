@@ -1,0 +1,28 @@
+# env
+.env
+.env.local
+.env.*
+
+# secrets
+bot-wallet.json
+*.key
+*.pem
+
+# node
+node_modules
+dist
+
+# python
+.venv
+__pycache__
+
+# misc
+*.log
+dev.db
+tokens_validated.csv
+whitelist.json
+
+services/sherpa/encrypted_credentials.bin
+services/sherpa/encrypted_characters.bin
+services/sherpa/feed_config.json
+services/sherpa/reply_state.json

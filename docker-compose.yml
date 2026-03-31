@@ -1,0 +1,34 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
+  mork-core:
+    build:
+      context: ./services/mork-core
+    container_name: mork-core
+    env_file: ./.env
+    environment:
+      - OLLAMA_URL=${OLLAMA_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+    ports:
+      - "${MORK_CORE_PORT}:8790"
+    depends_on:
+      - ollama
+
+  telegram-bridge:
+    build:
+      context: ./services/telegram-bridge
+    container_name: telegram-bridge
+    env_file: ./.env
+    environment:
+      - MORK_CORE_URL=${MORK_CORE_URL}
+    depends_on:
+      - mork-core
+
+volumes:
+  ollama:

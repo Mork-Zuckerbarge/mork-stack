@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Memory {
+  id         String   @id @default(cuid())
+
+  type       String
+
+  channel    String?  // "telegram" | "x" | "web" | "arb" | "system" | etc
+  handle     String?  // username / chat handle / account id
+
+  content    String
+
+  entities   Json     @default("[]")
+  importance Float    @default(0.3)
+  source     String?  // "user" | "agent" | "system" | "arb-bot" | etc
+
+  tags       String?  // comma-separated tags e.g. "arb,solana,fees"
+
+  createdAt  DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([channel, handle, createdAt])
+}
+
+model MemoryFact {
+  id        String   @id @default(cuid())
+
+  key       String   @unique
+
+  value     String
+  source    String   // "system" | "user" | "agent"
+  weight    Int      @default(5) // 1..10 priority for recall
+  expiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([weight, updatedAt])
+}
+
+model MemorySummary {
+  id        String   @id @default(cuid())
+  scope     String   // "working" | "daily" | "weekly"
+  content   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scope, updatedAt])
+}
+
+model Relationship {
+  id              String   @id @default(cuid())
+  handle          String   @unique
+  affinity        Float    @default(0)
+  trust           Float    @default(0)
+  topics          Json     @default("[]") // array stored as JSON
+  lastInteraction DateTime?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Episode {
+  id        String   @id @default(cuid())
+  day       String   @unique
+  moodTags  Json     @default("[]") // array stored as JSON
+  summary   String
+  learned   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ActionLog {
+  id        String   @id @default(cuid())
+  kind      String
+  input     Json?
+  output    Json?
+  status    String   @default("ok")
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([kind, createdAt])
+}
+
+model ArbPolicy {
+  id        String   @id @default(cuid())
+  mint      String
+  policy    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mint])
+}
+
