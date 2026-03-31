@@ -670,60 +670,64 @@ app.post("/chat/respond_v2", async (req, res) => {
   }
 });
 
+async function runBrainReflect() {
+  const recent = await prisma.memory.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 120,
+  });
+
+  const context = recent
+    .map((m) => {
+      const src = m.source ? String(m.source) : "unknown";
+      const typ = m.type ? String(m.type) : "memory";
+      const c = typeof m.content === "string" ? m.content : "";
+      return `- [${typ}/${src}] ${c}`;
+    })
+    .filter((line) => line.trim().length > 0)
+    .slice(0, 90)
+    .join("\n");
+
+  const prompt =
+    `You are Mork Zuckerbarge, CEO of BETA.
+    You are NOT the television character from Mork & Mindy.
+    You are a melancholic technologist obsessed with signal, power, and strategic advantage.
+    You speak with restrained irony, not cartoon absurdity.
+
+    Reflect on the recent memory log.
+
+    Write:
+    1) REFLECTION: 2–4 sentences grounded in the logs.
+    2) NEXT: one concrete next action you will take inside your system.
+
+    Rules:
+    - No hashtags.
+    - No emojis.
+    - No URLs.
+    - No cartoon catchphrases.
+    - No sci-fi alien speech.
+    - Only use vague totalitarian speech when referring to BETA or Faceboot.
+    RECENT MEMORY:
+    ${context}
+    `;
+
+  const reflection = await ollama(prompt);
+
+  const saved = await prisma.memory.create({
+    data: {
+      type: "reflection",
+      content: (reflection || "").slice(0, 1800),
+      entities: ["brain:reflect"],
+      importance: 0.65,
+      source: "ollama",
+    },
+  });
+
+  return saved;
+}
+
 app.post("/brain/reflect", async (_req, res) => {
   try {
-    const recent = await prisma.memory.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 120,
-    });
-
-    const context = recent
-      .map((m) => {
-        const src = m.source ? String(m.source) : "unknown";
-        const typ = m.type ? String(m.type) : "memory";
-        const c = typeof m.content === "string" ? m.content : "";
-        return `- [${typ}/${src}] ${c}`;
-      })
-      .filter((line) => line.trim().length > 0)
-      .slice(0, 90)
-      .join("\n");
-
-	const prompt =
-	  `You are Mork Zuckerbarge, CEO of BETA.
-	You are NOT the television character from Mork & Mindy.
-	You are a melancholic technologist obsessed with signal, power, and strategic advantage.
-	You speak with restrained irony, not cartoon absurdity.
-
-	Reflect on the recent memory log.
-
-	Write:
-	1) REFLECTION: 2–4 sentences grounded in the logs.
-	2) NEXT: one concrete next action you will take inside your system.
-	
-	Rules:
-	- No hashtags.
-	- No emojis.
-	- No URLs.
-	- No cartoon catchphrases.
-	- No sci-fi alien speech.
-	- Only use vague totalitarian speech when referring to BETA or Faceboot.
-	RECENT MEMORY:
-	${context}
-	`;
-
-
-    const reflection = await ollama(prompt);
-
-    const saved = await prisma.memory.create({
-      data: {
-        type: "reflection",
-        content: (reflection || "").slice(0, 1800),
-        entities: ["brain:reflect"],
-        importance: 0.65,
-        source: "ollama",
-      },
-    });
-
+    const saved = await runBrainReflect();
     res.json({ ok: true, savedId: saved.id });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -919,9 +923,7 @@ app.listen(PORT, HOST, () => {
 });
 setInterval(async () => {
   try {
-    await fetch("http://127.0.0.1:8790/brain/reflect", {
-      method: "POST"
-    });
+    await runBrainReflect();
   } catch (e) {
     console.error("brain reflect loop failed", e);
   }

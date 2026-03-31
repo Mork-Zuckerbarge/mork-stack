@@ -1,30 +1,38 @@
 import { NextResponse } from "next/server";
-
-async function safeJson(url: string) {
-  try {
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) return null;
-    return await r.json();
-  } catch {
-    return null;
-  }
-}
+import { getWalletState } from "@/lib/core/wallet";
 
 export async function GET() {
-  const walletData = await safeJson("http://127.0.0.1:8790/wallet/state");
+  try {
+    const wallet = await getWalletState();
 
-  return NextResponse.json({
-    agent: {
-      name: "Mork Zuckerbarge",
-      status: walletData ? "active" : "offline",
-      model: "llama3.2:3b",
-    },
-    wallet: {
-      address: walletData?.wallet?.address || null,
-      sol: walletData?.wallet?.sol || 0,
-      bbq: walletData?.wallet?.bbq || 0,
-      usdc: walletData?.wallet?.usdc || 0,
-      requirementMet: walletData?.wallet?.requirementMet || false,
-    },
-  });
+    return NextResponse.json({
+      agent: {
+        name: "Mork Zuckerbarge",
+        status: "active",
+        model: process.env.OLLAMA_MODEL || "llama3.2:3b",
+      },
+      wallet: {
+        address: wallet.address,
+        sol: wallet.sol,
+        bbq: wallet.bbq,
+        usdc: wallet.usdc,
+        requirementMet: wallet.requirementMet,
+      },
+    });
+  } catch {
+    return NextResponse.json({
+      agent: {
+        name: "Mork Zuckerbarge",
+        status: "offline",
+        model: process.env.OLLAMA_MODEL || "llama3.2:3b",
+      },
+      wallet: {
+        address: null,
+        sol: 0,
+        bbq: 0,
+        usdc: 0,
+        requirementMet: false,
+      },
+    });
+  }
 }
