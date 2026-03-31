@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { isMemoryEnabled, isPlannerEnabled } from "./appControl";
+import { isMemoryEnabled, isPlannerEnabled } from "./orchestrator";
 
 type BuildContextArgs = {
   handle?: string;

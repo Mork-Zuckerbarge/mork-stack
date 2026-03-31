@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { refreshWalletMemory } from "@/lib/core/wallet";
-import { isWalletAutoRefreshEnabled } from "@/lib/core/appControl";
+import { isWalletAutoRefreshEnabled, updateHealth } from "@/lib/core/orchestrator";
 
 export async function POST() {
   try {
@@ -12,6 +12,7 @@ export async function POST() {
     }
 
     const wallet = await refreshWalletMemory();
+    updateHealth("wallet", "healthy", "wallet refreshed");
 
     return NextResponse.json({
       ok: true,
@@ -19,6 +20,7 @@ export async function POST() {
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "wallet refresh failed";
+    updateHealth("wallet", "degraded", message);
     return NextResponse.json(
       { ok: false, error: message },
       { status: 500 }
