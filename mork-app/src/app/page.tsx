@@ -2,6 +2,7 @@ import ChatPanel from "@/components/ChatPanel";
 import WalletPanel from "@/components/WalletPanel";
 import AgentStatusCard from "@/components/AgentStatusCard";
 import JupiterPanel from "@/components/JupiterPanel";
+import AppControlPanel from "@/components/AppControlPanel";
 
 export default function HomePage() {
   return (
@@ -12,6 +13,7 @@ export default function HomePage() {
         </section>
 
         <section className="space-y-6">
+          <AppControlPanel />
           <AgentStatusCard />
           <WalletPanel />
           <JupiterPanel />

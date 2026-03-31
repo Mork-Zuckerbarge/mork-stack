@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { getWalletState } from "@/lib/core/wallet";
+import { getAppControlState } from "@/lib/core/appControl";
 
 export async function GET() {
+  const app = getAppControlState();
+
   try {
     const wallet = await getWalletState();
 
@@ -11,6 +14,7 @@ export async function GET() {
         status: "active",
         model: process.env.OLLAMA_MODEL || "llama3.2:3b",
       },
+      app,
       wallet,
     });
   } catch {
@@ -20,6 +24,7 @@ export async function GET() {
         status: "offline",
         model: process.env.OLLAMA_MODEL || "llama3.2:3b",
       },
+      app,
       wallet: {
         address: null,
         sol: 0,

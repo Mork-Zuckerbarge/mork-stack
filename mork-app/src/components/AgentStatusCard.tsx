@@ -8,6 +8,10 @@ type AgentState = {
     status: string;
     model: string;
   };
+  app?: {
+    arb: { status: string };
+    sherpa: { status: string };
+  };
 };
 
 export default function AgentStatusCard() {
@@ -31,6 +35,8 @@ export default function AgentStatusCard() {
           <div><span className="text-white/50">Name: </span>{state.agent.name}</div>
           <div><span className="text-white/50">Status: </span>{state.agent.status}</div>
           <div><span className="text-white/50">Model: </span>{state.agent.model}</div>
+          <div><span className="text-white/50">Arb: </span>{state.app?.arb?.status || "unknown"}</div>
+          <div><span className="text-white/50">Sherpa: </span>{state.app?.sherpa?.status || "unknown"}</div>
         </div>
       )}
     </div>
