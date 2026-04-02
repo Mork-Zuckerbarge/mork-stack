@@ -2,6 +2,22 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+1) Copy local environment defaults:
+
+```bash
+cp env.example .env.local
+```
+
+2) Configure wallet access in `.env.local` (choose one):
+
+```bash
+MORK_WALLET="<your existing wallet address>"
+# OR
+MORK_WALLET_SECRET_KEY="[12,34,...]" # Solana secret key JSON array (never commit)
+```
+
+3) Run the development server:
+
 First, run the development server:
 
 ```bash

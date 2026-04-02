@@ -239,7 +239,9 @@ export default function AppControlPanel() {
                 ? "existing wallet configured"
                 : "needs setup"}
             </div>
-            <div className="mt-1 break-all">{state.walletProvisioning.address || "No MORK_WALLET configured yet."}</div>
+            <div className="mt-1 break-all">
+              {state.walletProvisioning.address || "No wallet configured yet (set MORK_WALLET or MORK_WALLET_SECRET_KEY)."}
+            </div>
           </div>
 
           <button

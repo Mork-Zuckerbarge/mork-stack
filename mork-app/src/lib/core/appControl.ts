@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { resolveWalletAddressFromEnv } from "./walletConfig";
 
 export type RuntimeStatus = "running" | "stopped";
 
@@ -213,7 +214,7 @@ async function persistState() {
 export async function getAppControlState(): Promise<AppControlState> {
   await ensureStateLoaded();
 
-  const configuredWallet = process.env.MORK_WALLET?.trim() || null;
+  const configuredWallet = resolveWalletAddressFromEnv();
   state.walletProvisioning = configuredWallet
     ? {
         status: "provisioned_existing",
