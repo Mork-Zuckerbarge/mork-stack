@@ -1,52 +1,41 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mork App
 
-## Getting Started
+## Quick start (one-command bootstrap)
 
-1) Copy local environment defaults:
-
-```bash
-cp env.example .env.local
-```
-
-2) Configure wallet access in `.env.local` (choose one):
+From the repo root:
 
 ```bash
-MORK_WALLET="<your existing wallet address>"
-# OR
-MORK_WALLET_SECRET_KEY="[12,34,...]" # Solana secret key JSON array (never commit)
-```
-
-3) Run the development server:
-
-First, run the development server:
-
-```bash
+./setup.sh
+cd mork-app
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The setup command will:
+- install app dependencies,
+- create `mork-app/.env.local` from `mork-app/env.example` if missing,
+- auto-create a local development wallet when no wallet is configured,
+- run `prisma generate` and `prisma db push`,
+- verify Ollama reachability and ensure the default model is pulled,
+- install Sherpa dependencies into `services/sherpa/.venv` when Python is available.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Docker Compose bootstrap
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+For a reproducible containerized setup:
 
-## Learn More
+```bash
+docker compose up --build
+```
 
-To learn more about Next.js, take a look at the following resources:
+This starts:
+- `mork-app` on `http://localhost:3000`,
+- `ollama` on `http://localhost:11434`,
+- `mork-core` and `telegram-bridge` for backend channels.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Runtime preflight checks
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+On app startup, the UI now reports clear actionable status for:
+- Ollama reachability,
+- selected model availability,
+- wallet configuration validity.
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Use the **Preflight** card in the control panel to recheck at any time.
