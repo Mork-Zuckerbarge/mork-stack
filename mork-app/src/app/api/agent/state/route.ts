@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getWalletState } from "@/lib/core/wallet";
 import { getOrchestratorState, updateHealth } from "@/lib/core/orchestrator";
+import { getPreflightStatus } from "@/lib/bootstrap/preflight";
 
 export async function GET() {
   const orchestrator = await getOrchestratorState();
+  const preflight = await getPreflightStatus();
 
   try {
     const wallet = await getWalletState();
@@ -21,6 +23,7 @@ export async function GET() {
         runtimeFlagOwner: orchestrator.runtimeFlagOwner,
       },
       wallet,
+      preflight,
     });
   } catch {
     updateHealth("wallet", "degraded", "wallet query failed");
@@ -35,6 +38,7 @@ export async function GET() {
         health: orchestrator.health,
         runtimeFlagOwner: orchestrator.runtimeFlagOwner,
       },
+      preflight,
       wallet: {
         address: null,
         sol: 0,

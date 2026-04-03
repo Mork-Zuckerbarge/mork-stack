@@ -3,6 +3,7 @@ import WalletPanel from "@/components/WalletPanel";
 import AgentStatusCard from "@/components/AgentStatusCard";
 import JupiterPanel from "@/components/JupiterPanel";
 import AppControlPanel from "@/components/AppControlPanel";
+import PreflightStatusCard from "@/components/PreflightStatusCard";
 
 export default function HomePage() {
   return (
@@ -24,6 +25,7 @@ export default function HomePage() {
           <AppControlPanel />
           <AgentStatusCard />
           <WalletPanel />
+          <PreflightStatusCard />
         </section>
       </div>
     </main>
