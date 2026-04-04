@@ -14,6 +14,7 @@ const REQUEST_TIMEOUT_MS = 4000;
 const MODEL_PULL_TIMEOUT_MS = 30 * 60 * 1000;
 const STARTUP_WAIT_MS = 90000;
 const RETRY_INTERVAL_MS = 2000;
+const STRICT_MODE = process.env.MORK_OLLAMA_STRICT === "1";
 
 function normalizeHost(host) {
   if (!host || typeof host !== "string") return "";
@@ -220,7 +221,15 @@ async function main() {
   if (!reachableHost) {
     console.error(`[dev:ollama] Ollama not reachable (tried: ${hosts.join(", ")}).`);
     console.error("[dev:ollama] Start Ollama manually (`ollama serve`) or run `docker compose up -d ollama`.");
-    process.exit(1);
+    if (STRICT_MODE) {
+      console.error("[dev:ollama] Strict mode enabled (MORK_OLLAMA_STRICT=1); failing startup.");
+      process.exit(1);
+    }
+
+    console.warn(
+      "[dev:ollama] Continuing without Ollama so the app can boot and surface remediation steps in the Preflight panel.",
+    );
+    return;
   }
 
   console.log(`[dev:ollama] Ollama reachable at ${reachableHost}`);
