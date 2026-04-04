@@ -50,6 +50,7 @@ Runtime defaults:
 - Arb + Sherpa are auto-started on first app boot/load.
 - First-time setup is auto-marked complete on boot.
 - Set `MORK_AUTO_START_ON_BOOT=0` to disable this behavior.
+- Agent `/api/agent/state` reports `active` only when preflight checks pass.
 
 Use the **Preflight** card in the control panel to recheck at any time.
 
