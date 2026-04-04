@@ -13,10 +13,17 @@ npm run dev
 The setup command will:
 - install app dependencies,
 - create `mork-app/.env.local` from `mork-app/env.example` if missing,
-- auto-create a local development wallet when no wallet is configured,
+- import a wallet from `~/.config/solana/id.json` when available (or from `MORK_WALLET_IMPORT_PATH`),
+- otherwise auto-create a local development wallet when no wallet is configured,
 - run `prisma generate` and `prisma db push`,
 - verify Ollama reachability and ensure the default model is pulled,
 - install Sherpa dependencies into `services/sherpa/.venv` when Python is available.
+
+Wallet setup mode can be controlled with:
+- `MORK_SETUP_WALLET_MODE=auto` (default): import if file exists, otherwise create.
+- `MORK_SETUP_WALLET_MODE=import`: require importing from `MORK_WALLET_IMPORT_PATH` (or `~/.config/solana/id.json`).
+- `MORK_SETUP_WALLET_MODE=create`: always create a new local dev keypair.
+- `MORK_SETUP_SKIP_SHERPA=1`: skip Sherpa Python dependency bootstrap.
 
 ## Docker Compose bootstrap
 
