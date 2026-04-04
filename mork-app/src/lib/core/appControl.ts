@@ -43,6 +43,7 @@ type BooleanControlKey = "memoryEnabled" | "plannerEnabled" | "telegramEnabled" 
 
 const nowIso = () => new Date().toISOString();
 const APP_CONTROL_FACT_KEY = "__app_control_state_v1__";
+const AUTO_START_ON_BOOT = process.env.MORK_AUTO_START_ON_BOOT !== "0";
 
 const state: AppControlState = {
   arb: {
@@ -180,6 +181,28 @@ async function ensureStateLoaded() {
       applyPersistedState(parsed);
     } catch {
       // Ignore invalid persisted state and keep defaults.
+    }
+  }
+
+  if (AUTO_START_ON_BOOT) {
+    let shouldPersist = false;
+    if (state.arb.status !== "running") {
+      state.arb.status = "running";
+      state.arb.updatedAt = nowIso();
+      shouldPersist = true;
+    }
+    if (state.sherpa.status !== "running") {
+      state.sherpa.status = "running";
+      state.sherpa.updatedAt = nowIso();
+      shouldPersist = true;
+    }
+    if (!state.controls.startupCompleted) {
+      state.controls.startupCompleted = true;
+      shouldPersist = true;
+    }
+
+    if (shouldPersist) {
+      await persistState();
     }
   }
 

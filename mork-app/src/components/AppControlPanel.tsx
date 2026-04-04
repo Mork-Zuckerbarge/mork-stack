@@ -173,7 +173,7 @@ export default function AppControlPanel() {
             busy={busy}
           />
           <StatusRow
-            label="Sherpa"
+            label="Sherpa (X bot)"
             status={state.sherpa.status}
             onStart={() => act("sherpa.start")}
             onStop={() => act("sherpa.stop")}

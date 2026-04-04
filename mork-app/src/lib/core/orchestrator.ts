@@ -155,8 +155,14 @@ export async function isChannelEnabled(channel: string) {
 }
 
 export async function getOrchestratorState() {
+  const app = await getAppControlState();
+
+  updateHealth("app", app.controls.startupCompleted ? "healthy" : "degraded", app.controls.startupCompleted ? "startup complete" : "startup pending");
+  updateHealth("arb", app.arb.status === "running" ? "healthy" : "stopped", app.arb.status);
+  updateHealth("sherpa", app.sherpa.status === "running" ? "healthy" : "stopped", app.sherpa.status);
+
   return {
-    app: await getAppControlState(),
+    app,
     health: getHealthRegistry(),
     runtimeFlagOwner: "orchestrator",
   };

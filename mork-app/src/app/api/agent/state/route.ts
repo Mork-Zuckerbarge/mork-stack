@@ -6,6 +6,7 @@ import { getPreflightStatus } from "@/lib/bootstrap/preflight";
 export async function GET() {
   const orchestrator = await getOrchestratorState();
   const preflight = await getPreflightStatus();
+  const agentStatus = preflight.ok ? "active" : "degraded";
 
   try {
     const wallet = await getWalletState();
@@ -14,7 +15,7 @@ export async function GET() {
     return NextResponse.json({
       agent: {
         name: "Mork Zuckerbarge",
-        status: "active",
+        status: agentStatus,
         model: process.env.OLLAMA_MODEL || "llama3.2:3b",
       },
       app: orchestrator.app,
