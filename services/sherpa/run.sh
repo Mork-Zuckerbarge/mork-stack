@@ -8,15 +8,18 @@ if [ ! -f "requirements.txt" ]; then
     exit 1
 fi
 
-# Check if virtual environment exists
-if [ ! -f "venv/bin/activate" ]; then
-    echo "Virtual environment not found. Please run build.sh first."
-    read -p "Press Enter to exit..."
+# Check if virtual environment exists (.venv preferred, venv fallback)
+if [ -f ".venv/bin/activate" ]; then
+    VENV_DIR=".venv"
+elif [ -f "venv/bin/activate" ]; then
+    VENV_DIR="venv"
+else
+    echo "Virtual environment not found. Run repo setup first (./setup.sh) or run build.sh in this folder."
     exit 1
 fi
 
 echo "Activating virtual environment..."
-source venv/bin/activate
+source "$VENV_DIR/bin/activate"
 
 # Launch browser based on OS
 echo "Opening web interface..."
@@ -37,7 +40,6 @@ if [ $? -ne 0 ]; then
     echo "1. Your internet connection"
     echo "2. That all API keys are correctly entered"
     echo "3. That you have sufficient permissions"
-    read -p "Press Enter to exit..."
 fi
 
 deactivate

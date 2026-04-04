@@ -1,16 +1,18 @@
 # Mork App
 
-## Quick start (one-command bootstrap)
+## Quick start (single app command)
 
 From the repo root:
 
 ```bash
-./setup.sh
-cd mork-app
-npm run dev
+./start.sh
 ```
 
-The setup command will:
+The start command will:
+- run setup/bootstrap first,
+- then launch the web app in dev mode from one command/UI surface.
+
+Bootstrap includes:
 - install app dependencies,
 - create `mork-app/.env.local` from `mork-app/env.example` if missing,
 - import a wallet from `~/.config/solana/id.json` when available (or from `MORK_WALLET_IMPORT_PATH`),
@@ -83,6 +85,6 @@ If setup logs show Python venv errors and preflight reports `Sherpa (X bot) boot
 
 1. Install the Python venv package for your distro (Debian/Ubuntu example: `sudo apt install python3-venv` or `python3.12-venv`).
 2. Re-run setup from repo root: `./setup.sh`
-3. Restart app: `cd mork-app && npm run dev`
+3. Restart app from repo root: `./start.sh`
 
 If you intentionally don't run Sherpa locally, set `MORK_SETUP_SKIP_SHERPA=1` before setup.

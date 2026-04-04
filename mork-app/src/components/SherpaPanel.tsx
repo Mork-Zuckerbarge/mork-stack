@@ -52,7 +52,7 @@ export default function SherpaPanel() {
         <div className="mb-3 rounded-xl border border-fuchsia-300/30 bg-fuchsia-500/10 px-3 py-2 text-xs text-fuchsia-100">
           <div>{iframeError}</div>
           <div className="mt-1 text-fuchsia-50/90">
-            Start Sherpa from repo root with <code>cd services/sherpa && ./run.sh</code>, then set this panel URL to that host:port.
+            Use the repo-root <code>./start.sh</code> flow first, then point this panel to the Sherpa host:port if you run Sherpa externally.
           </div>
         </div>
       ) : null}
