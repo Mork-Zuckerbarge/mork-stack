@@ -73,6 +73,7 @@ If bootstrap still fails:
 3. If running `mork-app` inside WSL but Ollama on Windows:
    - set `OLLAMA_HOST` in `mork-app/.env.local` to the Windows host IP (not `127.0.0.1`), then restart `npm run dev`.
 4. To disable auto-install attempts, set `MORK_SKIP_OLLAMA_INSTALL=1` before `npm run dev`.
+5. By default, `npm run dev` now continues even if Ollama is unavailable so the app can load and show guided remediation in the Preflight panel. To make Ollama a hard requirement, set `MORK_OLLAMA_STRICT=1`.
 
 ## Sherpa bootstrap troubleshooting
 
