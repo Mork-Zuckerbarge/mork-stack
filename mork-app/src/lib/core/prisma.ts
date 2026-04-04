@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 function resolveDatabaseUrl() {
   const configuredUrl = process.env.DATABASE_URL;
-  if (configuredUrl && !configuredUrl.startsWith("file:./")) {
+  if (configuredUrl && !configuredUrl.startsWith("file:")) {
     return configuredUrl;
   }
 
@@ -14,9 +14,14 @@ function resolveDatabaseUrl() {
   const appRoot = existsSync(path.join(appRootFromCwd, "prisma"))
     ? appRootFromCwd
     : appRootFromFile;
+  const schemaDir = path.join(appRoot, "prisma");
 
-  const relativePath = configuredUrl?.slice("file:".length) ?? "./prisma/dev.db";
-  const absolutePath = path.resolve(appRoot, relativePath);
+  const configuredPath = configuredUrl?.slice("file:".length) ?? "./dev.db";
+  if (path.isAbsolute(configuredPath)) {
+    return `file:${configuredPath}`;
+  }
+
+  const absolutePath = path.resolve(schemaDir, configuredPath);
   return `file:${absolutePath}`;
 }
 
