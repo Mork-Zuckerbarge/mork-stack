@@ -56,19 +56,23 @@ Use the **Preflight** card in the control panel to recheck at any time.
 
 ## Ollama reachability troubleshooting
 
-If preflight shows `Ollama not reachable at http://127.0.0.1:11434`:
+`npm run dev` now runs an Ollama bootstrap step before Next.js starts. It will:
+- probe `OLLAMA_HOST` plus common local fallbacks,
+- auto-install `ollama` on Linux (via `https://ollama.com/install.sh`) when missing,
+- try launching local `ollama serve` when Ollama is unreachable,
+- auto-start `docker compose up -d ollama` (or `docker-compose up -d ollama`) as a fallback when available,
+- auto-pull the selected model (`OLLAMA_MODEL`, default `llama3.2:3b`) if missing.
 
-1. Start Ollama:
+If bootstrap still fails:
+
+1. Start Ollama manually:
    - local install: `ollama serve`
    - Docker: `docker compose up -d ollama`
 2. Verify from the same shell where `npm run dev` is running:
    - `curl http://127.0.0.1:11434/api/tags`
-
-3. If you are running `mork-app` inside WSL but Ollama on Windows:
-   - set `OLLAMA_HOST` in `mork-app/.env.local` to the Windows host IP (not `127.0.0.1`), then restart `npm run dev`,
-   - the app also auto-probes common alternatives (`localhost`, `host.docker.internal`, and WSL nameserver IP) as a fallback.
-4. Pull the selected model once reachability is fixed:
-   - `OLLAMA_HOST=<your-host> ollama pull llama3.2:3b`
+3. If running `mork-app` inside WSL but Ollama on Windows:
+   - set `OLLAMA_HOST` in `mork-app/.env.local` to the Windows host IP (not `127.0.0.1`), then restart `npm run dev`.
+4. To disable auto-install attempts, set `MORK_SKIP_OLLAMA_INSTALL=1` before `npm run dev`.
 
 ## Sherpa bootstrap troubleshooting
 
@@ -81,7 +85,3 @@ If setup logs show Python venv errors and preflight reports `Sherpa (X bot) boot
 3. Restart app: `cd mork-app && npm run dev`
 
 If you intentionally don't run Sherpa locally, set `MORK_SETUP_SKIP_SHERPA=1` before setup.
-=======
-3. If you are running `mork-app` inside WSL but Ollama on Windows, set `OLLAMA_HOST` in `mork-app/.env.local` to the Windows host IP (not `127.0.0.1`), then restart `npm run dev`.
-4. Pull the selected model once reachability is fixed:
-   - `OLLAMA_HOST=<your-host> ollama pull llama3.2:3b`
