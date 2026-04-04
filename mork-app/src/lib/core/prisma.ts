@@ -46,6 +46,10 @@ function resolveDatabaseUrl() {
     return configuredUrl;
   }
 
+  if (configuredUrl?.startsWith("file:/")) {
+    return configuredUrl;
+  }
+
   const appRoot = resolveAppRoot();
   const sqlitePath = configuredUrl?.slice("file:".length) ?? "./prisma/dev.db";
   const absolutePath = path.resolve(appRoot, sqlitePath);
