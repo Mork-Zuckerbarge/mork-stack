@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ensure:ollama": "node ./scripts/ensure-ollama.mjs",
+    "predev": "npm run ensure:ollama"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",
