@@ -356,7 +356,7 @@ function ExecutionAuthorityEditor({
 
   return (
     <div className="rounded-2xl bg-black/35 p-3">
-      <div className="mb-2 text-xs uppercase tracking-wide text-white/60">Execution Authority (Wallet)</div>
+      <div className="mb-2 text-xs uppercase tracking-wide text-white/60">ARB Real Controls (Execution + Risk Gates)</div>
       <div className="grid grid-cols-1 gap-2">
         <label className="text-xs text-white/70">Mode</label>
         <select
@@ -374,6 +374,40 @@ function ExecutionAuthorityEditor({
         <input value={allowlist} onChange={(e) => setAllowlist(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
         <label className="text-xs text-white/70">Cooldown (minutes)</label>
         <input value={cooldownMinutes} onChange={(e) => setCooldownMinutes(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setMode("user_only");
+              setMaxTradeUsd("50");
+              setCooldownMinutes("15");
+            }}
+            className="rounded-lg border border-white/10 px-2 py-1 text-xs"
+          >
+            Safe preset
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("agent_assisted");
+              setMaxTradeUsd("100");
+              setCooldownMinutes("10");
+            }}
+            className="rounded-lg border border-white/10 px-2 py-1 text-xs"
+          >
+            Active preset
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("emergency_stop");
+              setMaxTradeUsd("0");
+            }}
+            className="rounded-lg border border-red-300/40 px-2 py-1 text-xs text-red-100"
+          >
+            Halt preset
+          </button>
+        </div>
         <button
           onClick={() =>
             onSave({
