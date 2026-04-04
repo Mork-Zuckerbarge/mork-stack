@@ -52,6 +52,8 @@ export default function AppControlPanel() {
   const [state, setState] = useState<AppControlState | null>(null);
   const [busy, setBusy] = useState(false);
   const [statusText, setStatusText] = useState("");
+  const [sherpaBootstrapMessage, setSherpaBootstrapMessage] = useState("");
+  const [sherpaBootstrapAction, setSherpaBootstrapAction] = useState("");
 
   async function load() {
     const res = await fetch("/api/app/control");
@@ -61,6 +63,22 @@ export default function AppControlPanel() {
 
   useEffect(() => {
     load().catch(() => setState(null));
+    fetch("/api/preflight", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data: { checks?: Array<{ key: string; ok: boolean; message: string; action?: string }> }) => {
+        const sherpaCheck = (data.checks || []).find((check) => check.key === "sherpa_bootstrap");
+        if (sherpaCheck && !sherpaCheck.ok) {
+          setSherpaBootstrapMessage(sherpaCheck.message);
+          setSherpaBootstrapAction(sherpaCheck.action || "");
+        } else {
+          setSherpaBootstrapMessage("");
+          setSherpaBootstrapAction("");
+        }
+      })
+      .catch(() => {
+        setSherpaBootstrapMessage("Unable to verify Sherpa bootstrap readiness.");
+        setSherpaBootstrapAction("");
+      });
   }, []);
 
   async function act(action: string, extra?: Record<string, unknown>) {
@@ -179,6 +197,14 @@ export default function AppControlPanel() {
             onStop={() => act("sherpa.stop")}
             busy={busy}
           />
+          {sherpaBootstrapMessage ? (
+            <div className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+              <div>{sherpaBootstrapMessage}</div>
+              {sherpaBootstrapAction ? (
+                <div className="mt-1 text-amber-50/90">Action: {sherpaBootstrapAction}</div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-2 rounded-2xl bg-black/35 p-3">
             <div className="mb-1 text-xs uppercase tracking-wide text-white/60">Research + Controls</div>
