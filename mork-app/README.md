@@ -58,8 +58,8 @@ If preflight shows `Ollama not reachable at http://127.0.0.1:11434`:
 2. Verify from the same shell where `npm run dev` is running:
    - `curl http://127.0.0.1:11434/api/tags`
 3. If you are running `mork-app` inside WSL but Ollama on Windows:
-   - the app now auto-probes common alternatives (`localhost`, `host.docker.internal`, and WSL nameserver IP),
-   - you should still set `OLLAMA_HOST` in `mork-app/.env.local` to the reachable host to make configuration explicit.
+   - set `OLLAMA_HOST` in `mork-app/.env.local` to the Windows host IP (not `127.0.0.1`), then restart `npm run dev`,
+   - the app also auto-probes common alternatives (`localhost`, `host.docker.internal`, and WSL nameserver IP) as a fallback.
 4. Pull the selected model once reachability is fixed:
    - `OLLAMA_HOST=<your-host> ollama pull llama3.2:3b`
 
