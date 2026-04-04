@@ -63,6 +63,7 @@ If preflight shows `Ollama not reachable at http://127.0.0.1:11434`:
    - Docker: `docker compose up -d ollama`
 2. Verify from the same shell where `npm run dev` is running:
    - `curl http://127.0.0.1:11434/api/tags`
+
 3. If you are running `mork-app` inside WSL but Ollama on Windows:
    - set `OLLAMA_HOST` in `mork-app/.env.local` to the Windows host IP (not `127.0.0.1`), then restart `npm run dev`,
    - the app also auto-probes common alternatives (`localhost`, `host.docker.internal`, and WSL nameserver IP) as a fallback.
@@ -80,3 +81,7 @@ If setup logs show Python venv errors and preflight reports `Sherpa (X bot) boot
 3. Restart app: `cd mork-app && npm run dev`
 
 If you intentionally don't run Sherpa locally, set `MORK_SETUP_SKIP_SHERPA=1` before setup.
+=======
+3. If you are running `mork-app` inside WSL but Ollama on Windows, set `OLLAMA_HOST` in `mork-app/.env.local` to the Windows host IP (not `127.0.0.1`), then restart `npm run dev`.
+4. Pull the selected model once reachability is fixed:
+   - `OLLAMA_HOST=<your-host> ollama pull llama3.2:3b`
