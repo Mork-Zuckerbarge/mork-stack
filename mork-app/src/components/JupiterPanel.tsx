@@ -15,12 +15,31 @@ const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 
 export default function JupiterPanel() {
   useEffect(() => {
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
     const tryInit = () => {
-      if (!window.Jupiter) {
-        console.log("Jupiter not loaded yet");
+      if (cancelled) {
         return;
       }
 
+      if (!window.Jupiter) {
+        attempts += 1;
+        if (attempts <= 10) {
+          timer = setTimeout(tryInit, 500);
+        } else {
+          console.warn("Jupiter plugin script did not load in time");
+        }
+        return;
+      }
+
+      const target = document.getElementById("jupiter-plugin");
+      if (!target) {
+        return;
+      }
+
+      target.innerHTML = "";
       window.Jupiter.init({
         displayMode: "widget",
         integratedTargetId: "jupiter-plugin",
@@ -31,8 +50,13 @@ export default function JupiterPanel() {
       });
     };
 
-    const t = setTimeout(tryInit, 800);
-    return () => clearTimeout(t);
+    timer = setTimeout(tryInit, 200);
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
   }, []);
 
   return (
