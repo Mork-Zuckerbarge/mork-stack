@@ -32,12 +32,45 @@ create_wallet_if_missing() {
     return
   fi
 
+  local wallet_mode="${MORK_SETUP_WALLET_MODE:-auto}"
+  local default_import_path=""
+  if [[ -n "${HOME:-}" ]]; then
+    default_import_path="$HOME/.config/solana/id.json"
+  fi
+  local import_path="${MORK_WALLET_IMPORT_PATH:-$default_import_path}"
+
+  if [[ "$wallet_mode" == "import" || "$wallet_mode" == "auto" ]]; then
+    if [[ -n "$import_path" && -f "$import_path" ]]; then
+      log "No wallet configured. Importing Solana keypair from $import_path."
+      local imported_key_json
+      imported_key_json=$(cat "$import_path")
+      local imported_address
+      imported_address=$(
+        cd "$APP_DIR"
+        node -e "const { Keypair } = require('@solana/web3.js'); const secret = Uint8Array.from(JSON.parse(process.argv[1])); process.stdout.write(Keypair.fromSecretKey(secret).publicKey.toBase58());" "$imported_key_json"
+      )
+      upsert_env "MORK_WALLET_SECRET_KEY" "$imported_key_json"
+      log "Imported wallet ${imported_address}. Secret key was written to mork-app/.env.local (local-only)."
+      return
+    fi
+
+    if [[ "$wallet_mode" == "import" ]]; then
+      err "MORK_SETUP_WALLET_MODE=import was set but no wallet file was found at ${import_path:-<empty path>}"
+    fi
+  fi
+
   log "No wallet configured. Creating a new local Solana keypair for development."
 
   local key_json
-  key_json=$(node -e "const { Keypair } = require('@solana/web3.js'); const kp = Keypair.generate(); process.stdout.write(JSON.stringify(Array.from(kp.secretKey)));" )
+  key_json=$(
+    cd "$APP_DIR"
+    node -e "const { Keypair } = require('@solana/web3.js'); const kp = Keypair.generate(); process.stdout.write(JSON.stringify(Array.from(kp.secretKey)));"
+  )
   local address
-  address=$(node -e "const { Keypair } = require('@solana/web3.js'); const secret = Uint8Array.from(JSON.parse(process.argv[1])); process.stdout.write(Keypair.fromSecretKey(secret).publicKey.toBase58());" "$key_json")
+  address=$(
+    cd "$APP_DIR"
+    node -e "const { Keypair } = require('@solana/web3.js'); const secret = Uint8Array.from(JSON.parse(process.argv[1])); process.stdout.write(Keypair.fromSecretKey(secret).publicKey.toBase58());" "$key_json"
+  )
 
   upsert_env "MORK_WALLET_SECRET_KEY" "$key_json"
   log "Created wallet ${address}. Secret key was written to mork-app/.env.local (local-only)."
@@ -78,10 +111,27 @@ setup_sherpa() {
     return
   fi
 
+  if [[ "${MORK_SETUP_SKIP_SHERPA:-}" == "1" ]]; then
+    warn "Skipping Sherpa dependency bootstrap (MORK_SETUP_SKIP_SHERPA=1)"
+    return
+  fi
+
   log "Setting up Sherpa Python virtualenv"
-  python3 -m venv "$ROOT_DIR/services/sherpa/.venv"
-  "$ROOT_DIR/services/sherpa/.venv/bin/pip" install --upgrade pip >/dev/null
-  "$ROOT_DIR/services/sherpa/.venv/bin/pip" install -r "$ROOT_DIR/services/sherpa/requirements.txt" >/dev/null
+  if ! python3 -m venv "$ROOT_DIR/services/sherpa/.venv"; then
+    warn "Failed to create Sherpa virtualenv; continuing setup without Sherpa bootstrap"
+    return
+  fi
+
+  if ! "$ROOT_DIR/services/sherpa/.venv/bin/pip" install --upgrade pip >/dev/null; then
+    warn "Failed to upgrade pip for Sherpa virtualenv; continuing setup"
+    return
+  fi
+
+  if ! "$ROOT_DIR/services/sherpa/.venv/bin/pip" install -r "$ROOT_DIR/services/sherpa/requirements.txt" >/dev/null; then
+    warn "Failed to install Sherpa requirements (likely network/proxy); continuing setup"
+    return
+  fi
+
   log "Sherpa dependencies installed in services/sherpa/.venv"
 }
 
@@ -107,8 +157,11 @@ main() {
   create_wallet_if_missing
 
   log "Running Prisma generate + db push"
-  npm --prefix "$APP_DIR" exec prisma generate
-  npm --prefix "$APP_DIR" exec prisma db push
+  (
+    cd "$APP_DIR"
+    npm exec prisma generate
+    npm exec prisma db push
+  )
 
   local ollama_host
   ollama_host=$(awk -F'=' '/^OLLAMA_HOST=/{gsub(/"/,"",$2); print $2}' "$ENV_FILE")
