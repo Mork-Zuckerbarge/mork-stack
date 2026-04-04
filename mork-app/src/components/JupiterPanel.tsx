@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 declare global {
   interface Window {
@@ -17,7 +17,21 @@ const JUPITER_SCRIPT_SRC = "https://plugin.jup.ag/plugin-v1.js";
 function ensureScriptLoaded() {
   const existing = document.querySelector<HTMLScriptElement>(`script[src="${JUPITER_SCRIPT_SRC}"]`);
   if (existing) {
-    return Promise.resolve();
+    if (window.Jupiter) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const onLoad = () => {
+        existing.removeEventListener("load", onLoad);
+        existing.removeEventListener("error", onError);
+        resolve();
+      };
+      const onError = () => {
+        existing.removeEventListener("load", onLoad);
+        existing.removeEventListener("error", onError);
+        reject(new Error("Unable to load Jupiter plugin script."));
+      };
+      existing.addEventListener("load", onLoad);
+      existing.addEventListener("error", onError);
+    });
   }
 
   return new Promise<void>((resolve, reject) => {
@@ -34,8 +48,14 @@ function ensureScriptLoaded() {
 export default function JupiterPanel() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorText, setErrorText] = useState("");
+  const initializedRef = useRef(false);
 
   const initWidget = useCallback(async () => {
+    if (initializedRef.current) {
+      setStatus("ready");
+      return;
+    }
+
     setStatus("loading");
     setErrorText("");
 
@@ -66,6 +86,7 @@ export default function JupiterPanel() {
           initialOutputMint: BBQ_MINT,
         },
       });
+      initializedRef.current = true;
       setStatus("ready");
     } catch (error) {
       setStatus("error");

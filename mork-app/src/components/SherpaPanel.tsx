@@ -17,10 +17,12 @@ export default function SherpaPanel() {
     return window.localStorage.getItem("mork.sherpa.gradio.url") || DEFAULT_GRADIO_URL;
   });
   const [saved, setSaved] = useState(false);
+  const [iframeError, setIframeError] = useState("");
   const src = useMemo(() => normalizeUrl(rawUrl), [rawUrl]);
 
   function saveUrl() {
     if (!src) return;
+    setIframeError("");
     window.localStorage.setItem("mork.sherpa.gradio.url", src);
     setRawUrl(src);
     setSaved(true);
@@ -46,12 +48,21 @@ export default function SherpaPanel() {
           Open tab
         </a>
       </div>
+      {iframeError ? (
+        <div className="mb-3 rounded-xl border border-fuchsia-300/30 bg-fuchsia-500/10 px-3 py-2 text-xs text-fuchsia-100">
+          <div>{iframeError}</div>
+          <div className="mt-1 text-fuchsia-50/90">
+            Start Sherpa from repo root with <code>cd services/sherpa && ./run.sh</code>, then set this panel URL to that host:port.
+          </div>
+        </div>
+      ) : null}
 
       <iframe
         key={src}
         src={src || DEFAULT_GRADIO_URL}
         title="Sherpa Gradio"
         className="h-[640px] w-full rounded-2xl border border-white/10 bg-black/30"
+        onError={() => setIframeError(`Unable to reach Sherpa at ${src || DEFAULT_GRADIO_URL}.`)}
       />
     </div>
   );
