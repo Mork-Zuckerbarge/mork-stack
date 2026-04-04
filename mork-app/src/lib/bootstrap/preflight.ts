@@ -127,11 +127,11 @@ export async function getPreflightStatus(): Promise<PreflightStatus> {
     key: "sherpa_bootstrap",
     ok: sherpaReady,
     message: sherpaReady
-      ? "Sherpa bootstrap ready (.venv detected)"
-      : "Sherpa bootstrap missing (.venv not found)",
+      ? "Sherpa (X bot) bootstrap ready (.venv detected)"
+      : "Sherpa (X bot) bootstrap missing (.venv not found)",
     action: sherpaReady
       ? undefined
-      : "Install python3-venv, then re-run ./setup.sh from repo root. If you do not need Sherpa locally, set MORK_SETUP_SKIP_SHERPA=1.",
+      : "Install python3-venv, then re-run ./setup.sh from repo root. Sherpa powers X posting/replies and uses RSS + memories/reflections. If you do not need Sherpa locally, set MORK_SETUP_SKIP_SHERPA=1.",
   });
 
   return {

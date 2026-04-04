@@ -44,7 +44,7 @@ On app startup, the UI now reports clear actionable status for:
 - Ollama reachability,
 - selected model availability,
 - wallet configuration validity,
-- Sherpa bootstrap readiness (`services/sherpa/.venv` present).
+- Sherpa (X bot) bootstrap readiness (`services/sherpa/.venv` present).
 
 Use the **Preflight** card in the control panel to recheck at any time.
 
@@ -65,7 +65,9 @@ If preflight shows `Ollama not reachable at http://127.0.0.1:11434`:
 
 ## Sherpa bootstrap troubleshooting
 
-If setup logs show Python venv errors and preflight reports `Sherpa bootstrap missing (.venv not found)`:
+Sherpa is the X/Twitter bot module (posting + replies) and uses RSS feeds, meme/media inputs, Ollama writing, plus arb reflections and memory modules.
+
+If setup logs show Python venv errors and preflight reports `Sherpa (X bot) bootstrap missing (.venv not found)`:
 
 1. Install the Python venv package for your distro (Debian/Ubuntu example: `sudo apt install python3-venv` or `python3.12-venv`).
 2. Re-run setup from repo root: `./setup.sh`
