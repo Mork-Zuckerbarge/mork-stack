@@ -4,6 +4,7 @@ import AgentStatusCard from "@/components/AgentStatusCard";
 import JupiterPanel from "@/components/JupiterPanel";
 import AppControlPanel from "@/components/AppControlPanel";
 import PreflightStatusCard from "@/components/PreflightStatusCard";
+import SherpaPanel from "@/components/SherpaPanel";
 
 export default function HomePage() {
   return (
@@ -19,6 +20,7 @@ export default function HomePage() {
         <section className="lg:col-span-2 space-y-6">
           <ChatPanel />
           <JupiterPanel />
+          <SherpaPanel />
         </section>
 
         <section className="space-y-6">
