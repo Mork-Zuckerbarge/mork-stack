@@ -59,7 +59,8 @@ export async function getPreflightStatus(): Promise<PreflightStatus> {
       key: "ollama_reachable",
       ok: false,
       message: `Ollama not reachable at ${ollamaHost}`,
-      action: "Start Ollama and verify OLLAMA_HOST in mork-app/.env.local.",
+      action:
+        "Start Ollama and verify OLLAMA_HOST in mork-app/.env.local (WSL note: if Ollama runs on Windows, use the Windows host IP instead of 127.0.0.1).",
     });
   }
 

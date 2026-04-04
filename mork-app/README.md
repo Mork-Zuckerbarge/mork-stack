@@ -46,3 +46,16 @@ On app startup, the UI now reports clear actionable status for:
 - wallet configuration validity.
 
 Use the **Preflight** card in the control panel to recheck at any time.
+
+## Ollama reachability troubleshooting
+
+If preflight shows `Ollama not reachable at http://127.0.0.1:11434`:
+
+1. Start Ollama:
+   - local install: `ollama serve`
+   - Docker: `docker compose up -d ollama`
+2. Verify from the same shell where `npm run dev` is running:
+   - `curl http://127.0.0.1:11434/api/tags`
+3. If you are running `mork-app` inside WSL but Ollama on Windows, set `OLLAMA_HOST` in `mork-app/.env.local` to the Windows host IP (not `127.0.0.1`), then restart `npm run dev`.
+4. Pull the selected model once reachability is fixed:
+   - `OLLAMA_HOST=<your-host> ollama pull llama3.2:3b`
