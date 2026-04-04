@@ -43,6 +43,32 @@ This starts:
 On app startup, the UI now reports clear actionable status for:
 - Ollama reachability,
 - selected model availability,
-- wallet configuration validity.
+- wallet configuration validity,
+- Sherpa bootstrap readiness (`services/sherpa/.venv` present).
 
 Use the **Preflight** card in the control panel to recheck at any time.
+
+## Ollama reachability troubleshooting
+
+If preflight shows `Ollama not reachable at http://127.0.0.1:11434`:
+
+1. Start Ollama:
+   - local install: `ollama serve`
+   - Docker: `docker compose up -d ollama`
+2. Verify from the same shell where `npm run dev` is running:
+   - `curl http://127.0.0.1:11434/api/tags`
+3. If you are running `mork-app` inside WSL but Ollama on Windows:
+   - the app now auto-probes common alternatives (`localhost`, `host.docker.internal`, and WSL nameserver IP),
+   - you should still set `OLLAMA_HOST` in `mork-app/.env.local` to the reachable host to make configuration explicit.
+4. Pull the selected model once reachability is fixed:
+   - `OLLAMA_HOST=<your-host> ollama pull llama3.2:3b`
+
+## Sherpa bootstrap troubleshooting
+
+If setup logs show Python venv errors and preflight reports `Sherpa bootstrap missing (.venv not found)`:
+
+1. Install the Python venv package for your distro (Debian/Ubuntu example: `sudo apt install python3-venv` or `python3.12-venv`).
+2. Re-run setup from repo root: `./setup.sh`
+3. Restart app: `cd mork-app && npm run dev`
+
+If you intentionally don't run Sherpa locally, set `MORK_SETUP_SKIP_SHERPA=1` before setup.

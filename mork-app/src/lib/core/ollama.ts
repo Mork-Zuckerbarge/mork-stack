@@ -1,4 +1,5 @@
 import { getAppControlState } from "./appControl";
+import { resolveOllamaHost } from "./ollamaHost";
 let hasLoggedOllamaConfig = false;
 
 type OllamaMode = "coding" | "telegram" | "x" | "default";
@@ -20,12 +21,16 @@ async function pickModel(mode: OllamaMode) {
 }
 
 export async function ollama(prompt: string, mode: OllamaMode = "default") {
-  const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const hostResolution = await resolveOllamaHost(process.env.OLLAMA_HOST);
+  const host = hostResolution.host;
   const model = await pickModel(mode);
   const ctx = Number(process.env.OLLAMA_CTX || 8192);
 
   if (!hasLoggedOllamaConfig) {
     console.log(`[mork] ollama host: ${host}`);
+    if (hostResolution.usedFallback) {
+      console.log(`[mork] requested OLLAMA_HOST: ${hostResolution.requestedHost}`);
+    }
     console.log(`[mork] default model: ${process.env.OLLAMA_MODEL || "llama3.1:8b"}`);
     console.log(`[mork] coding model: ${process.env.OLLAMA_MODEL_CODING || "(inherits default)"}`);
     console.log(`[mork] telegram model: ${process.env.OLLAMA_MODEL_TELEGRAM || "(inherits default)"}`);
