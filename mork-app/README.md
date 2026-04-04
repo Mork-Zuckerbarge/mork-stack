@@ -46,6 +46,11 @@ On app startup, the UI now reports clear actionable status for:
 - wallet configuration validity,
 - Sherpa (X bot) bootstrap readiness (`services/sherpa/.venv` present).
 
+Runtime defaults:
+- Arb + Sherpa are auto-started on first app boot/load.
+- First-time setup is auto-marked complete on boot.
+- Set `MORK_AUTO_START_ON_BOOT=0` to disable this behavior.
+
 Use the **Preflight** card in the control panel to recheck at any time.
 
 ## Ollama reachability troubleshooting
