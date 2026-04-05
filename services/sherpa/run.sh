@@ -26,8 +26,15 @@ echo "Opening web interface..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
     open "http://127.0.0.1:7860" || echo "Unable to auto-open browser. Please navigate to http://127.0.0.1:7860"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    xdg-open "http://127.0.0.1:7860" || sensible-browser "http://127.0.0.1:7860" || x-www-browser "http://127.0.0.1:7860" || \
-    echo "Unable to auto-open browser. Please navigate to http://127.0.0.1:7860"
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "http://127.0.0.1:7860" || echo "Unable to auto-open browser. Please navigate to http://127.0.0.1:7860"
+    elif command -v sensible-browser >/dev/null 2>&1; then
+        sensible-browser "http://127.0.0.1:7860" || echo "Unable to auto-open browser. Please navigate to http://127.0.0.1:7860"
+    elif command -v x-www-browser >/dev/null 2>&1; then
+        x-www-browser "http://127.0.0.1:7860" || echo "Unable to auto-open browser. Please navigate to http://127.0.0.1:7860"
+    else
+        echo "Unable to auto-open browser. Please navigate to http://127.0.0.1:7860"
+    fi
 fi
 
 echo "Starting Twitter Bot Control Center..."

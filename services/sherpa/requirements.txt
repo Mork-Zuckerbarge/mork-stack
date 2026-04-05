@@ -13,5 +13,5 @@ python-multipart==0.0.9
 typing-extensions==4.12.2
 pydantic==2.5.2
 httpx==0.25.2 
-
+huggingface_hub==0.25.2
 
