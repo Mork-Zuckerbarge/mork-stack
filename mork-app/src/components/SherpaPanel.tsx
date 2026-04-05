@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const DEFAULT_GRADIO_URL = process.env.NEXT_PUBLIC_SHERPA_GRADIO_URL || "http://127.0.0.1:7860";
 
@@ -18,7 +18,19 @@ export default function SherpaPanel() {
   });
   const [saved, setSaved] = useState(false);
   const [iframeError, setIframeError] = useState("");
+  const [loadedSrc, setLoadedSrc] = useState("");
   const src = useMemo(() => normalizeUrl(rawUrl), [rawUrl]);
+  const resolvedSrc = src || DEFAULT_GRADIO_URL;
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      if (loadedSrc !== resolvedSrc) {
+        setIframeError(`Sherpa did not load inside the frame from ${resolvedSrc}.`);
+      }
+    }, 5000);
+
+    return () => window.clearTimeout(timeout);
+  }, [loadedSrc, resolvedSrc]);
 
   function saveUrl() {
     if (!src) return;
@@ -37,7 +49,10 @@ export default function SherpaPanel() {
       <div className="mb-3 grid grid-cols-1 gap-2 rounded-2xl bg-black/35 p-3 text-xs md:grid-cols-[1fr_auto_auto]">
         <input
           value={rawUrl}
-          onChange={(event) => setRawUrl(event.target.value)}
+          onChange={(event) => {
+            setIframeError("");
+            setRawUrl(event.target.value);
+          }}
           placeholder="http://127.0.0.1:7860"
           className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-sm"
         />
@@ -59,11 +74,18 @@ export default function SherpaPanel() {
 
       <iframe
         key={src}
-        src={src || DEFAULT_GRADIO_URL}
+        src={resolvedSrc}
         title="Sherpa Gradio"
         className="h-[640px] w-full rounded-2xl border border-white/10 bg-black/30"
-        onError={() => setIframeError(`Unable to reach Sherpa at ${src || DEFAULT_GRADIO_URL}.`)}
+        onLoad={() => {
+          setLoadedSrc(resolvedSrc);
+          setIframeError("");
+        }}
+        onError={() => setIframeError(`Unable to reach Sherpa at ${resolvedSrc}.`)}
       />
+      {loadedSrc !== resolvedSrc ? (
+        <p className="mt-2 text-xs text-white/50">Waiting for frame response… if this persists, use “Open tab” to verify Sherpa is running.</p>
+      ) : null}
     </div>
   );
 }
