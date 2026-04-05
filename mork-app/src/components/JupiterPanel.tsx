@@ -45,6 +45,12 @@ type QuoteResponse = {
   error?: string;
 };
 
+type BalanceResponse = {
+  ok: boolean;
+  balances?: Record<string, number>;
+  error?: string;
+};
+
 function TokenLogo({ mint, symbol }: { mint: string; symbol: string }) {
   const src = tokenLogos[mint] ?? "/globe.svg";
 
@@ -72,6 +78,8 @@ export default function JupiterPanel() {
   const [outputTokenResults, setOutputTokenResults] = useState<TokenOption[]>([]);
   const [wallet, setWallet] = useState<WalletState | null>(null);
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
+  const [pairBalances, setPairBalances] = useState<Record<string, number>>({});
+  const [pairBalancesLoading, setPairBalancesLoading] = useState(false);
   const [status, setStatus] = useState<{ kind: "idle" | "ok" | "error"; text: string }>({
     kind: "idle",
     text: "",
@@ -94,36 +102,66 @@ export default function JupiterPanel() {
     ? `${selectedInputToken.symbol} → ${selectedOutputToken.symbol}`
     : `${selectedInputToken.symbol} → Select token`;
 
-  const searchTokens = useCallback(async (query: string, side: "input" | "output") => {
+  const fetchTokenOptions = useCallback(async (query: string): Promise<TokenOption[]> => {
     const q = query.trim();
     if (!q) {
-      const base = [{ symbol: "SOL", mint: SOL_MINT }];
-      if (side === "input") {
-        setInputTokenResults(base);
-      } else {
-        setOutputTokenResults(base);
-      }
-      return;
+      return [{ symbol: "SOL", mint: SOL_MINT }];
     }
+
     try {
       const res = await fetch(`/api/trade/tokens?q=${encodeURIComponent(q)}`, { cache: "no-store" });
       const data = (await res.json()) as { ok?: boolean; tokens?: TokenOption[] };
       const fromApi = res.ok && data.ok ? data.tokens ?? [] : [];
-      const results = fromApi.length ? fromApi : [{ symbol: shortMint(q), mint: q }];
-      if (side === "input") {
-        setInputTokenResults(results);
-      } else {
-        setOutputTokenResults(results);
-      }
+      return fromApi.length ? fromApi : [{ symbol: shortMint(q), mint: q }];
     } catch {
-      const fallback = [{ symbol: shortMint(q), mint: q }];
-      if (side === "input") {
-        setInputTokenResults(fallback);
-      } else {
-        setOutputTokenResults(fallback);
-      }
+      return [{ symbol: shortMint(q), mint: q }];
     }
   }, []);
+
+  const findBestToken = useCallback((query: string, options: TokenOption[]): TokenOption | null => {
+    if (!options.length) return null;
+    const q = query.trim().toLowerCase();
+    return options.find((option) => option.symbol.toLowerCase() === q) ?? options[0];
+  }, []);
+
+  const searchTokens = useCallback(async (query: string, side: "input" | "output") => {
+    const results = await fetchTokenOptions(query);
+    if (side === "input") {
+      setInputTokenResults(results);
+    } else {
+      setOutputTokenResults(results);
+    }
+  }, [fetchTokenOptions]);
+
+  const applyPairSearch = useCallback(async (query: string) => {
+    const parts = query
+      .split(/(?:\/|->|\bto\b|\s+)/i)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (parts.length < 2) {
+      return;
+    }
+
+    const [inputQuery, outputQuery] = parts;
+    const [inputOptions, outputOptions] = await Promise.all([
+      fetchTokenOptions(inputQuery),
+      fetchTokenOptions(outputQuery),
+    ]);
+    const bestInput = findBestToken(inputQuery, inputOptions);
+    const bestOutput = findBestToken(outputQuery, outputOptions);
+
+    if (!bestInput || !bestOutput || bestInput.mint === bestOutput.mint) {
+      return;
+    }
+
+    setInputSearch(inputQuery);
+    setOutputSearch(outputQuery);
+    setInputTokenResults(inputOptions);
+    setOutputTokenResults(outputOptions);
+    setSelectedInputMint(bestInput.mint);
+    setSelectedOutputMint(bestOutput.mint);
+  }, [fetchTokenOptions, findBestToken]);
 
   function tradeMaxAmount() {
     if (!wallet) return;
@@ -164,6 +202,32 @@ export default function JupiterPanel() {
     }
   }, [hasValidPair, parsedAmountSol, selectedInputMint, selectedOutputMint, slippageBps]);
 
+  const loadPairBalances = useCallback(async () => {
+    if (!hasValidPair) {
+      setPairBalances({});
+      return;
+    }
+
+    setPairBalancesLoading(true);
+    try {
+      const res = await fetch("/api/trade/balances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mints: [selectedInputMint, selectedOutputMint] }),
+      });
+      const data = (await res.json()) as BalanceResponse;
+      if (!res.ok || !data.ok || !data.balances) {
+        setPairBalances({});
+        return;
+      }
+      setPairBalances(data.balances);
+    } catch {
+      setPairBalances({});
+    } finally {
+      setPairBalancesLoading(false);
+    }
+  }, [hasValidPair, selectedInputMint, selectedOutputMint]);
+
   useEffect(() => {
     void loadWallet();
   }, [loadWallet]);
@@ -177,17 +241,29 @@ export default function JupiterPanel() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      if (inputSearch.includes("/") || inputSearch.includes("->") || /\bto\b/i.test(inputSearch)) {
+        void applyPairSearch(inputSearch);
+        return;
+      }
       void searchTokens(inputSearch, "input");
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [inputSearch, searchTokens]);
+  }, [applyPairSearch, inputSearch, searchTokens]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      if (outputSearch.includes("/") || outputSearch.includes("->") || /\bto\b/i.test(outputSearch)) {
+        void applyPairSearch(outputSearch);
+        return;
+      }
       void searchTokens(outputSearch, "output");
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [outputSearch, searchTokens]);
+  }, [applyPairSearch, outputSearch, searchTokens]);
+
+  useEffect(() => {
+    void loadPairBalances();
+  }, [loadPairBalances]);
 
   async function submitDirectSwap() {
     if (!hasValidPair) {
@@ -305,6 +381,19 @@ export default function JupiterPanel() {
               <p className="text-sm font-semibold">
                 {selectedInputToken.symbol}/{selectedOutputToken?.symbol || "—"}
               </p>
+            </div>
+          </div>
+          <div className="mb-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-xs text-white/80">
+            <div className="mb-1 text-[11px] text-white/60">Selected pair balances</div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span>{selectedInputToken.symbol}</span>
+                <span>{pairBalancesLoading ? "…" : (pairBalances[selectedInputMint] ?? 0).toFixed(6)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>{selectedOutputToken?.symbol || "Output token"}</span>
+                <span>{pairBalancesLoading ? "…" : selectedOutputMint ? (pairBalances[selectedOutputMint] ?? 0).toFixed(6) : "—"}</span>
+              </div>
             </div>
           </div>
 
