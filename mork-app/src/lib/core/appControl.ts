@@ -32,6 +32,12 @@ export type AppControlState = {
       mintAllowlist: string[];
       cooldownMinutes: number;
     };
+    responsePolicy: {
+      maxResponseChars: number;
+      allowUrls: boolean;
+      allowUserMessageQuotes: boolean;
+      behaviorGuidelines: string;
+    };
   };
   walletProvisioning: {
     status: "provisioned_existing" | "needs_setup";
@@ -73,6 +79,13 @@ const state: AppControlState = {
       maxTradeUsd: 50,
       mintAllowlist: [],
       cooldownMinutes: 15,
+    },
+    responsePolicy: {
+      maxResponseChars: 12000,
+      allowUrls: false,
+      allowUserMessageQuotes: false,
+      behaviorGuidelines:
+        "Do NOT act like the TV character from Mork & Mindy.\nNever say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\nDo not create false information.\nIf you do not know something, say so plainly.",
     },
   },
   walletProvisioning: {
@@ -163,6 +176,21 @@ function applyPersistedState(raw: unknown) {
       }
       if (typeof executionAuthority.cooldownMinutes === "number") {
         state.controls.executionAuthority.cooldownMinutes = executionAuthority.cooldownMinutes;
+      }
+    }
+    const responsePolicy = controls.responsePolicy;
+    if (isObjectRecord(responsePolicy)) {
+      if (typeof responsePolicy.maxResponseChars === "number") {
+        state.controls.responsePolicy.maxResponseChars = responsePolicy.maxResponseChars;
+      }
+      if (typeof responsePolicy.allowUrls === "boolean") {
+        state.controls.responsePolicy.allowUrls = responsePolicy.allowUrls;
+      }
+      if (typeof responsePolicy.allowUserMessageQuotes === "boolean") {
+        state.controls.responsePolicy.allowUserMessageQuotes = responsePolicy.allowUserMessageQuotes;
+      }
+      if (typeof responsePolicy.behaviorGuidelines === "string") {
+        state.controls.responsePolicy.behaviorGuidelines = responsePolicy.behaviorGuidelines;
       }
     }
   }
@@ -381,4 +409,21 @@ export async function setExecutionAuthority(input: {
   };
   await persistState();
   return structuredClone(state.controls.executionAuthority);
+}
+
+export async function setResponsePolicy(input: {
+  maxResponseChars: number;
+  allowUrls: boolean;
+  allowUserMessageQuotes: boolean;
+  behaviorGuidelines: string;
+}) {
+  await ensureStateLoaded();
+  state.controls.responsePolicy = {
+    maxResponseChars: Math.min(20000, Math.max(120, Math.round(input.maxResponseChars))),
+    allowUrls: input.allowUrls,
+    allowUserMessageQuotes: input.allowUserMessageQuotes,
+    behaviorGuidelines: input.behaviorGuidelines,
+  };
+  await persistState();
+  return structuredClone(state.controls.responsePolicy);
 }
