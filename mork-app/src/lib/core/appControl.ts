@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { resolveWalletAddressFromEnv } from "./walletConfig";
+import { resolveWalletConfigFromEnv } from "./walletConfig";
 
 export type RuntimeStatus = "running" | "stopped";
 
@@ -42,6 +42,7 @@ export type AppControlState = {
   walletProvisioning: {
     status: "provisioned_existing" | "needs_setup";
     address: string | null;
+    source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
   };
 };
 
@@ -91,6 +92,7 @@ const state: AppControlState = {
   walletProvisioning: {
     status: "needs_setup",
     address: null,
+    source: "unconfigured",
   },
 };
 
@@ -265,15 +267,17 @@ async function persistState() {
 export async function getAppControlState(): Promise<AppControlState> {
   await ensureStateLoaded();
 
-  const configuredWallet = resolveWalletAddressFromEnv();
-  state.walletProvisioning = configuredWallet
+  const walletConfig = resolveWalletConfigFromEnv();
+  state.walletProvisioning = walletConfig.address
     ? {
         status: "provisioned_existing",
-        address: configuredWallet,
+        address: walletConfig.address,
+        source: walletConfig.source,
       }
     : {
         status: "needs_setup",
         address: null,
+        source: walletConfig.source,
       };
 
   return structuredClone(state);

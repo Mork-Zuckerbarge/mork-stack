@@ -38,6 +38,7 @@ type AppControlState = {
   walletProvisioning: {
     status: "provisioned_existing" | "needs_setup";
     address: string | null;
+    source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
   };
 };
 
@@ -277,6 +278,9 @@ export default function AppControlPanel() {
               {state.walletProvisioning.status === "provisioned_existing"
                 ? "existing wallet configured"
                 : "needs setup"}
+            </div>
+            <div className="mt-1">
+              Wallet source: {state.walletProvisioning.source === "unconfigured" ? "not configured" : state.walletProvisioning.source}
             </div>
             <div className="mt-1 break-all">
               {state.walletProvisioning.address || "No wallet configured yet (set MORK_WALLET or MORK_WALLET_SECRET_KEY)."}

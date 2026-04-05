@@ -1,5 +1,15 @@
 import { Keypair } from "@solana/web3.js";
 
+export type WalletConfigSource =
+  | "MORK_WALLET"
+  | "MORK_WALLET_SECRET_KEY"
+  | "unconfigured";
+
+export type ResolvedWalletConfig = {
+  address: string | null;
+  source: WalletConfigSource;
+};
+
 function parseSecretKey(raw: string): Uint8Array | null {
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -12,17 +22,34 @@ function parseSecretKey(raw: string): Uint8Array | null {
   }
 }
 
-export function resolveWalletAddressFromEnv(): string | null {
+export function resolveWalletConfigFromEnv(): ResolvedWalletConfig {
   const configuredWallet = process.env.MORK_WALLET?.trim();
-  if (configuredWallet) return configuredWallet;
+  if (configuredWallet) {
+    return {
+      address: configuredWallet,
+      source: "MORK_WALLET",
+    };
+  }
 
   const secretRaw = process.env.MORK_WALLET_SECRET_KEY?.trim();
-  if (!secretRaw) return null;
+  if (!secretRaw) {
+    return {
+      address: null,
+      source: "unconfigured",
+    };
+  }
 
   const secretKey = parseSecretKey(secretRaw);
   if (!secretKey) {
     throw new Error("MORK_WALLET_SECRET_KEY must be a JSON array of bytes");
   }
 
-  return Keypair.fromSecretKey(secretKey).publicKey.toBase58();
+  return {
+    address: Keypair.fromSecretKey(secretKey).publicKey.toBase58(),
+    source: "MORK_WALLET_SECRET_KEY",
+  };
+}
+
+export function resolveWalletAddressFromEnv(): string | null {
+  return resolveWalletConfigFromEnv().address;
 }
