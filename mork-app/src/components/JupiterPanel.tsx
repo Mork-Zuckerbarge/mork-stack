@@ -5,73 +5,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ArbLogFeed from "@/components/ArbLogFeed";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 
 const tokenLogos: Record<string, string> = {
   [SOL_MINT]: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png",
-  [BBQ_MINT]: "/window.svg",
 };
-
-type Pair = {
-  id: string;
-  baseSymbol: string;
-  baseMint: string;
-  quoteSymbol: string;
-  quoteMint: string;
-  supportsDirectSwap: boolean;
-};
-
-function pairLabel(pair: Pair): string {
-  return `${pair.baseSymbol} → ${pair.quoteSymbol}`;
-}
 
 type TokenOption = {
   symbol: string;
   mint: string;
 };
 
-const pairs: Pair[] = [
-  {
-    id: "sol-bbq",
-    baseSymbol: "SOL",
-    baseMint: SOL_MINT,
-    quoteSymbol: "BBQ",
-    quoteMint: BBQ_MINT,
-    supportsDirectSwap: true,
-  },
-  {
-    id: "sol-usdc",
-    baseSymbol: "SOL",
-    baseMint: SOL_MINT,
-    quoteSymbol: "USDC",
-    quoteMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    supportsDirectSwap: false,
-  },
-  {
-    id: "sol-usdt",
-    baseSymbol: "SOL",
-    baseMint: SOL_MINT,
-    quoteSymbol: "USDT",
-    quoteMint: "Es9vMFrzaCERmJfrF4H2FYD4Xf9LQ4NVY6Yq6iUiJQw",
-    supportsDirectSwap: false,
-  },
-  {
-    id: "sol-jup",
-    baseSymbol: "SOL",
-    baseMint: SOL_MINT,
-    quoteSymbol: "JUP",
-    quoteMint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
-    supportsDirectSwap: false,
-  },
-  {
-    id: "sol-bonk",
-    baseSymbol: "SOL",
-    baseMint: SOL_MINT,
-    quoteSymbol: "BONK",
-    quoteMint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6X8xXQqfS3RzW2X",
-    supportsDirectSwap: false,
-  },
-];
+function shortMint(mint: string): string {
+  return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+}
 
 type SwapResponse = {
   ok: boolean;
@@ -121,7 +67,9 @@ export default function JupiterPanel() {
   const [inputSearch, setInputSearch] = useState("");
   const [outputSearch, setOutputSearch] = useState("");
   const [selectedInputMint, setSelectedInputMint] = useState(SOL_MINT);
-  const [selectedOutputMint, setSelectedOutputMint] = useState(BBQ_MINT);
+  const [selectedOutputMint, setSelectedOutputMint] = useState("");
+  const [inputTokenResults, setInputTokenResults] = useState<TokenOption[]>([]);
+  const [outputTokenResults, setOutputTokenResults] = useState<TokenOption[]>([]);
   const [wallet, setWallet] = useState<WalletState | null>(null);
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [status, setStatus] = useState<{ kind: "idle" | "ok" | "error"; text: string }>({
@@ -129,40 +77,53 @@ export default function JupiterPanel() {
     text: "",
   });
 
-  const tokens = useMemo(() => {
-    const tokenMap = new Map<string, TokenOption>();
-    for (const pair of pairs) {
-      tokenMap.set(pair.baseMint, { symbol: pair.baseSymbol, mint: pair.baseMint });
-      tokenMap.set(pair.quoteMint, { symbol: pair.quoteSymbol, mint: pair.quoteMint });
-    }
-    return Array.from(tokenMap.values());
-  }, []);
-
-  const selectedInputToken = tokens.find((token) => token.mint === selectedInputMint) ?? tokens[0];
-  const selectedOutputToken = tokens.find((token) => token.mint === selectedOutputMint) ?? tokens[1];
-  const selectedPair = useMemo(
-    () =>
-      pairs.find((pair) => pair.baseMint === selectedInputMint && pair.quoteMint === selectedOutputMint) ?? {
-        id: "custom",
-        baseSymbol: selectedInputToken.symbol,
-        baseMint: selectedInputToken.mint,
-        quoteSymbol: selectedOutputToken.symbol,
-        quoteMint: selectedOutputToken.mint,
-        supportsDirectSwap: false,
-      },
-    [selectedInputMint, selectedOutputMint, selectedInputToken, selectedOutputToken],
+  const selectedInputToken = useMemo(
+    () => inputTokenResults.find((token) => token.mint === selectedInputMint) ?? { symbol: shortMint(selectedInputMint), mint: selectedInputMint },
+    [inputTokenResults, selectedInputMint],
   );
-  const filteredInputTokens = useMemo(() => {
-    const q = inputSearch.trim().toLowerCase();
-    if (!q) return tokens;
-    return tokens.filter((token) => token.symbol.toLowerCase().includes(q) || token.mint.toLowerCase().includes(q));
-  }, [inputSearch, tokens]);
-  const filteredOutputTokens = useMemo(() => {
-    const q = outputSearch.trim().toLowerCase();
-    if (!q) return tokens;
-    return tokens.filter((token) => token.symbol.toLowerCase().includes(q) || token.mint.toLowerCase().includes(q));
-  }, [outputSearch, tokens]);
+  const selectedOutputToken = useMemo(
+    () =>
+      outputTokenResults.find((token) => token.mint === selectedOutputMint) ??
+      (selectedOutputMint ? { symbol: shortMint(selectedOutputMint), mint: selectedOutputMint } : null),
+    [outputTokenResults, selectedOutputMint],
+  );
+
   const parsedAmountSol = Number(amountSol);
+  const hasValidPair = Boolean(selectedInputMint && selectedOutputMint && selectedInputMint !== selectedOutputMint);
+  const selectedPairLabel = selectedOutputToken
+    ? `${selectedInputToken.symbol} → ${selectedOutputToken.symbol}`
+    : `${selectedInputToken.symbol} → Select token`;
+
+  const searchTokens = useCallback(async (query: string, side: "input" | "output") => {
+    const q = query.trim();
+    if (!q) {
+      const base = [{ symbol: "SOL", mint: SOL_MINT }];
+      if (side === "input") {
+        setInputTokenResults(base);
+      } else {
+        setOutputTokenResults(base);
+      }
+      return;
+    }
+    try {
+      const res = await fetch(`/api/trade/tokens?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+      const data = (await res.json()) as { ok?: boolean; tokens?: TokenOption[] };
+      const fromApi = res.ok && data.ok ? data.tokens ?? [] : [];
+      const results = fromApi.length ? fromApi : [{ symbol: shortMint(q), mint: q }];
+      if (side === "input") {
+        setInputTokenResults(results);
+      } else {
+        setOutputTokenResults(results);
+      }
+    } catch {
+      const fallback = [{ symbol: shortMint(q), mint: q }];
+      if (side === "input") {
+        setInputTokenResults(fallback);
+      } else {
+        setOutputTokenResults(fallback);
+      }
+    }
+  }, []);
 
   function tradeMaxAmount() {
     if (!wallet) return;
@@ -181,7 +142,7 @@ export default function JupiterPanel() {
   }, []);
 
   const loadQuote = useCallback(async () => {
-    if (!Number.isFinite(parsedAmountSol) || parsedAmountSol <= 0) {
+    if (!Number.isFinite(parsedAmountSol) || parsedAmountSol <= 0 || !hasValidPair) {
       setQuote(null);
       return;
     }
@@ -201,7 +162,7 @@ export default function JupiterPanel() {
     } catch {
       setQuote({ ok: false, error: "Quote unavailable" });
     }
-  }, [parsedAmountSol, selectedInputMint, selectedOutputMint, slippageBps]);
+  }, [hasValidPair, parsedAmountSol, selectedInputMint, selectedOutputMint, slippageBps]);
 
   useEffect(() => {
     void loadWallet();
@@ -214,11 +175,25 @@ export default function JupiterPanel() {
     return () => window.clearTimeout(timer);
   }, [loadQuote]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void searchTokens(inputSearch, "input");
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [inputSearch, searchTokens]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void searchTokens(outputSearch, "output");
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [outputSearch, searchTokens]);
+
   async function submitDirectSwap() {
-    if (!selectedPair.supportsDirectSwap) {
+    if (!hasValidPair) {
       setStatus({
         kind: "error",
-        text: "This pair is display-only for now. Direct execution is currently enabled only for SOL/BBQ.",
+        text: "Select different input/output tokens before swapping.",
       });
       return;
     }
@@ -257,8 +232,6 @@ export default function JupiterPanel() {
       setBusy(false);
     }
   }
-
-  const selectedPairLabel = pairLabel(selectedPair);
 
   return (
     <div className="rounded-3xl border border-amber-300/20 bg-gradient-to-b from-amber-500/10 to-transparent p-5">
@@ -324,13 +297,13 @@ export default function JupiterPanel() {
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
           <div className="mb-3 flex items-center gap-2">
             <div className="flex -space-x-2">
-              <TokenLogo mint={selectedPair.baseMint} symbol={selectedPair.baseSymbol} />
-              <TokenLogo mint={selectedPair.quoteMint} symbol={selectedPair.quoteSymbol} />
+              <TokenLogo mint={selectedInputToken.mint} symbol={selectedInputToken.symbol} />
+              {selectedOutputToken ? <TokenLogo mint={selectedOutputToken.mint} symbol={selectedOutputToken.symbol} /> : null}
             </div>
             <div>
               <p className="text-base font-semibold">{selectedPairLabel}</p>
               <p className="text-sm font-semibold">
-                {selectedPair.baseSymbol}/{selectedPair.quoteSymbol}
+                {selectedInputToken.symbol}/{selectedOutputToken?.symbol || "—"}
               </p>
             </div>
           </div>
@@ -347,7 +320,7 @@ export default function JupiterPanel() {
               />
             </label>
             <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
-              {filteredInputTokens.map((token) => {
+              {inputTokenResults.map((token) => {
                 const selected = token.mint === selectedInputMint;
                 return (
                   <button
@@ -360,7 +333,7 @@ export default function JupiterPanel() {
                   >
                     <span>{token.symbol}</span>
                     <span className="text-white/60">
-                      {token.mint.slice(0, 4)}…{token.mint.slice(-4)}
+                      {shortMint(token.mint)}
                     </span>
                   </button>
                 );
@@ -380,7 +353,7 @@ export default function JupiterPanel() {
               />
             </label>
             <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
-              {filteredOutputTokens.map((token) => {
+              {outputTokenResults.map((token) => {
                 const selected = token.mint === selectedOutputMint;
                 return (
                   <button
@@ -393,7 +366,7 @@ export default function JupiterPanel() {
                   >
                     <span>{token.symbol}</span>
                     <span className="text-white/60">
-                      {token.mint.slice(0, 4)}…{token.mint.slice(-4)}
+                      {shortMint(token.mint)}
                     </span>
                   </button>
                 );
@@ -454,13 +427,13 @@ export default function JupiterPanel() {
             ) : quote.ok ? (
                 <div className="mt-1 space-y-1">
                 <div>
-                  Estimated output: {quote.outAmount?.toLocaleString()} {selectedOutputToken.symbol}
+                  Estimated output: {quote.outAmount?.toLocaleString()} {selectedOutputToken?.symbol || "token"}
                 </div>
                 <div>
-                  Min received (slippage applied): {quote.otherAmountThreshold?.toLocaleString()} {selectedOutputToken.symbol}
+                  Min received (slippage applied): {quote.otherAmountThreshold?.toLocaleString()} {selectedOutputToken?.symbol || "token"}
                 </div>
                 <div>
-                  Route fee: {quote.routeFeeAmount?.toLocaleString()} {quote.routeFeeSymbol || selectedOutputToken.symbol}
+                  Route fee: {quote.routeFeeAmount?.toLocaleString()} {quote.routeFeeSymbol || selectedOutputToken?.symbol || "token"}
                 </div>
                 <div>Price impact: {quote.priceImpactPct || "0"}%</div>
               </div>
@@ -471,15 +444,15 @@ export default function JupiterPanel() {
 
           <button
             onClick={submitDirectSwap}
-            disabled={busy || !selectedPair.supportsDirectSwap || selectedInputMint === selectedOutputMint}
+            disabled={busy || !hasValidPair}
             className="mt-3 w-full rounded-xl border border-amber-200/40 bg-amber-300/10 px-3 py-2 text-sm disabled:opacity-50"
           >
-            {busy ? "Submitting…" : `Swap ${selectedInputToken.symbol} → ${selectedOutputToken.symbol}`}
+            {busy ? "Submitting…" : `Swap ${selectedInputToken.symbol} → ${selectedOutputToken?.symbol || "token"}`}
           </button>
 
-          {!selectedPair.supportsDirectSwap ? (
+          {!hasValidPair ? (
             <p className="mt-3 text-xs text-white/60">
-              Direct execution is currently enabled only for SOL/BBQ in this environment.
+              Search and select both tokens to enable execution.
             </p>
           ) : null}
 
