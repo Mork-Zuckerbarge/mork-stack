@@ -9,6 +9,7 @@ import {
   setRuntimePersonaGuidelines,
   setRuntimePersonaMode,
   setRuntimeStartupCompleted,
+  setRuntimeResponsePolicy,
   startRuntime,
   stopRuntime,
 } from "@/lib/core/orchestrator";
@@ -25,7 +26,8 @@ type Action =
   | "persona.guidelines.set"
   | "ollama.model.set"
   | "startup.completed.set"
-  | "execution.authority.set";
+  | "execution.authority.set"
+  | "response.params.set";
 
 export async function GET() {
   const orchestrator = await getOrchestratorState();
@@ -148,6 +150,28 @@ export async function POST(req: NextRequest) {
         maxTradeUsd,
         mintAllowlist,
         cooldownMinutes,
+      });
+    } else if (action === "response.params.set") {
+      const maxResponseChars = body?.maxResponseChars;
+      const allowUrls = body?.allowUrls;
+      const allowUserMessageQuotes = body?.allowUserMessageQuotes;
+      const behaviorGuidelines = body?.behaviorGuidelines;
+      if (
+        typeof maxResponseChars !== "number" ||
+        typeof allowUrls !== "boolean" ||
+        typeof allowUserMessageQuotes !== "boolean" ||
+        typeof behaviorGuidelines !== "string"
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "response.params.set requires response policy fields" },
+          { status: 400 }
+        );
+      }
+      await setRuntimeResponsePolicy({
+        maxResponseChars,
+        allowUrls,
+        allowUserMessageQuotes,
+        behaviorGuidelines,
       });
     } else {
       return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });

@@ -2,6 +2,7 @@ import {
   getAppControlState,
   setControlFlag,
   setExecutionAuthority,
+  setResponsePolicy,
   setPersonaGuidelines,
   setPersonaMode,
   setSelectedOllamaModel,
@@ -113,6 +114,16 @@ export async function setRuntimeExecutionAuthority(input: {
 export async function setRuntimeStartupCompleted(value: boolean) {
   await setStartupCompleted(value);
   updateHealth("app", value ? "healthy" : "stopped", value ? "startup complete" : "startup pending");
+  return getOrchestratorState();
+}
+
+export async function setRuntimeResponsePolicy(input: {
+  maxResponseChars: number;
+  allowUrls: boolean;
+  allowUserMessageQuotes: boolean;
+  behaviorGuidelines: string;
+}) {
+  await setResponsePolicy(input);
   return getOrchestratorState();
 }
 

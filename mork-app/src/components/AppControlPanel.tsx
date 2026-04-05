@@ -28,10 +28,17 @@ type AppControlState = {
       mintAllowlist: string[];
       cooldownMinutes: number;
     };
+    responsePolicy: {
+      maxResponseChars: number;
+      allowUrls: boolean;
+      allowUserMessageQuotes: boolean;
+      behaviorGuidelines: string;
+    };
   };
   walletProvisioning: {
     status: "provisioned_existing" | "needs_setup";
     address: string | null;
+    source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
   };
 };
 
@@ -249,6 +256,13 @@ export default function AppControlPanel() {
             />
           </div>
 
+          <ResponsePolicyEditor
+            key={JSON.stringify(state.controls.responsePolicy)}
+            state={state}
+            busy={busy}
+            onSave={(input) => act("response.params.set", input)}
+          />
+
           <ExecutionAuthorityEditor
             key={JSON.stringify(state.controls.executionAuthority)}
             state={state}
@@ -264,6 +278,9 @@ export default function AppControlPanel() {
               {state.walletProvisioning.status === "provisioned_existing"
                 ? "existing wallet configured"
                 : "needs setup"}
+            </div>
+            <div className="mt-1">
+              Wallet source: {state.walletProvisioning.source === "unconfigured" ? "not configured" : state.walletProvisioning.source}
             </div>
             <div className="mt-1 break-all">
               {state.walletProvisioning.address || "No wallet configured yet (set MORK_WALLET or MORK_WALLET_SECRET_KEY)."}
@@ -421,6 +438,63 @@ function ExecutionAuthorityEditor({
           className="rounded-lg border border-white/10 px-2 py-1"
         >
           Save execution policy
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ResponsePolicyEditor({
+  state,
+  busy,
+  onSave,
+}: {
+  state: AppControlState;
+  busy: boolean;
+  onSave: (input: {
+    maxResponseChars: number;
+    allowUrls: boolean;
+    allowUserMessageQuotes: boolean;
+    behaviorGuidelines: string;
+  }) => void;
+}) {
+  const [maxResponseChars, setMaxResponseChars] = useState(String(state.controls.responsePolicy.maxResponseChars));
+  const [allowUrls, setAllowUrls] = useState(state.controls.responsePolicy.allowUrls);
+  const [allowUserMessageQuotes, setAllowUserMessageQuotes] = useState(state.controls.responsePolicy.allowUserMessageQuotes);
+  const [behaviorGuidelines, setBehaviorGuidelines] = useState(state.controls.responsePolicy.behaviorGuidelines);
+
+  return (
+    <div className="rounded-2xl bg-black/35 p-3">
+      <div className="mb-2 text-xs uppercase tracking-wide text-white/60">Agent Behavior + Response Policy</div>
+      <div className="grid grid-cols-1 gap-2">
+        <label className="text-xs text-white/70">Max response characters</label>
+        <input
+          value={maxResponseChars}
+          onChange={(e) => setMaxResponseChars(e.target.value)}
+          className="rounded-lg border border-white/10 bg-black/40 px-2 py-1"
+        />
+        <FlagToggle label="Allow URLs in replies" enabled={allowUrls} onToggle={setAllowUrls} busy={busy} />
+        <FlagToggle label="Allow quoting user messages" enabled={allowUserMessageQuotes} onToggle={setAllowUserMessageQuotes} busy={busy} />
+        <label className="text-xs text-white/70">Behavior guidelines (applies to all channels)</label>
+        <textarea
+          value={behaviorGuidelines}
+          onChange={(e) => setBehaviorGuidelines(e.target.value)}
+          rows={5}
+          className="w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs"
+        />
+        <button
+          onClick={() =>
+            onSave({
+              maxResponseChars: Number(maxResponseChars) || 12000,
+              allowUrls,
+              allowUserMessageQuotes,
+              behaviorGuidelines,
+            })
+          }
+          disabled={busy}
+          className="rounded-lg border border-white/10 px-2 py-1"
+        >
+          Save response policy
         </button>
       </div>
     </div>
