@@ -10,7 +10,9 @@ From the repo root:
 
 The start command will:
 - run setup/bootstrap first,
-- then launch the web app in dev mode from one command/UI surface.
+- then launch the web app in dev mode,
+- auto-start arb (`services/arb/index.js`) in the same launch flow,
+- auto-start Sherpa (`services/sherpa/sherpa_bot.py`) when `services/sherpa/.venv` exists.
 
 Bootstrap includes:
 - install app dependencies,

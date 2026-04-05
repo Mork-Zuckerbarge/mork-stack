@@ -86,6 +86,12 @@ export default function JupiterPanel() {
           initialOutputMint: BBQ_MINT,
         },
       });
+
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      if (!target.hasChildNodes()) {
+        throw new Error("Jupiter widget initialized but rendered an empty panel.");
+      }
+
       initializedRef.current = true;
       setStatus("ready");
     } catch (error) {
@@ -116,6 +122,9 @@ export default function JupiterPanel() {
               jup.ag swap
             </a>{" "}
             and verify wallet adapter permissions.
+          </div>
+          <div className="mt-1 text-amber-50/80">
+            If an ad/tracker blocker is active, allow <code>plugin.jup.ag</code> and retry.
           </div>
           <button onClick={() => initWidget()} className="mt-2 rounded-lg border border-amber-100/40 px-2 py-1 text-[11px] text-amber-50">
             Retry widget load
