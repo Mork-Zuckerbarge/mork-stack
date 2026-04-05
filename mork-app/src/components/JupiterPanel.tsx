@@ -25,6 +25,11 @@ function pairLabel(pair: Pair): string {
   return `${pair.baseSymbol} → ${pair.quoteSymbol}`;
 }
 
+type TokenOption = {
+  symbol: string;
+  mint: string;
+};
+
 const pairs: Pair[] = [
   {
     id: "sol-bbq",
@@ -113,8 +118,10 @@ export default function JupiterPanel() {
   const [amountSol, setAmountSol] = useState("0.05");
   const [slippageBps, setSlippageBps] = useState(50);
   const [busy, setBusy] = useState(false);
-  const [search, setSearch] = useState("");
-  const [selectedPairId, setSelectedPairId] = useState(pairs[0].id);
+  const [inputSearch, setInputSearch] = useState("");
+  const [outputSearch, setOutputSearch] = useState("");
+  const [selectedInputMint, setSelectedInputMint] = useState(SOL_MINT);
+  const [selectedOutputMint, setSelectedOutputMint] = useState(BBQ_MINT);
   const [wallet, setWallet] = useState<WalletState | null>(null);
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [status, setStatus] = useState<{ kind: "idle" | "ok" | "error"; text: string }>({
@@ -122,18 +129,39 @@ export default function JupiterPanel() {
     text: "",
   });
 
-  const filteredPairs = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return pairs;
+  const tokens = useMemo(() => {
+    const tokenMap = new Map<string, TokenOption>();
+    for (const pair of pairs) {
+      tokenMap.set(pair.baseMint, { symbol: pair.baseSymbol, mint: pair.baseMint });
+      tokenMap.set(pair.quoteMint, { symbol: pair.quoteSymbol, mint: pair.quoteMint });
+    }
+    return Array.from(tokenMap.values());
+  }, []);
 
-    return pairs.filter((pair) => {
-      const symbols = `${pair.baseSymbol}/${pair.quoteSymbol}`.toLowerCase();
-      const mints = `${pair.baseMint} ${pair.quoteMint}`.toLowerCase();
-      return symbols.includes(q) || mints.includes(q);
-    });
-  }, [search]);
-
-  const selectedPair = pairs.find((pair) => pair.id === selectedPairId) ?? pairs[0];
+  const selectedInputToken = tokens.find((token) => token.mint === selectedInputMint) ?? tokens[0];
+  const selectedOutputToken = tokens.find((token) => token.mint === selectedOutputMint) ?? tokens[1];
+  const selectedPair = useMemo(
+    () =>
+      pairs.find((pair) => pair.baseMint === selectedInputMint && pair.quoteMint === selectedOutputMint) ?? {
+        id: "custom",
+        baseSymbol: selectedInputToken.symbol,
+        baseMint: selectedInputToken.mint,
+        quoteSymbol: selectedOutputToken.symbol,
+        quoteMint: selectedOutputToken.mint,
+        supportsDirectSwap: false,
+      },
+    [selectedInputMint, selectedOutputMint, selectedInputToken, selectedOutputToken],
+  );
+  const filteredInputTokens = useMemo(() => {
+    const q = inputSearch.trim().toLowerCase();
+    if (!q) return tokens;
+    return tokens.filter((token) => token.symbol.toLowerCase().includes(q) || token.mint.toLowerCase().includes(q));
+  }, [inputSearch, tokens]);
+  const filteredOutputTokens = useMemo(() => {
+    const q = outputSearch.trim().toLowerCase();
+    if (!q) return tokens;
+    return tokens.filter((token) => token.symbol.toLowerCase().includes(q) || token.mint.toLowerCase().includes(q));
+  }, [outputSearch, tokens]);
   const parsedAmountSol = Number(amountSol);
 
   function tradeMaxAmount() {
@@ -163,8 +191,8 @@ export default function JupiterPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amountSol: parsedAmountSol,
-          inputMint: selectedPair.baseMint,
-          outputMint: selectedPair.quoteMint,
+          inputMint: selectedInputMint,
+          outputMint: selectedOutputMint,
           slippageBps,
         }),
       });
@@ -173,7 +201,7 @@ export default function JupiterPanel() {
     } catch {
       setQuote({ ok: false, error: "Quote unavailable" });
     }
-  }, [parsedAmountSol, selectedPair.baseMint, selectedPair.quoteMint, slippageBps]);
+  }, [parsedAmountSol, selectedInputMint, selectedOutputMint, slippageBps]);
 
   useEffect(() => {
     void loadWallet();
@@ -206,8 +234,8 @@ export default function JupiterPanel() {
         body: JSON.stringify({
           amountSol: amount,
           slippageBps,
-          inputMint: selectedPair.baseMint,
-          outputMint: selectedPair.quoteMint,
+          inputMint: selectedInputMint,
+          outputMint: selectedOutputMint,
         }),
       });
 
@@ -230,6 +258,8 @@ export default function JupiterPanel() {
     }
   }
 
+  const selectedPairLabel = pairLabel(selectedPair);
+
   return (
     <div className="rounded-3xl border border-amber-300/20 bg-gradient-to-b from-amber-500/10 to-transparent p-5">
       <h2 className="mb-1 text-lg font-semibold">wallet control</h2>
@@ -250,58 +280,45 @@ export default function JupiterPanel() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[1fr_1.3fr]">
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">Pairs</h3>
-            <input
-              type="text"
-              placeholder="Search pair or mint"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-52 rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-xs"
-            />
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Wallet</h3>
+            <button
+              type="button"
+              onClick={loadWallet}
+              className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-xs"
+            >
+              Refresh
+            </button>
           </div>
 
-          <div className="max-h-60 space-y-2 overflow-y-auto pr-1">
-            {filteredPairs.map((pair) => {
-              const selected = pair.id === selectedPair.id;
-
-              return (
-                <button
-                  key={pair.id}
-                  type="button"
-                  onClick={() => setSelectedPairId(pair.id)}
-                  className={`w-full rounded-xl border px-3 py-2 text-left transition ${
-                    selected
-                      ? "border-amber-200/50 bg-amber-300/15"
-                      : "border-white/10 bg-black/25 hover:border-white/25"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="flex -space-x-2">
-                        <TokenLogo mint={pair.baseMint} symbol={pair.baseSymbol} />
-                        <TokenLogo mint={pair.quoteMint} symbol={pair.quoteSymbol} />
-                      </div>
-                      <span className="text-sm font-medium">
-                        {pair.baseSymbol}/{pair.quoteSymbol}
-                      </span>
-                    </div>
-                    <span className={`text-[10px] ${pair.supportsDirectSwap ? "text-emerald-200" : "text-white/55"}`}>
-                      {pair.supportsDirectSwap ? "Live" : "Watch"}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-
-            {filteredPairs.length === 0 ? (
-              <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-4 text-xs text-white/60">
-                No pairs found for “{search}”.
+          {!wallet ? (
+            <p className="text-sm text-white/60">No wallet data yet.</p>
+          ) : (
+            <div className="space-y-3 text-sm">
+              <div>
+                <div className="text-white/50">Address</div>
+                <div className="break-all">{wallet.address || "Not configured"}</div>
               </div>
-            ) : null}
-          </div>
+              <div className="rounded-2xl bg-black/35 p-3 text-xs text-white/70">
+                Full control is user-custodied; agent actions are constrained by active runtime and your configured wallet.
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <span className="rounded-full bg-white/10 px-3 py-1 text-center">
+                  User Control: {wallet.address ? "Enabled" : "Needs Wallet"}
+                </span>
+                <span className="rounded-full bg-white/10 px-3 py-1 text-center">
+                  Agent Control: {wallet.address ? "Enabled" : "Locked"}
+                </span>
+              </div>
+              <div>
+                <span className="rounded-full bg-white/10 px-3 py-1 text-xs">
+                  {wallet.requirementMet ? "BBQ requirement met ✅" : "Below BBQ threshold"}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
@@ -311,30 +328,81 @@ export default function JupiterPanel() {
               <TokenLogo mint={selectedPair.quoteMint} symbol={selectedPair.quoteSymbol} />
             </div>
             <div>
-              <p className="text-base font-semibold">{pairLabel(selectedPair)}</p>
+              <p className="text-base font-semibold">{selectedPairLabel}</p>
               <p className="text-sm font-semibold">
                 {selectedPair.baseSymbol}/{selectedPair.quoteSymbol}
-              </p>
-              <p className="text-[11px] text-white/60">
-                {selectedPair.supportsDirectSwap ? "Direct swap enabled" : "Display-only pair"}
               </p>
             </div>
           </div>
 
-          <p className="mb-3 text-xs text-white/70">
-            Executes server-side via the configured agent keypair (no browser extension). Requires
-            <code className="mx-1 rounded bg-black/50 px-1 py-0.5">MORK_AGENT_SWAP_ENABLED=1</code>
-            and
-            <code className="mx-1 rounded bg-black/50 px-1 py-0.5">MORK_WALLET_SECRET_KEY</code>.
-          </p>
+          <div className="mb-3 space-y-2">
+            <label className="block text-xs text-white/70">
+              Input token (ticker or CA)
+              <input
+                type="text"
+                value={inputSearch}
+                onChange={(e) => setInputSearch(e.target.value)}
+                placeholder="Search ticker or contract address"
+                className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
+              />
+            </label>
+            <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
+              {filteredInputTokens.map((token) => {
+                const selected = token.mint === selectedInputMint;
+                return (
+                  <button
+                    key={`input-${token.mint}`}
+                    type="button"
+                    onClick={() => setSelectedInputMint(token.mint)}
+                    className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs ${
+                      selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
+                    }`}
+                  >
+                    <span>{token.symbol}</span>
+                    <span className="text-white/60">
+                      {token.mint.slice(0, 4)}…{token.mint.slice(-4)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-          <div className="mb-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-[11px] text-white/80">
-            Mints: {selectedPair.baseMint.slice(0, 4)}…{selectedPair.baseMint.slice(-4)} / {selectedPair.quoteMint.slice(0, 4)}…
-            {selectedPair.quoteMint.slice(-4)}
+          <div className="mb-3 space-y-2">
+            <label className="block text-xs text-white/70">
+              Output token (ticker or CA)
+              <input
+                type="text"
+                value={outputSearch}
+                onChange={(e) => setOutputSearch(e.target.value)}
+                placeholder="Search ticker or contract address"
+                className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
+              />
+            </label>
+            <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
+              {filteredOutputTokens.map((token) => {
+                const selected = token.mint === selectedOutputMint;
+                return (
+                  <button
+                    key={`output-${token.mint}`}
+                    type="button"
+                    onClick={() => setSelectedOutputMint(token.mint)}
+                    className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs ${
+                      selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
+                    }`}
+                  >
+                    <span>{token.symbol}</span>
+                    <span className="text-white/60">
+                      {token.mint.slice(0, 4)}…{token.mint.slice(-4)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <label className="text-xs text-white/70">
-            Amount ({selectedPair.baseSymbol})
+            Amount ({selectedInputToken.symbol})
             <input
               type="number"
               min="0.001"
@@ -384,15 +452,15 @@ export default function JupiterPanel() {
             {!quote ? (
               <p className="mt-1 text-white/55">Enter an amount to view estimated output, fee, and min received.</p>
             ) : quote.ok ? (
-              <div className="mt-1 space-y-1">
+                <div className="mt-1 space-y-1">
                 <div>
-                  Estimated output: {quote.outAmount?.toLocaleString()} {selectedPair.quoteSymbol}
+                  Estimated output: {quote.outAmount?.toLocaleString()} {selectedOutputToken.symbol}
                 </div>
                 <div>
-                  Min received (slippage applied): {quote.otherAmountThreshold?.toLocaleString()} {selectedPair.quoteSymbol}
+                  Min received (slippage applied): {quote.otherAmountThreshold?.toLocaleString()} {selectedOutputToken.symbol}
                 </div>
                 <div>
-                  Route fee: {quote.routeFeeAmount?.toLocaleString()} {quote.routeFeeSymbol || selectedPair.quoteSymbol}
+                  Route fee: {quote.routeFeeAmount?.toLocaleString()} {quote.routeFeeSymbol || selectedOutputToken.symbol}
                 </div>
                 <div>Price impact: {quote.priceImpactPct || "0"}%</div>
               </div>
@@ -403,11 +471,17 @@ export default function JupiterPanel() {
 
           <button
             onClick={submitDirectSwap}
-            disabled={busy || !selectedPair.supportsDirectSwap}
+            disabled={busy || !selectedPair.supportsDirectSwap || selectedInputMint === selectedOutputMint}
             className="mt-3 w-full rounded-xl border border-amber-200/40 bg-amber-300/10 px-3 py-2 text-sm disabled:opacity-50"
           >
-            {busy ? "Submitting…" : `Swap ${selectedPair.baseSymbol} → ${selectedPair.quoteSymbol}`}
+            {busy ? "Submitting…" : `Swap ${selectedInputToken.symbol} → ${selectedOutputToken.symbol}`}
           </button>
+
+          {!selectedPair.supportsDirectSwap ? (
+            <p className="mt-3 text-xs text-white/60">
+              Direct execution is currently enabled only for SOL/BBQ in this environment.
+            </p>
+          ) : null}
 
           {status.kind !== "idle" ? (
             <p className={`mt-3 text-xs ${status.kind === "ok" ? "text-emerald-200" : "text-amber-200"}`}>
