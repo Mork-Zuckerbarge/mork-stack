@@ -151,7 +151,7 @@ main() {
     cp "$ENV_TEMPLATE" "$ENV_FILE"
     log "Created $ENV_FILE from template"
   else
-    log "Using existing $ENV_FILE"
+    log "Using existing $ENV_FILE (env.example is template-only after first creation)"
   fi
 
   create_wallet_if_missing
@@ -177,7 +177,7 @@ main() {
 
 Setup complete.
 Next steps:
-  1) Review mork-app/.env.local
+  1) Review mork-app/.env.local (runtime env source; env.example is template-only)
   2) Start app: cd mork-app && npm run dev
   3) Optional full stack: docker compose up
 MSG
