@@ -16,6 +16,11 @@ export default function JupiterPanel() {
   return (
     <div className="rounded-3xl border border-amber-300/20 bg-gradient-to-b from-amber-500/10 to-transparent p-5">
       <h2 className="mb-1 text-lg font-semibold">Jupiter Trade Window</h2>
+      <p className="mb-3 text-xs text-white/60">Direct Jupiter swap surface for SOL ⇄ BBQ with a quick Solana pair reference.</p>
+      <div className="mb-3 rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-2 text-[11px] text-cyan-100">
+        Wallet note: Jupiter uses the wallet connected inside the embedded jup.ag window (usually your browser wallet extension),
+        not the backend MORK runtime wallet shown in the Wallet panel.
+      </div>
 
       <div className="mb-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-[11px] text-white/80">
         Pair link: SOL ({SOL_MINT.slice(0, 4)}…{SOL_MINT.slice(-4)}) / BBQ ({BBQ_MINT.slice(0, 4)}…{BBQ_MINT.slice(-4)}) ·{" "}
