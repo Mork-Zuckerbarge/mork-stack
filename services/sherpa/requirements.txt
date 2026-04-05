@@ -14,4 +14,4 @@ typing-extensions==4.12.2
 pydantic==2.5.2
 httpx==0.25.2 
 huggingface_hub==0.25.2
-
+python-dotenv==1.0.1

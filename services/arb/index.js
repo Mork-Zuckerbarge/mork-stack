@@ -394,14 +394,44 @@ async function sleep(ms) {
 
 const WALLET_PATH = process.env.WALLET_PATH;
 const MAX_TRADE_USDC = Number(process.env.MAX_TRADE_USDC || 0);
+const WALLET_SECRET_KEY = process.env.MORK_WALLET_SECRET_KEY;
 
-function loadKeypair(p) {
-  const secret = JSON.parse(fs.readFileSync(p, "utf8"));
-  return Keypair.fromSecretKey(Uint8Array.from(secret));
+function parseSecretKey(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.some((v) => typeof v !== "number")) return null;
+    return Uint8Array.from(parsed);
+  } catch {
+    return null;
+  }
 }
 
-const wallet = loadKeypair(WALLET_PATH);
+function loadKeypair() {
+  if (WALLET_PATH) {
+    const secret = JSON.parse(fs.readFileSync(WALLET_PATH, "utf8"));
+    return Keypair.fromSecretKey(Uint8Array.from(secret));
+  }
+
+  if (WALLET_SECRET_KEY) {
+    const secret = parseSecretKey(WALLET_SECRET_KEY);
+    if (!secret) {
+      throw new Error("Invalid MORK_WALLET_SECRET_KEY (must be a JSON array of bytes)");
+    }
+    return Keypair.fromSecretKey(secret);
+  }
+
+  throw new Error("Wallet not configured. Set WALLET_PATH or MORK_WALLET_SECRET_KEY.");
+}
+
+function resolveWalletSource() {
+  if (WALLET_PATH) return `WALLET_PATH=${WALLET_PATH}`;
+  if (WALLET_SECRET_KEY) return "MORK_WALLET_SECRET_KEY";
+  return "none";
+}
+
+const wallet = loadKeypair();
 console.log("Bot wallet:", wallet.publicKey.toBase58());
+console.log("Wallet source:", resolveWalletSource());
 console.log("ARMED:", ARMED);
 
 function parseCsvLine(line) {

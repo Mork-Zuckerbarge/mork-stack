@@ -32,6 +32,16 @@ fi
 log "Bootstrapping local dependencies"
 "$ROOT_DIR/setup.sh"
 
+if [[ -f "$APP_DIR/.env.local" ]]; then
+  log "Loading environment from mork-app/.env.local"
+  set -a
+  # shellcheck disable=SC1090
+  source "$APP_DIR/.env.local"
+  set +a
+else
+  log "No mork-app/.env.local found; continuing with current environment"
+fi
+
 if [[ -d "$ARB_DIR" ]]; then
   if [[ ! -d "$ARB_DIR/node_modules" ]]; then
     log "Installing arb dependencies"
