@@ -463,12 +463,32 @@ function parseCsvLine(line) {
   return out.map((s) => s.trim());
 }
 
+const DEFAULT_WHITELIST = [
+  {
+    symbol: "SOL/USDC",
+    inMint: SOL_MINT,
+    inDecimals: 9,
+    outMint: USDC_MINT,
+    outDecimals: 6,
+    probeUsd: 25,
+  },
+];
+
 function loadWhitelist(file = "whitelist.json") {
-  const raw = fs.readFileSync(file, "utf8");
+  const absolutePath = path.isAbsolute(file) ? file : path.join(__dirname, file);
+
+  if (!fs.existsSync(absolutePath)) {
+    console.log(
+      `⚠️ whitelist file missing at ${absolutePath}. Falling back to built-in starter whitelist (${DEFAULT_WHITELIST.length} market).`
+    );
+    return DEFAULT_WHITELIST;
+  }
+
+  const raw = fs.readFileSync(absolutePath, "utf8");
   const markets = JSON.parse(raw);
 
   if (!Array.isArray(markets) || markets.length === 0) {
-    throw new Error(`Whitelist is empty or invalid: ${file}`);
+    throw new Error(`Whitelist is empty or invalid: ${absolutePath}`);
   }
   return markets;
 }
