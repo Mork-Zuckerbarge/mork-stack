@@ -21,6 +21,10 @@ type Pair = {
   supportsDirectSwap: boolean;
 };
 
+function pairLabel(pair: Pair): string {
+  return `${pair.baseSymbol} → ${pair.quoteSymbol}`;
+}
+
 const pairs: Pair[] = [
   {
     id: "sol-bbq",
@@ -223,7 +227,6 @@ export default function JupiterPanel() {
           </div>
 
           <p className="mb-3 text-xs text-white/70">
-            Server-side execution via configured agent keypair. Requires
             Executes server-side via the configured agent keypair (no browser extension). Requires
             <code className="mx-1 rounded bg-black/50 px-1 py-0.5">MORK_AGENT_SWAP_ENABLED=1</code>
             and
