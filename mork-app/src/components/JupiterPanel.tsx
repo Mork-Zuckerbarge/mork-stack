@@ -10,10 +10,6 @@ const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 const tokenLogos: Record<string, string> = {
   [SOL_MINT]: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png",
   [BBQ_MINT]: "/window.svg",
-  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png",
-  "Es9vMFrzaCERmJfrF4H2FYD4Xf9LQ4NVY6Yq6iUiJQw": "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4Xf9LQ4NVY6Yq6iUiJQw/logo.svg",
-  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN": "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN/logo.png",
-  "DezXAZ8z7PnrnRJjz3wXBoRgixCa6X8xXQqfS3RzW2X": "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/DezXAZ8z7PnrnRJjz3wXBoRgixCa6X8xXQqfS3RzW2X/logo.png",
 };
 
 type Pair = {
@@ -216,6 +212,7 @@ export default function JupiterPanel() {
               <TokenLogo mint={selectedPair.quoteMint} symbol={selectedPair.quoteSymbol} />
             </div>
             <div>
+              <p className="text-base font-semibold">{pairLabel(selectedPair)}</p>
               <p className="text-sm font-semibold">
                 {selectedPair.baseSymbol}/{selectedPair.quoteSymbol}
               </p>
@@ -226,6 +223,7 @@ export default function JupiterPanel() {
           </div>
 
           <p className="mb-3 text-xs text-white/70">
+            Server-side execution via configured agent keypair. Requires
             Executes server-side via the configured agent keypair (no browser extension). Requires
             <code className="mx-1 rounded bg-black/50 px-1 py-0.5">MORK_AGENT_SWAP_ENABLED=1</code>
             and
