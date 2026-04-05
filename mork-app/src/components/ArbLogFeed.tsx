@@ -12,6 +12,7 @@ type ArbLog = {
 export default function ArbLogFeed() {
   const [logs, setLogs] = useState<ArbLog[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pollMs, setPollMs] = useState(15000);
 
   async function loadLogs() {
     try {
@@ -34,21 +35,32 @@ export default function ArbLogFeed() {
     }, 0);
     const timer = window.setInterval(() => {
       void loadLogs();
-    }, 5000);
+    }, pollMs);
 
     return () => {
       window.clearTimeout(kickoff);
       window.clearInterval(timer);
     };
-  }, []);
+  }, [pollMs]);
 
   return (
     <div className="mt-4 rounded-2xl border border-white/15 bg-black/30 p-3">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-semibold">ARB Logs Feed</h3>
-        <button className="rounded-lg border border-white/20 px-2 py-1 text-xs" onClick={loadLogs}>
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <select
+            value={pollMs}
+            onChange={(e) => setPollMs(Number(e.target.value))}
+            className="rounded-lg border border-white/20 bg-black/35 px-2 py-1 text-xs"
+          >
+            <option value={15000}>15s poll</option>
+            <option value={30000}>30s poll</option>
+            <option value={60000}>60s poll</option>
+          </select>
+          <button className="rounded-lg border border-white/20 px-2 py-1 text-xs" onClick={loadLogs}>
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error ? <p className="text-xs text-amber-200">{error}</p> : null}
