@@ -95,6 +95,8 @@ export async function respondToChat(input: unknown) {
   }
 
   const controlState = await getAppControlState();
+  const responsePolicy = controlState.controls.responsePolicy;
+  const finalMaxChars = Math.min(maxChars, responsePolicy.maxResponseChars);
   let modeInstruction = "";
 
   if (handle === "frontend-coding") {
@@ -152,13 +154,10 @@ export async function respondToChat(input: unknown) {
   const instruction =
     `Reply as Mork Zuckerbarge.\n` +
     modeInstruction +
-    `Max ${maxChars} characters.\n` +
-    `Do NOT include URLs.\n` +
-    `Do NOT quote the user's message.\n` +
-    `Do NOT act like the TV character from Mork & Mindy.\n` +
-    `Never say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\n` +
-    `Do not create false information.\n` +
-    `If you do not know something, say so plainly.\n` +
+    `Max ${finalMaxChars} characters.\n` +
+    `${responsePolicy.allowUrls ? "URLs are allowed.\n" : "Do NOT include URLs.\n"}` +
+    `${responsePolicy.allowUserMessageQuotes ? "You may quote the user's message when useful.\n" : "Do NOT quote the user's message.\n"}` +
+    `${responsePolicy.behaviorGuidelines.trim()}\n` +
     `Return ONLY the reply text.\n`;
 
   let responseText = "";
@@ -210,8 +209,8 @@ export async function respondToChat(input: unknown) {
     }
   }
 
-  if (responseText.length > maxChars) {
-    responseText = responseText.slice(0, maxChars);
+  if (responseText.length > finalMaxChars) {
+    responseText = responseText.slice(0, finalMaxChars);
   }
 
   if (await isMemoryEnabled()) {

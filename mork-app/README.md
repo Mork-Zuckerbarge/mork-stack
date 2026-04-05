@@ -29,6 +29,11 @@ Wallet setup mode can be controlled with:
 - `MORK_SETUP_WALLET_MODE=create`: always create a new local dev keypair.
 - `MORK_SETUP_SKIP_SHERPA=1`: skip Sherpa Python dependency bootstrap.
 
+Important wallet env note:
+- Runtime reads `mork-app/.env.local`.
+- `mork-app/env.example` is only used as a template when `.env.local` is first created.
+- If `.env.local` already exists, edit `MORK_WALLET` or `MORK_WALLET_SECRET_KEY` in `.env.local` directly, then restart the app.
+
 ## Docker Compose bootstrap
 
 For a reproducible containerized setup:

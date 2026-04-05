@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { resolveWalletAddressFromEnv } from "./walletConfig";
+import { resolveWalletConfigFromEnv } from "./walletConfig";
 
 export type RuntimeStatus = "running" | "stopped";
 
@@ -32,10 +32,17 @@ export type AppControlState = {
       mintAllowlist: string[];
       cooldownMinutes: number;
     };
+    responsePolicy: {
+      maxResponseChars: number;
+      allowUrls: boolean;
+      allowUserMessageQuotes: boolean;
+      behaviorGuidelines: string;
+    };
   };
   walletProvisioning: {
     status: "provisioned_existing" | "needs_setup";
     address: string | null;
+    source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
   };
 };
 
@@ -74,10 +81,18 @@ const state: AppControlState = {
       mintAllowlist: [],
       cooldownMinutes: 15,
     },
+    responsePolicy: {
+      maxResponseChars: 12000,
+      allowUrls: false,
+      allowUserMessageQuotes: false,
+      behaviorGuidelines:
+        "Do NOT act like the TV character from Mork & Mindy.\nNever say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\nDo not create false information.\nIf you do not know something, say so plainly.",
+    },
   },
   walletProvisioning: {
     status: "needs_setup",
     address: null,
+    source: "unconfigured",
   },
 };
 
@@ -165,6 +180,21 @@ function applyPersistedState(raw: unknown) {
         state.controls.executionAuthority.cooldownMinutes = executionAuthority.cooldownMinutes;
       }
     }
+    const responsePolicy = controls.responsePolicy;
+    if (isObjectRecord(responsePolicy)) {
+      if (typeof responsePolicy.maxResponseChars === "number") {
+        state.controls.responsePolicy.maxResponseChars = responsePolicy.maxResponseChars;
+      }
+      if (typeof responsePolicy.allowUrls === "boolean") {
+        state.controls.responsePolicy.allowUrls = responsePolicy.allowUrls;
+      }
+      if (typeof responsePolicy.allowUserMessageQuotes === "boolean") {
+        state.controls.responsePolicy.allowUserMessageQuotes = responsePolicy.allowUserMessageQuotes;
+      }
+      if (typeof responsePolicy.behaviorGuidelines === "string") {
+        state.controls.responsePolicy.behaviorGuidelines = responsePolicy.behaviorGuidelines;
+      }
+    }
   }
 }
 
@@ -237,15 +267,17 @@ async function persistState() {
 export async function getAppControlState(): Promise<AppControlState> {
   await ensureStateLoaded();
 
-  const configuredWallet = resolveWalletAddressFromEnv();
-  state.walletProvisioning = configuredWallet
+  const walletConfig = resolveWalletConfigFromEnv();
+  state.walletProvisioning = walletConfig.address
     ? {
         status: "provisioned_existing",
-        address: configuredWallet,
+        address: walletConfig.address,
+        source: walletConfig.source,
       }
     : {
         status: "needs_setup",
         address: null,
+        source: walletConfig.source,
       };
 
   return structuredClone(state);
@@ -381,4 +413,21 @@ export async function setExecutionAuthority(input: {
   };
   await persistState();
   return structuredClone(state.controls.executionAuthority);
+}
+
+export async function setResponsePolicy(input: {
+  maxResponseChars: number;
+  allowUrls: boolean;
+  allowUserMessageQuotes: boolean;
+  behaviorGuidelines: string;
+}) {
+  await ensureStateLoaded();
+  state.controls.responsePolicy = {
+    maxResponseChars: Math.min(20000, Math.max(120, Math.round(input.maxResponseChars))),
+    allowUrls: input.allowUrls,
+    allowUserMessageQuotes: input.allowUserMessageQuotes,
+    behaviorGuidelines: input.behaviorGuidelines,
+  };
+  await persistState();
+  return structuredClone(state.controls.responsePolicy);
 }
