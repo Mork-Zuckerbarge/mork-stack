@@ -10,14 +10,6 @@ const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 const tokenLogos: Record<string, string> = {
   [SOL_MINT]: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png",
   [BBQ_MINT]: "/window.svg",
-  EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v:
-    "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png",
-  Es9vMFrzaCERmJfrF4H2FYD4Xf9LQ4NVY6Yq6iUiJQw:
-    "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4Xf9LQ4NVY6Yq6iUiJQw/logo.svg",
-  JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN:
-    "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN/logo.png",
-  DezXAZ8z7PnrnRJjz3wXBoRgixCa6X8xXQqfS3RzW2X:
-    "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/DezXAZ8z7PnrnRJjz3wXBoRgixCa6X8xXQqfS3RzW2X/logo.png",
 };
 
 type Pair = {
@@ -86,16 +78,12 @@ function TokenLogo({ mint, symbol }: { mint: string; symbol: string }) {
     <Image
       src={src}
       alt={`${symbol} logo`}
-      width={28}
-      height={28}
-      className="h-7 w-7 rounded-full border border-white/20 bg-black/40 object-cover"
+      width={24}
+      height={24}
+      className="h-6 w-6 rounded-full border border-white/20 bg-black/40 object-cover"
       unoptimized
     />
   );
-}
-
-function pairLabel(pair: Pair) {
-  return `${pair.baseSymbol}/${pair.quoteSymbol}`;
 }
 
 export default function JupiterPanel() {
@@ -108,33 +96,18 @@ export default function JupiterPanel() {
     text: "",
   });
 
-  const selectedPair = pairs.find((pair) => pair.id === selectedPairId) ?? pairs[0];
-
-  const matchingPairs = useMemo(() => {
+  const filteredPairs = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) {
-      return [];
-    }
+    if (!q) return pairs;
 
-    return pairs
-      .map((pair) => {
-        const symbolKey = `${pair.baseSymbol}/${pair.quoteSymbol}`.toLowerCase();
-        const reverseSymbolKey = `${pair.quoteSymbol}/${pair.baseSymbol}`.toLowerCase();
-        const mintKey = `${pair.baseMint} ${pair.quoteMint}`.toLowerCase();
-
-        let score = 0;
-        if (symbolKey === q || reverseSymbolKey === q) score += 150;
-        if (symbolKey.includes(q) || reverseSymbolKey.includes(q)) score += 75;
-        if (pair.baseSymbol.toLowerCase() === q || pair.quoteSymbol.toLowerCase() === q) score += 45;
-        if (mintKey.includes(q)) score += 60;
-
-        return { pair, score };
-      })
-      .filter((entry) => entry.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 6)
-      .map((entry) => entry.pair);
+    return pairs.filter((pair) => {
+      const symbols = `${pair.baseSymbol}/${pair.quoteSymbol}`.toLowerCase();
+      const mints = `${pair.baseMint} ${pair.quoteMint}`.toLowerCase();
+      return symbols.includes(q) || mints.includes(q);
+    });
   }, [search]);
+
+  const selectedPair = pairs.find((pair) => pair.id === selectedPairId) ?? pairs[0];
 
   async function submitDirectSwap() {
     if (!selectedPair.supportsDirectSwap) {
@@ -174,67 +147,65 @@ export default function JupiterPanel() {
   }
 
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-fuchsia-300/20 bg-gradient-to-b from-violet-500/10 via-fuchsia-500/10 to-transparent p-5">
-      <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-fuchsia-400/20 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-24 -left-16 h-64 w-64 rounded-full bg-cyan-400/10 blur-3xl" />
+    <div className="rounded-3xl border border-amber-300/20 bg-gradient-to-b from-amber-500/10 to-transparent p-5">
+      <h2 className="mb-1 text-lg font-semibold">Jupiter Direct (Agent Wallet)</h2>
+      <p className="mb-3 text-xs text-white/70">DEX-style pair browser with quick search and token logos.</p>
 
-      <h2 className="relative mb-4 text-lg font-semibold">Wallet Control</h2>
+      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+        <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold">Pairs</h3>
+            <input
+              type="text"
+              placeholder="Search pair or mint"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-52 rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-xs"
+            />
+          </div>
 
-      <div className="relative rounded-3xl border border-white/15 bg-black/35 p-4 backdrop-blur">
-        <div className="mb-3 text-xs text-white/70">Search by ticker pair (SOL/USDC) or contract address.</div>
+          <div className="max-h-60 space-y-2 overflow-y-auto pr-1">
+            {filteredPairs.map((pair) => {
+              const selected = pair.id === selectedPair.id;
 
-        <div className="relative">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Type token ticker or CA"
-            className="w-full rounded-2xl border border-white/20 bg-black/40 px-4 py-3 text-sm outline-none ring-fuchsia-300/50 transition focus:ring"
-          />
-
-          {search.trim() && (
-            <div className="absolute z-20 mt-2 w-full rounded-2xl border border-white/15 bg-[#100f1acc] p-2 shadow-2xl backdrop-blur">
-              {matchingPairs.length > 0 ? (
-                <div className="space-y-1">
-                  {matchingPairs.map((pair) => (
-                    <button
-                      key={pair.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedPairId(pair.id);
-                        setSearch(pairLabel(pair));
-                      }}
-                      className="flex w-full items-center justify-between rounded-xl border border-transparent bg-white/5 px-3 py-2 text-left transition hover:border-fuchsia-200/35 hover:bg-white/10"
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="flex -space-x-2">
-                          <TokenLogo mint={pair.baseMint} symbol={pair.baseSymbol} />
-                          <TokenLogo mint={pair.quoteMint} symbol={pair.quoteSymbol} />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">{pairLabel(pair)}</p>
-                          <p className="text-[10px] text-white/50">
-                            {pair.baseMint.slice(0, 4)}…{pair.baseMint.slice(-4)} · {pair.quoteMint.slice(0, 4)}…
-                            {pair.quoteMint.slice(-4)}
-                          </p>
-                        </div>
+              return (
+                <button
+                  key={pair.id}
+                  type="button"
+                  onClick={() => setSelectedPairId(pair.id)}
+                  className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                    selected
+                      ? "border-amber-200/50 bg-amber-300/15"
+                      : "border-white/10 bg-black/25 hover:border-white/25"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex -space-x-2">
+                        <TokenLogo mint={pair.baseMint} symbol={pair.baseSymbol} />
+                        <TokenLogo mint={pair.quoteMint} symbol={pair.quoteSymbol} />
                       </div>
-                      <span className={`text-[10px] ${pair.supportsDirectSwap ? "text-emerald-200" : "text-white/50"}`}>
-                        {pair.supportsDirectSwap ? "Live" : "Watch"}
+                      <span className="text-sm font-medium">
+                        {pair.baseSymbol}/{pair.quoteSymbol}
                       </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/60">
-                  No matching pairs.
-                </div>
-              )}
-            </div>
-          )}
+                    </div>
+                    <span className={`text-[10px] ${pair.supportsDirectSwap ? "text-emerald-200" : "text-white/55"}`}>
+                      {pair.supportsDirectSwap ? "Live" : "Watch"}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+
+            {filteredPairs.length === 0 ? (
+              <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-4 text-xs text-white/60">
+                No pairs found for “{search}”.
+              </div>
+            ) : null}
+          </div>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-white/15 bg-gradient-to-b from-white/10 to-black/25 p-4">
+        <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
           <div className="mb-3 flex items-center gap-2">
             <div className="flex -space-x-2">
               <TokenLogo mint={selectedPair.baseMint} symbol={selectedPair.baseSymbol} />
@@ -242,6 +213,9 @@ export default function JupiterPanel() {
             </div>
             <div>
               <p className="text-base font-semibold">{pairLabel(selectedPair)}</p>
+              <p className="text-sm font-semibold">
+                {selectedPair.baseSymbol}/{selectedPair.quoteSymbol}
+              </p>
               <p className="text-[11px] text-white/60">
                 {selectedPair.supportsDirectSwap ? "Direct swap enabled" : "Display-only pair"}
               </p>
@@ -250,10 +224,16 @@ export default function JupiterPanel() {
 
           <p className="mb-3 text-xs text-white/70">
             Server-side execution via configured agent keypair. Requires
+            Executes server-side via the configured agent keypair (no browser extension). Requires
             <code className="mx-1 rounded bg-black/50 px-1 py-0.5">MORK_AGENT_SWAP_ENABLED=1</code>
             and
             <code className="mx-1 rounded bg-black/50 px-1 py-0.5">MORK_WALLET_SECRET_KEY</code>.
           </p>
+
+          <div className="mb-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-[11px] text-white/80">
+            Mints: {selectedPair.baseMint.slice(0, 4)}…{selectedPair.baseMint.slice(-4)} / {selectedPair.quoteMint.slice(0, 4)}…
+            {selectedPair.quoteMint.slice(-4)}
+          </div>
 
           <label className="text-xs text-white/70">
             Amount ({selectedPair.baseSymbol})
@@ -263,14 +243,14 @@ export default function JupiterPanel() {
               step="0.001"
               value={amountSol}
               onChange={(e) => setAmountSol(e.target.value)}
-              className="mt-1 block w-full rounded-xl border border-white/20 bg-black/40 px-3 py-2 text-sm"
+              className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
             />
           </label>
 
           <button
             onClick={submitDirectSwap}
             disabled={busy}
-            className="mt-3 w-full rounded-xl border border-fuchsia-200/50 bg-gradient-to-r from-fuchsia-300/20 to-violet-300/20 px-3 py-2 text-sm disabled:opacity-50"
+            className="mt-3 w-full rounded-xl border border-amber-200/40 bg-amber-300/10 px-3 py-2 text-sm disabled:opacity-50"
           >
             {busy ? "Submitting…" : `Swap ${selectedPair.baseSymbol} → ${selectedPair.quoteSymbol}`}
           </button>
