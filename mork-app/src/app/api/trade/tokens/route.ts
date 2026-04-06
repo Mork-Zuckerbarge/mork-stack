@@ -7,10 +7,23 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 type JupiterToken = {
   address?: string;
+  mint?: string;
+  id?: string;
   symbol?: string;
   name?: string;
   logoURI?: string;
 };
+
+function normalizeToken(token: JupiterToken) {
+  const mint = token.address || token.mint || token.id;
+  if (!mint) return null;
+  return {
+    symbol: token.symbol?.trim() || `${mint.slice(0, 4)}…${mint.slice(-4)}`,
+    mint,
+    name: token.name?.trim() || "",
+    logoUri: token.logoURI || "",
+  };
+}
 
 export async function GET(req: Request) {
   try {
@@ -37,17 +50,34 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: `Token search failed (${res.status}): ${body}` }, { status: 502 });
     }
 
-    const tokens = ((await res.json()) as JupiterToken[])
-      .filter((token) => token.address)
-      .slice(0, 25)
-      .map((token) => ({
-        symbol: token.symbol?.trim() || `${token.address!.slice(0, 4)}…${token.address!.slice(-4)}`,
-        mint: token.address!,
-        name: token.name?.trim() || "",
-        logoUri: token.logoURI || "",
-      }));
+    const searchedTokens = ((await res.json()) as JupiterToken[])
+      .map((token) => normalizeToken(token))
+      .filter((token): token is NonNullable<typeof token> => Boolean(token))
+      .slice(0, 25);
 
-    return NextResponse.json({ ok: true, tokens });
+    if (searchedTokens.length > 0) {
+      return NextResponse.json({ ok: true, tokens: searchedTokens });
+    }
+
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(q)) {
+      return NextResponse.json({ ok: true, tokens: [] });
+    }
+
+    const tokenByMintRes = await fetch(`${JUP_BASE}/tokens/v1/token/${q}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!tokenByMintRes.ok) {
+      return NextResponse.json({ ok: true, tokens: [] });
+    }
+
+    const tokenByMint = normalizeToken((await tokenByMintRes.json()) as JupiterToken);
+    if (!tokenByMint) {
+      return NextResponse.json({ ok: true, tokens: [] });
+    }
+
+    return NextResponse.json({ ok: true, tokens: [tokenByMint] });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "token search failed";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
