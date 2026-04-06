@@ -39,15 +39,21 @@ export async function GET(req: Request) {
 
     const url = new URL(`${JUP_BASE}/tokens/v1/search`);
     url.searchParams.set("query", q);
+    if (q.length < 2) {
+      return NextResponse.json({
+        ok: true,
+        tokens: [{ symbol: "SOL", mint: SOL_MINT }],
+      });
+    }
 
     const res = await fetch(url.toString(), {
       headers: { Accept: "application/json" },
       cache: "no-store",
+      signal: AbortSignal.timeout(2500),
     });
 
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return NextResponse.json({ ok: false, error: `Token search failed (${res.status}): ${body}` }, { status: 502 });
+      return NextResponse.json({ ok: true, tokens: [] });
     }
 
     const searchedTokens = ((await res.json()) as JupiterToken[])
