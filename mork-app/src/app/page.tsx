@@ -1,5 +1,4 @@
 import ChatPanel from "@/components/ChatPanel";
-import WalletPanel from "@/components/WalletPanel";
 import AgentStatusCard from "@/components/AgentStatusCard";
 import JupiterPanel from "@/components/JupiterPanel";
 import AppControlPanel from "@/components/AppControlPanel";
@@ -20,7 +19,6 @@ export default function HomePage() {
         <section className="lg:col-span-2 space-y-6">
           <ChatPanel />
           <JupiterPanel />
-          <WalletPanel />
           <SherpaPanel />
         </section>
 

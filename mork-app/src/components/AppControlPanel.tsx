@@ -35,11 +35,6 @@ type AppControlState = {
       behaviorGuidelines: string;
     };
   };
-  walletProvisioning: {
-    status: "provisioned_existing" | "needs_setup";
-    address: string | null;
-    source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
-  };
 };
 
 type UpdateState = {
@@ -131,26 +126,6 @@ export default function AppControlPanel() {
       }
     } catch {
       setStatusText("Failed to update controls");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function refreshWalletMemory() {
-    if (busy) return;
-    setBusy(true);
-    setStatusText("");
-
-    try {
-      const res = await fetch("/api/wallet/refresh", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data?.ok) {
-        setStatusText(data?.error || `Wallet refresh failed (${res.status})`);
-      } else {
-        setStatusText("Wallet memory refreshed");
-      }
-    } catch {
-      setStatusText("Wallet refresh failed");
     } finally {
       setBusy(false);
     }
@@ -327,29 +302,6 @@ export default function AppControlPanel() {
             busy={busy}
             onSave={(input) => act("response.params.set", input)}
           />
-
-          <div className="rounded-2xl bg-black/30 p-3 text-xs text-white/70">
-            <div>
-              Wallet Provisioning: {" "}
-              {state.walletProvisioning.status === "provisioned_existing"
-                ? "existing wallet configured"
-                : "needs setup"}
-            </div>
-            <div className="mt-1">
-              Wallet source: {state.walletProvisioning.source === "unconfigured" ? "not configured" : state.walletProvisioning.source}
-            </div>
-            <div className="mt-1 break-all">
-              {state.walletProvisioning.address || "No wallet configured yet (set MORK_WALLET or MORK_WALLET_SECRET_KEY)."}
-            </div>
-          </div>
-
-          <button
-            onClick={refreshWalletMemory}
-            disabled={busy}
-            className="w-full rounded-xl border border-cyan-300/30 bg-cyan-200/10 px-3 py-2"
-          >
-            Refresh Wallet Memory
-          </button>
 
           {statusText ? <p className="text-xs text-white/60">{statusText}</p> : null}
         </div>
