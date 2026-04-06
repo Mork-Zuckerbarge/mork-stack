@@ -62,6 +62,8 @@ type ExecutionAuthority = {
   cooldownMinutes: number;
 };
 
+type RuntimeStatus = "running" | "stopped";
+
 type WalletProvisioning = {
   status: "provisioned_existing" | "needs_setup";
   address: string | null;
@@ -129,6 +131,10 @@ export default function JupiterPanel() {
   const [walletProvisioning, setWalletProvisioning] = useState<WalletProvisioning | null>(null);
   const [walletRefreshBusy, setWalletRefreshBusy] = useState(false);
   const [walletRefreshStatus, setWalletRefreshStatus] = useState("");
+  const [arbStatus, setArbStatus] = useState<RuntimeStatus>("stopped");
+  const [startupCompleted, setStartupCompleted] = useState(false);
+  const [arbStartupBusy, setArbStartupBusy] = useState(false);
+  const [arbStartupStatus, setArbStartupStatus] = useState("");
 
   const selectedInputToken = useMemo(
     () => inputTokenResults.find((token) => token.mint === selectedInputMint) ?? { symbol: shortMint(selectedInputMint), mint: selectedInputMint },
@@ -231,6 +237,11 @@ export default function JupiterPanel() {
       const res = await fetch("/api/app/control", { cache: "no-store" });
       const data = (await res.json()) as {
         ok?: boolean;
+        state?: {
+          arb?: { status?: RuntimeStatus };
+          controls?: { executionAuthority?: ExecutionAuthority; startupCompleted?: boolean };
+          walletProvisioning?: WalletProvisioning;
+        };
         state?: { controls?: { executionAuthority?: ExecutionAuthority }; walletProvisioning?: WalletProvisioning };
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
@@ -265,6 +276,42 @@ export default function JupiterPanel() {
       setWalletRefreshBusy(false);
     }
   }, [loadExecution, walletRefreshBusy]);
+
+  const ensureArbOnStartup = useCallback(async () => {
+    if (arbStartupBusy) return;
+    setArbStartupBusy(true);
+    setArbStartupStatus("");
+    try {
+      const startupRes = await fetch("/api/app/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "startup.completed.set", value: true }),
+      });
+      const startupData = (await startupRes.json()) as { ok?: boolean; error?: string };
+      if (!startupRes.ok || !startupData.ok) {
+        setArbStartupStatus(startupData.error || `Startup save failed (${startupRes.status})`);
+        return;
+      }
+
+      const arbRes = await fetch("/api/app/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "arb.start" }),
+      });
+      const arbData = (await arbRes.json()) as { ok?: boolean; error?: string };
+      if (!arbRes.ok || !arbData.ok) {
+        setArbStartupStatus(arbData.error || `ARB start failed (${arbRes.status})`);
+        return;
+      }
+
+      setArbStartupStatus("ARB startup armed and runtime started");
+      void loadExecution();
+    } catch {
+      setArbStartupStatus("Failed to arm ARB startup");
+    } finally {
+      setArbStartupBusy(false);
+    }
+  }, [arbStartupBusy, loadExecution]);
 
   async function saveExecution(nextExecution: ExecutionAuthority) {
     setExecutionBusy(true);
@@ -467,6 +514,13 @@ export default function JupiterPanel() {
           walletProvisioning={walletProvisioning}
           walletRefreshBusy={walletRefreshBusy}
           walletRefreshStatus={walletRefreshStatus}
+          arbStatus={arbStatus}
+          startupCompleted={startupCompleted}
+          arbStartupBusy={arbStartupBusy}
+          arbStartupStatus={arbStartupStatus}
+          onRefresh={loadExecution}
+          onRefreshWalletMemory={refreshWalletMemory}
+          onEnsureArbOnStartup={ensureArbOnStartup}
           onRefresh={loadExecution}
           onRefreshWalletMemory={refreshWalletMemory}
           onSave={saveExecution}
@@ -714,6 +768,13 @@ function ExecutionControls({
   walletProvisioning,
   walletRefreshBusy,
   walletRefreshStatus,
+  arbStatus,
+  startupCompleted,
+  arbStartupBusy,
+  arbStartupStatus,
+  onRefresh,
+  onRefreshWalletMemory,
+  onEnsureArbOnStartup,
   onRefresh,
   onRefreshWalletMemory,
   onSave,
@@ -724,6 +785,13 @@ function ExecutionControls({
   walletProvisioning: WalletProvisioning | null;
   walletRefreshBusy: boolean;
   walletRefreshStatus: string;
+  arbStatus: RuntimeStatus;
+  startupCompleted: boolean;
+  arbStartupBusy: boolean;
+  arbStartupStatus: string;
+  onRefresh: () => void;
+  onRefreshWalletMemory: () => void;
+  onEnsureArbOnStartup: () => void;
   onRefresh: () => void;
   onRefreshWalletMemory: () => void;
   onSave: (input: ExecutionAuthority) => void;
@@ -745,6 +813,23 @@ function ExecutionControls({
         <p className="text-sm text-white/60">Unable to load execution controls.</p>
       ) : (
         <div className="grid grid-cols-1 gap-2 text-xs">
+          <div className="mb-1 rounded-xl bg-black/30 p-2 text-white/70">
+            <div>
+              ARB runtime: <span className={arbStatus === "running" ? "text-emerald-300" : "text-amber-200"}>{arbStatus}</span>
+            </div>
+            <div className="mt-1">
+              Startup ready: {startupCompleted ? "yes" : "no"}
+            </div>
+            <button
+              type="button"
+              onClick={onEnsureArbOnStartup}
+              disabled={arbStartupBusy}
+              className="mt-2 rounded-lg border border-emerald-300/30 bg-emerald-200/10 px-2 py-1 text-xs disabled:opacity-60"
+            >
+              {arbStartupBusy ? "Arming…" : "Arm ARB for next startup"}
+            </button>
+            {arbStartupStatus ? <p className="mt-1 text-[11px] text-white/60">{arbStartupStatus}</p> : null}
+          </div>
           <label className="text-white/70">Mode</label>
           <select value={mode} onChange={(e) => setMode(e.target.value as ExecutionMode)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1">
             <option value="user_only">User-only mode</option>
