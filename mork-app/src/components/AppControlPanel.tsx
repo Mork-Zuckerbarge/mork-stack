@@ -42,6 +42,15 @@ type AppControlState = {
   };
 };
 
+type UpdateState = {
+  branch: string;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  hasUpdates: boolean;
+  preservedFiles?: string[];
+};
+
 const modelCatalog = [
   { value: "llama3.2:3b", label: "Llama 3.2 3B", description: "Fast, lightweight default for local assistant chats." },
   { value: "llama3.1:8b", label: "Llama 3.1 8B", description: "Balanced quality and speed for planning and coding." },
@@ -57,6 +66,7 @@ const personaModes = {
 
 export default function AppControlPanel() {
   const [state, setState] = useState<AppControlState | null>(null);
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [busy, setBusy] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [sherpaBootstrapMessage, setSherpaBootstrapMessage] = useState("");
@@ -66,6 +76,12 @@ export default function AppControlPanel() {
     const res = await fetch("/api/app/control");
     const data = await res.json();
     if (data?.ok) setState(data.state);
+
+    const updateRes = await fetch("/api/system/update", { cache: "no-store" });
+    const updateData = await updateRes.json();
+    if (updateData?.ok && updateData?.update) {
+      setUpdateState(updateData.update);
+    }
   }
 
   useEffect(() => {
@@ -134,9 +150,41 @@ export default function AppControlPanel() {
     }
   }
 
+  async function runSystemUpdate() {
+    if (busy) return;
+    setBusy(true);
+    setStatusText("");
+    try {
+      const res = await fetch("/api/system/update", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) {
+        setStatusText(data?.error || `Update failed (${res.status})`);
+      } else {
+        setUpdateState(data.update ?? null);
+        setStatusText(data?.message || "System updated");
+      }
+    } catch {
+      setStatusText("Update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="rounded-3xl border border-cyan-300/20 bg-gradient-to-b from-cyan-400/10 to-transparent p-5">
-      <h2 className="mb-1 text-lg font-semibold">System</h2>
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="mb-1 text-lg font-semibold">System</h2>
+        </div>
+        <button
+          onClick={runSystemUpdate}
+          disabled={busy}
+          className="rounded-xl border border-cyan-300/40 bg-cyan-200/10 px-3 py-1.5 text-xs"
+          title="Checks upstream and pulls latest code while restoring wallet/env/credential files."
+        >
+          {busy ? "Updating…" : "Update"}
+        </button>
+      </div>
       <p className="mb-3 text-xs text-white/60">One surface for models, personas, channels, and orchestration controls.</p>
 
       {!state ? (
@@ -152,6 +200,15 @@ export default function AppControlPanel() {
           <div className="grid grid-cols-1 gap-2 rounded-2xl bg-black/35 p-3">
             <InfoLine label="Status" value="ONLINE" ok />
             <InfoLine label="Model" value={state.controls.selectedOllamaModel} />
+            <InfoLine
+              label="Version"
+              value={
+                updateState
+                  ? `${updateState.branch} · ${updateState.behind > 0 ? `${updateState.behind} behind` : "up to date"}`
+                  : "unknown"
+              }
+              ok={updateState ? !updateState.hasUpdates : false}
+            />
             <InfoLine
               label="Memory"
               value={state.controls.memoryEnabled ? "Active" : "Paused"}
