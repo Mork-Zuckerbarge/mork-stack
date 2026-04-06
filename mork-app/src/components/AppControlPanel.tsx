@@ -209,6 +209,15 @@ export default function AppControlPanel() {
             <InfoLine label="Status" value="ONLINE" ok />
             <InfoLine label="Model" value={state.controls.selectedOllamaModel} />
             <InfoLine
+              label="Version"
+              value={
+                updateState
+                  ? `${updateState.branch} · ${updateState.behind > 0 ? `${updateState.behind} behind` : "up to date"}`
+                  : "unknown"
+              }
+              ok={updateState ? !updateState.hasUpdates : false}
+            />
+            <InfoLine
               label="Memory"
               value={state.controls.memoryEnabled ? "Active" : "Paused"}
               ok={state.controls.memoryEnabled}
