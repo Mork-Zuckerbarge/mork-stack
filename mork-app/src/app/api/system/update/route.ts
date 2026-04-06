@@ -59,11 +59,13 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
-async function detectGitState() {
+async function detectGitState({ refreshRemote = true }: { refreshRemote?: boolean } = {}) {
   const topLevel = (await runGit(["rev-parse", "--show-toplevel"])).stdout;
   const branch = (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], topLevel)).stdout;
 
-  await runGit(["fetch", "--all", "--prune"], topLevel);
+  if (refreshRemote) {
+    await runGit(["fetch", "--all", "--prune"], topLevel);
+  }
 
   let upstream = "";
   try {
