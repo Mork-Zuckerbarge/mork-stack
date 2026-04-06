@@ -1888,6 +1888,54 @@ class TwitterBot:
         print(f"\nUpdated rate limit count: {self.rate_limits['tweets']['current_count']}")
         print(f"Remaining in window: {self.rate_limits['tweets']['max_tweets'] - self.rate_limits['tweets']['current_count']}")
 
+    def send_tweet(self, tweet_or_character, topic=None):
+        """
+        Send a tweet using the configured X client.
+        Supports both call styles:
+          - send_tweet(tweet_text)
+          - send_tweet(character_name, topic)  # generates text first
+        """
+        try:
+            if not self.twitter_client:
+                print("❌ Twitter client not initialized.")
+                return False
+
+            if not self.check_rate_limit():
+                return False
+
+            if topic is None:
+                tweet_text = (tweet_or_character or "").strip()
+            else:
+                tweet_text = self.generate_tweet(tweet_or_character, topic) or ""
+                tweet_text = tweet_text.strip()
+
+            if not tweet_text:
+                print("⚠ Empty tweet text; skipping send.")
+                return False
+
+            response = self.twitter_client.create_tweet(text=tweet_text)
+            if not response or not response.data:
+                print("⚠ Tweet send returned no data.")
+                return False
+
+            tweet_id = response.data.get("id")
+            self.last_successful_tweet = datetime.now()
+            self.update_rate_limit()
+
+            if tweet_id:
+                username = (self.credentials.get("twitter_username") or "").lstrip("@")
+                if username:
+                    self.send_to_telegram(f"https://x.com/{username}/status/{tweet_id}")
+
+            print(f"✅ Tweet sent successfully: {tweet_id}")
+            return True
+        except tweepy.TooManyRequests as e:
+            self.handle_rate_limit_error(e)
+            return False
+        except Exception as e:
+            print(f"Error sending tweet: {e}")
+            return False
+
     def send_main_tweet(self):
         """Send a main scheduled tweet."""
         new_story = self.get_new_story("crypto")  # or "ai", depending on your subject
