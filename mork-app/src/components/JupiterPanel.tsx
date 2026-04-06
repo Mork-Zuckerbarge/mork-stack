@@ -62,6 +62,12 @@ type ExecutionAuthority = {
   cooldownMinutes: number;
 };
 
+type WalletProvisioning = {
+  status: "provisioned_existing" | "needs_setup";
+  address: string | null;
+  source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
+};
+
 function TokenLogo({ mint, symbol, logoUri }: { mint: string; symbol: string; logoUri?: string }) {
   const src = logoUri || tokenLogos[mint] || "/globe.svg";
 
@@ -120,6 +126,9 @@ export default function JupiterPanel() {
   const [execution, setExecution] = useState<ExecutionAuthority | null>(null);
   const [executionBusy, setExecutionBusy] = useState(false);
   const [executionStatus, setExecutionStatus] = useState("");
+  const [walletProvisioning, setWalletProvisioning] = useState<WalletProvisioning | null>(null);
+  const [walletRefreshBusy, setWalletRefreshBusy] = useState(false);
+  const [walletRefreshStatus, setWalletRefreshStatus] = useState("");
 
   const selectedInputToken = useMemo(
     () => inputTokenResults.find((token) => token.mint === selectedInputMint) ?? { symbol: shortMint(selectedInputMint), mint: selectedInputMint },
@@ -222,17 +231,40 @@ export default function JupiterPanel() {
       const res = await fetch("/api/app/control", { cache: "no-store" });
       const data = (await res.json()) as {
         ok?: boolean;
-        state?: { controls?: { executionAuthority?: ExecutionAuthority } };
+        state?: { controls?: { executionAuthority?: ExecutionAuthority }; walletProvisioning?: WalletProvisioning };
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
         setExecution(null);
+        setWalletProvisioning(null);
         return;
       }
       setExecution(data.state.controls.executionAuthority);
+      setWalletProvisioning(data.state.walletProvisioning ?? null);
     } catch {
       setExecution(null);
+      setWalletProvisioning(null);
     }
   }, []);
+
+  const refreshWalletMemory = useCallback(async () => {
+    if (walletRefreshBusy) return;
+    setWalletRefreshBusy(true);
+    setWalletRefreshStatus("");
+    try {
+      const res = await fetch("/api/wallet/refresh", { method: "POST" });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setWalletRefreshStatus(data.error || `Wallet refresh failed (${res.status})`);
+      } else {
+        setWalletRefreshStatus("Wallet memory refreshed");
+        void loadExecution();
+      }
+    } catch {
+      setWalletRefreshStatus("Wallet refresh failed");
+    } finally {
+      setWalletRefreshBusy(false);
+    }
+  }, [loadExecution, walletRefreshBusy]);
 
   async function saveExecution(nextExecution: ExecutionAuthority) {
     setExecutionBusy(true);
@@ -432,7 +464,11 @@ export default function JupiterPanel() {
           execution={execution}
           busy={executionBusy}
           status={executionStatus}
+          walletProvisioning={walletProvisioning}
+          walletRefreshBusy={walletRefreshBusy}
+          walletRefreshStatus={walletRefreshStatus}
           onRefresh={loadExecution}
+          onRefreshWalletMemory={refreshWalletMemory}
           onSave={saveExecution}
         />
 
@@ -675,13 +711,21 @@ function ExecutionControls({
   execution,
   busy,
   status,
+  walletProvisioning,
+  walletRefreshBusy,
+  walletRefreshStatus,
   onRefresh,
+  onRefreshWalletMemory,
   onSave,
 }: {
   execution: ExecutionAuthority | null;
   busy: boolean;
   status: string;
+  walletProvisioning: WalletProvisioning | null;
+  walletRefreshBusy: boolean;
+  walletRefreshStatus: string;
   onRefresh: () => void;
+  onRefreshWalletMemory: () => void;
   onSave: (input: ExecutionAuthority) => void;
 }) {
   const [mode, setMode] = useState<ExecutionMode>(execution?.mode ?? "user_only");
@@ -713,6 +757,26 @@ function ExecutionControls({
           <input value={allowlist} onChange={(e) => setAllowlist(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <label className="text-white/70">Cooldown (minutes)</label>
           <input value={cooldownMinutes} onChange={(e) => setCooldownMinutes(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <div className="mt-1 rounded-xl bg-black/30 p-2 text-white/70">
+            <div>
+              Wallet Provisioning: {" "}
+              {walletProvisioning?.status === "provisioned_existing"
+                ? "existing wallet configured"
+                : "needs setup"}
+            </div>
+            <div className="mt-1 break-all">
+              {walletProvisioning?.address || "No wallet configured yet (set MORK_WALLET or MORK_WALLET_SECRET_KEY)."}
+            </div>
+            <button
+              type="button"
+              onClick={onRefreshWalletMemory}
+              disabled={walletRefreshBusy}
+              className="mt-2 rounded-lg border border-cyan-300/30 bg-cyan-200/10 px-2 py-1 text-xs disabled:opacity-60"
+            >
+              Refresh Wallet Memory
+            </button>
+            {walletRefreshStatus ? <p className="mt-1 text-[11px] text-white/60">{walletRefreshStatus}</p> : null}
+          </div>
           <button
             onClick={() =>
               onSave({
