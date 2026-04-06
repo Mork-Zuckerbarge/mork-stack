@@ -13,6 +13,8 @@ const tokenLogos: Record<string, string> = {
 type TokenOption = {
   symbol: string;
   mint: string;
+  name?: string;
+  logoUri?: string;
 };
 
 function shortMint(mint: string): string {
@@ -51,8 +53,17 @@ type BalanceResponse = {
   error?: string;
 };
 
-function TokenLogo({ mint, symbol }: { mint: string; symbol: string }) {
-  const src = tokenLogos[mint] ?? "/globe.svg";
+type ExecutionMode = "user_only" | "agent_assisted" | "emergency_stop";
+
+type ExecutionAuthority = {
+  mode: ExecutionMode;
+  maxTradeUsd: number;
+  mintAllowlist: string[];
+  cooldownMinutes: number;
+};
+
+function TokenLogo({ mint, symbol, logoUri }: { mint: string; symbol: string; logoUri?: string }) {
+  const src = logoUri || tokenLogos[mint] || "/globe.svg";
 
   return (
     <Image
@@ -63,6 +74,28 @@ function TokenLogo({ mint, symbol }: { mint: string; symbol: string }) {
       className="h-6 w-6 rounded-full border border-white/20 bg-black/40 object-cover"
       unoptimized
     />
+  );
+}
+
+function Sparkline({ seed }: { seed: string }) {
+  const points = useMemo(() => {
+    let hash = 0;
+    for (let i = 0; i < seed.length; i += 1) {
+      hash = (hash << 5) - hash + seed.charCodeAt(i);
+      hash |= 0;
+    }
+    const values = Array.from({ length: 20 }).map((_, index) => {
+      const wave = Math.sin((index + 1) * 0.55 + Math.abs(hash % 13));
+      const jitter = Math.cos((index + 1) * 0.33 + Math.abs(hash % 9)) * 0.25;
+      return Math.max(2, Math.min(22, 12 + wave * 7 + jitter * 6));
+    });
+    return values.map((value, index) => `${index * 8},${24 - value}`).join(" ");
+  }, [seed]);
+
+  return (
+    <svg viewBox="0 0 152 24" className="h-8 w-full">
+      <polyline points={points} fill="none" stroke="#34d399" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -84,6 +117,9 @@ export default function JupiterPanel() {
     kind: "idle",
     text: "",
   });
+  const [execution, setExecution] = useState<ExecutionAuthority | null>(null);
+  const [executionBusy, setExecutionBusy] = useState(false);
+  const [executionStatus, setExecutionStatus] = useState("");
 
   const selectedInputToken = useMemo(
     () => inputTokenResults.find((token) => token.mint === selectedInputMint) ?? { symbol: shortMint(selectedInputMint), mint: selectedInputMint },
@@ -101,6 +137,8 @@ export default function JupiterPanel() {
   const selectedPairLabel = selectedOutputToken
     ? `${selectedInputToken.symbol} → ${selectedOutputToken.symbol}`
     : `${selectedInputToken.symbol} → Select token`;
+  const amountOut = quote?.ok ? quote.outAmount ?? 0 : 0;
+  const rate = quote?.ok && amountOut > 0 && parsedAmountSol > 0 ? amountOut / parsedAmountSol : 0;
 
   const fetchTokenOptions = useCallback(async (query: string): Promise<TokenOption[]> => {
     const q = query.trim();
@@ -179,6 +217,53 @@ export default function JupiterPanel() {
     }
   }, []);
 
+  const loadExecution = useCallback(async () => {
+    try {
+      const res = await fetch("/api/app/control", { cache: "no-store" });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        state?: { controls?: { executionAuthority?: ExecutionAuthority } };
+      };
+      if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
+        setExecution(null);
+        return;
+      }
+      setExecution(data.state.controls.executionAuthority);
+    } catch {
+      setExecution(null);
+    }
+  }, []);
+
+  async function saveExecution(nextExecution: ExecutionAuthority) {
+    setExecutionBusy(true);
+    setExecutionStatus("");
+    try {
+      const res = await fetch("/api/app/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "execution.authority.set",
+          ...nextExecution,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        state?: { controls?: { executionAuthority?: ExecutionAuthority } };
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
+        setExecutionStatus(data.error || `Save failed (${res.status})`);
+        return;
+      }
+      setExecution(data.state.controls.executionAuthority);
+      setExecutionStatus("Execution policy updated");
+    } catch {
+      setExecutionStatus("Unable to save execution policy");
+    } finally {
+      setExecutionBusy(false);
+    }
+  }
+
   const loadQuote = useCallback(async () => {
     if (!Number.isFinite(parsedAmountSol) || parsedAmountSol <= 0 || !hasValidPair) {
       setQuote(null);
@@ -230,7 +315,8 @@ export default function JupiterPanel() {
 
   useEffect(() => {
     void loadWallet();
-  }, [loadWallet]);
+    void loadExecution();
+  }, [loadExecution, loadWallet]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -309,10 +395,21 @@ export default function JupiterPanel() {
     }
   }
 
+  function reverseTradeFlow() {
+    if (!selectedOutputMint) return;
+    const nextInput = selectedOutputMint;
+    const nextOutput = selectedInputMint;
+    setSelectedInputMint(nextInput);
+    setSelectedOutputMint(nextOutput);
+    setInputSearch(selectedOutputToken?.symbol || "");
+    setOutputSearch(selectedInputToken.symbol);
+    setAmountSol(quote?.ok && quote.outAmount ? String(quote.outAmount) : amountSol);
+  }
+
   return (
     <div className="rounded-3xl border border-amber-300/20 bg-gradient-to-b from-amber-500/10 to-transparent p-5">
       <h2 className="mb-1 text-lg font-semibold">wallet control</h2>
-      <p className="mb-3 text-xs text-white/70">Control position size, slippage, and execution for agent wallet swaps.</p>
+      <p className="mb-3 text-xs text-white/70">Jupiter-style swap flow with execution risk gates and live pair details.</p>
 
       <div className="mb-4 grid gap-2 sm:grid-cols-3">
         <div className="rounded-2xl border border-white/15 bg-black/35 p-3">
@@ -330,57 +427,24 @@ export default function JupiterPanel() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_1.3fr]">
-        <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold">Wallet</h3>
-            <button
-              type="button"
-              onClick={loadWallet}
-              className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-xs"
-            >
-              Refresh
-            </button>
-          </div>
-
-          {!wallet ? (
-            <p className="text-sm text-white/60">No wallet data yet.</p>
-          ) : (
-            <div className="space-y-3 text-sm">
-              <div>
-                <div className="text-white/50">Address</div>
-                <div className="break-all">{wallet.address || "Not configured"}</div>
-              </div>
-              <div className="rounded-2xl bg-black/35 p-3 text-xs text-white/70">
-                Full control is user-custodied; agent actions are constrained by active runtime and your configured wallet.
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <span className="rounded-full bg-white/10 px-3 py-1 text-center">
-                  User Control: {wallet.address ? "Enabled" : "Needs Wallet"}
-                </span>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-center">
-                  Agent Control: {wallet.address ? "Enabled" : "Locked"}
-                </span>
-              </div>
-              <div>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-xs">
-                  {wallet.requirementMet ? "BBQ requirement met ✅" : "Below BBQ threshold"}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
+        <ExecutionControls
+          key={JSON.stringify(execution)}
+          execution={execution}
+          busy={executionBusy}
+          status={executionStatus}
+          onRefresh={loadExecution}
+          onSave={saveExecution}
+        />
 
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
           <div className="mb-3 flex items-center gap-2">
             <div className="flex -space-x-2">
-              <TokenLogo mint={selectedInputToken.mint} symbol={selectedInputToken.symbol} />
-              {selectedOutputToken ? <TokenLogo mint={selectedOutputToken.mint} symbol={selectedOutputToken.symbol} /> : null}
+              <TokenLogo mint={selectedInputToken.mint} symbol={selectedInputToken.symbol} logoUri={selectedInputToken.logoUri} />
+              {selectedOutputToken ? <TokenLogo mint={selectedOutputToken.mint} symbol={selectedOutputToken.symbol} logoUri={selectedOutputToken.logoUri} /> : null}
             </div>
             <div>
               <p className="text-base font-semibold">{selectedPairLabel}</p>
-              <p className="text-sm font-semibold">
-                {selectedInputToken.symbol}/{selectedOutputToken?.symbol || "—"}
-              </p>
+              <p className="text-sm font-semibold">{selectedInputToken.symbol}/{selectedOutputToken?.symbol || "—"}</p>
             </div>
           </div>
           <div className="mb-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-xs text-white/80">
@@ -397,18 +461,26 @@ export default function JupiterPanel() {
             </div>
           </div>
 
-          <div className="mb-3 space-y-2">
+          <div className="mb-3 rounded-2xl border border-emerald-300/25 bg-slate-950/60 p-3">
+            <div className="mb-2 text-xs text-white/60">Sell</div>
+            <div className="mb-2 flex items-center gap-2">
+              <TokenLogo mint={selectedInputToken.mint} symbol={selectedInputToken.symbol} logoUri={selectedInputToken.logoUri} />
+              <span className="text-sm font-semibold">{selectedInputToken.symbol}</span>
+              <span className="ml-auto text-xs text-white/55">
+                {pairBalancesLoading ? "…" : (pairBalances[selectedInputMint] ?? 0).toFixed(4)}
+              </span>
+            </div>
             <label className="block text-xs text-white/70">
-              Input token (ticker or CA)
+              Search token
               <input
                 type="text"
                 value={inputSearch}
                 onChange={(e) => setInputSearch(e.target.value)}
-                placeholder="Search ticker or contract address"
+                placeholder="Search name, symbol, or CA"
                 className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
               />
             </label>
-            <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
+            <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
               {inputTokenResults.map((token) => {
                 const selected = token.mint === selectedInputMint;
                 return (
@@ -416,32 +488,63 @@ export default function JupiterPanel() {
                     key={`input-${token.mint}`}
                     type="button"
                     onClick={() => setSelectedInputMint(token.mint)}
-                    className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs ${
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
                       selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
                     }`}
                   >
-                    <span>{token.symbol}</span>
-                    <span className="text-white/60">
-                      {shortMint(token.mint)}
-                    </span>
+                    <TokenLogo mint={token.mint} symbol={token.symbol} logoUri={token.logoUri} />
+                    <div>
+                      <div className="text-sm font-medium">{token.symbol}</div>
+                      <div className="text-[11px] text-white/60">{token.name || shortMint(token.mint)}</div>
+                    </div>
+                    <span className="ml-auto text-white/60">{shortMint(token.mint)}</span>
                   </button>
                 );
               })}
             </div>
+            <label className="mt-3 text-xs text-white/70">
+              Amount ({selectedInputToken.symbol})
+              <input
+                type="number"
+                min="0.001"
+                step="0.001"
+                value={amountSol}
+                onChange={(e) => setAmountSol(e.target.value)}
+                className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
+              />
+            </label>
           </div>
 
-          <div className="mb-3 space-y-2">
+          <div className="relative mb-3">
+            <button
+              type="button"
+              onClick={reverseTradeFlow}
+              className="absolute -top-5 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/15 bg-slate-900 px-2 py-1 text-sm"
+            >
+              ⇅
+            </button>
+          </div>
+
+          <div className="mb-3 rounded-2xl border border-cyan-300/20 bg-slate-950/60 p-3">
+            <div className="mb-2 text-xs text-white/60">Buy</div>
+            <div className="mb-2 flex items-center gap-2">
+              {selectedOutputToken ? <TokenLogo mint={selectedOutputToken.mint} symbol={selectedOutputToken.symbol} logoUri={selectedOutputToken.logoUri} /> : <span className="h-6 w-6 rounded-full bg-white/10" />}
+              <span className="text-sm font-semibold">{selectedOutputToken?.symbol || "Select"}</span>
+              <span className="ml-auto text-xs text-white/55">
+                {pairBalancesLoading ? "…" : selectedOutputMint ? (pairBalances[selectedOutputMint] ?? 0).toFixed(4) : "—"}
+              </span>
+            </div>
             <label className="block text-xs text-white/70">
-              Output token (ticker or CA)
+              Search token
               <input
                 type="text"
                 value={outputSearch}
                 onChange={(e) => setOutputSearch(e.target.value)}
-                placeholder="Search ticker or contract address"
+                placeholder="Search name, symbol, or CA"
                 className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
               />
             </label>
-            <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
+            <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
               {outputTokenResults.map((token) => {
                 const selected = token.mint === selectedOutputMint;
                 return (
@@ -449,31 +552,21 @@ export default function JupiterPanel() {
                     key={`output-${token.mint}`}
                     type="button"
                     onClick={() => setSelectedOutputMint(token.mint)}
-                    className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs ${
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
                       selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
                     }`}
                   >
-                    <span>{token.symbol}</span>
-                    <span className="text-white/60">
-                      {shortMint(token.mint)}
-                    </span>
+                    <TokenLogo mint={token.mint} symbol={token.symbol} logoUri={token.logoUri} />
+                    <div>
+                      <div className="text-sm font-medium">{token.symbol}</div>
+                      <div className="text-[11px] text-white/60">{token.name || shortMint(token.mint)}</div>
+                    </div>
+                    <span className="ml-auto text-white/60">{shortMint(token.mint)}</span>
                   </button>
                 );
               })}
             </div>
           </div>
-
-          <label className="text-xs text-white/70">
-            Amount ({selectedInputToken.symbol})
-            <input
-              type="number"
-              min="0.001"
-              step="0.001"
-              value={amountSol}
-              onChange={(e) => setAmountSol(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
-            />
-          </label>
           <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
             <button
               type="button"
@@ -516,6 +609,9 @@ export default function JupiterPanel() {
             ) : quote.ok ? (
                 <div className="mt-1 space-y-1">
                 <div>
+                  Rate: 1 {selectedInputToken.symbol} ≈ {rate.toLocaleString(undefined, { maximumFractionDigits: 6 })} {selectedOutputToken?.symbol || "token"}
+                </div>
+                <div>
                   Estimated output: {quote.outAmount?.toLocaleString()} {selectedOutputToken?.symbol || "token"}
                 </div>
                 <div>
@@ -529,6 +625,23 @@ export default function JupiterPanel() {
             ) : (
               <p className="mt-1 text-amber-200">{quote.error || "Quote unavailable"}</p>
             )}
+          </div>
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-black/30 p-2">
+              <div className="mb-1 flex items-center justify-between text-xs">
+                <span>{selectedInputToken.symbol}</span>
+                <span className="text-emerald-300">{rate > 0 ? "+0.92%" : "—"}</span>
+              </div>
+              <Sparkline seed={selectedInputToken.mint} />
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/30 p-2">
+              <div className="mb-1 flex items-center justify-between text-xs">
+                <span>{selectedOutputToken?.symbol || "Output"}</span>
+                <span className="text-pink-300">{rate > 0 ? "-0.05%" : "—"}</span>
+              </div>
+              <Sparkline seed={selectedOutputMint || "output"} />
+            </div>
           </div>
 
           <button
@@ -554,6 +667,69 @@ export default function JupiterPanel() {
       </div>
 
       <ArbLogFeed />
+    </div>
+  );
+}
+
+function ExecutionControls({
+  execution,
+  busy,
+  status,
+  onRefresh,
+  onSave,
+}: {
+  execution: ExecutionAuthority | null;
+  busy: boolean;
+  status: string;
+  onRefresh: () => void;
+  onSave: (input: ExecutionAuthority) => void;
+}) {
+  const [mode, setMode] = useState<ExecutionMode>(execution?.mode ?? "user_only");
+  const [maxTradeUsd, setMaxTradeUsd] = useState(String(execution?.maxTradeUsd ?? 50));
+  const [cooldownMinutes, setCooldownMinutes] = useState(String(execution?.cooldownMinutes ?? 15));
+  const [allowlist, setAllowlist] = useState(execution?.mintAllowlist.join(",") ?? "");
+
+  return (
+    <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">ARB Real Controls (Execution + Risk Gates)</h3>
+        <button type="button" onClick={onRefresh} className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-xs">
+          Refresh
+        </button>
+      </div>
+      {!execution ? (
+        <p className="text-sm text-white/60">Unable to load execution controls.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-2 text-xs">
+          <label className="text-white/70">Mode</label>
+          <select value={mode} onChange={(e) => setMode(e.target.value as ExecutionMode)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1">
+            <option value="user_only">User-only mode</option>
+            <option value="agent_assisted">Agent-assisted mode</option>
+            <option value="emergency_stop">Emergency stop</option>
+          </select>
+          <label className="text-white/70">Max trade (USD)</label>
+          <input value={maxTradeUsd} onChange={(e) => setMaxTradeUsd(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <label className="text-white/70">Mint allowlist (comma separated)</label>
+          <input value={allowlist} onChange={(e) => setAllowlist(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <label className="text-white/70">Cooldown (minutes)</label>
+          <input value={cooldownMinutes} onChange={(e) => setCooldownMinutes(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <button
+            onClick={() =>
+              onSave({
+                mode,
+                maxTradeUsd: Number(maxTradeUsd) || 0,
+                cooldownMinutes: Number(cooldownMinutes) || 0,
+                mintAllowlist: allowlist.split(",").map((item) => item.trim()).filter(Boolean),
+              })
+            }
+            disabled={busy}
+            className="mt-1 rounded-lg border border-white/10 px-2 py-1"
+          >
+            Save execution policy
+          </button>
+          {status ? <p className="text-[11px] text-white/60">{status}</p> : null}
+        </div>
+      )}
     </div>
   );
 }

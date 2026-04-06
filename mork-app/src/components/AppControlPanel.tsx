@@ -137,7 +137,7 @@ export default function AppControlPanel() {
   return (
     <div className="rounded-3xl border border-cyan-300/20 bg-gradient-to-b from-cyan-400/10 to-transparent p-5">
       <h2 className="mb-1 text-lg font-semibold">System</h2>
-      <p className="mb-3 text-xs text-white/60">One surface for models, personas, channels, and execution authority.</p>
+      <p className="mb-3 text-xs text-white/60">One surface for models, personas, channels, and orchestration controls.</p>
 
       {!state ? (
         <p className="text-sm text-white/60">Unable to load app controls.</p>
@@ -263,15 +263,6 @@ export default function AppControlPanel() {
             onSave={(input) => act("response.params.set", input)}
           />
 
-          <ExecutionAuthorityEditor
-            key={JSON.stringify(state.controls.executionAuthority)}
-            state={state}
-            busy={busy}
-            onSave={({ mode, maxTradeUsd, cooldownMinutes, mintAllowlist }) =>
-              act("execution.authority.set", { mode, maxTradeUsd, cooldownMinutes, mintAllowlist })
-            }
-          />
-
           <div className="rounded-2xl bg-black/30 p-3 text-xs text-white/70">
             <div>
               Wallet Provisioning: {" "}
@@ -348,98 +339,6 @@ function PersonaEditor({
       >
         Save guidelines
       </button>
-    </div>
-  );
-}
-
-function ExecutionAuthorityEditor({
-  state,
-  busy,
-  onSave,
-}: {
-  state: AppControlState;
-  busy: boolean;
-  onSave: (input: {
-    mode: ExecutionMode;
-    maxTradeUsd: number;
-    cooldownMinutes: number;
-    mintAllowlist: string[];
-  }) => void;
-}) {
-  const [mode, setMode] = useState<ExecutionMode>(state.controls.executionAuthority.mode);
-  const [maxTradeUsd, setMaxTradeUsd] = useState(String(state.controls.executionAuthority.maxTradeUsd));
-  const [cooldownMinutes, setCooldownMinutes] = useState(String(state.controls.executionAuthority.cooldownMinutes));
-  const [allowlist, setAllowlist] = useState(state.controls.executionAuthority.mintAllowlist.join(","));
-
-  return (
-    <div className="rounded-2xl bg-black/35 p-3">
-      <div className="mb-2 text-xs uppercase tracking-wide text-white/60">ARB Real Controls (Execution + Risk Gates)</div>
-      <div className="grid grid-cols-1 gap-2">
-        <label className="text-xs text-white/70">Mode</label>
-        <select
-          value={mode}
-          onChange={(e) => setMode(e.target.value as ExecutionMode)}
-          className="rounded-lg border border-white/10 bg-black/40 px-2 py-1"
-        >
-          <option value="user_only">User-only mode</option>
-          <option value="agent_assisted">Agent-assisted mode</option>
-          <option value="emergency_stop">Emergency stop</option>
-        </select>
-        <label className="text-xs text-white/70">Max trade (USD)</label>
-        <input value={maxTradeUsd} onChange={(e) => setMaxTradeUsd(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
-        <label className="text-xs text-white/70">Mint allowlist (comma separated)</label>
-        <input value={allowlist} onChange={(e) => setAllowlist(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
-        <label className="text-xs text-white/70">Cooldown (minutes)</label>
-        <input value={cooldownMinutes} onChange={(e) => setCooldownMinutes(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setMode("user_only");
-              setMaxTradeUsd("50");
-              setCooldownMinutes("15");
-            }}
-            className="rounded-lg border border-white/10 px-2 py-1 text-xs"
-          >
-            Safe preset
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode("agent_assisted");
-              setMaxTradeUsd("100");
-              setCooldownMinutes("10");
-            }}
-            className="rounded-lg border border-white/10 px-2 py-1 text-xs"
-          >
-            Active preset
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode("emergency_stop");
-              setMaxTradeUsd("0");
-            }}
-            className="rounded-lg border border-red-300/40 px-2 py-1 text-xs text-red-100"
-          >
-            Halt preset
-          </button>
-        </div>
-        <button
-          onClick={() =>
-            onSave({
-              mode,
-              maxTradeUsd: Number(maxTradeUsd) || 0,
-              cooldownMinutes: Number(cooldownMinutes) || 0,
-              mintAllowlist: allowlist.split(",").map((item) => item.trim()).filter(Boolean),
-            })
-          }
-          disabled={busy}
-          className="rounded-lg border border-white/10 px-2 py-1"
-        >
-          Save execution policy
-        </button>
-      </div>
     </div>
   );
 }

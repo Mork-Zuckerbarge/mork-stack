@@ -8,6 +8,8 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 type JupiterToken = {
   address?: string;
   symbol?: string;
+  name?: string;
+  logoURI?: string;
 };
 
 export async function GET(req: Request) {
@@ -41,6 +43,8 @@ export async function GET(req: Request) {
       .map((token) => ({
         symbol: token.symbol?.trim() || `${token.address!.slice(0, 4)}…${token.address!.slice(-4)}`,
         mint: token.address!,
+        name: token.name?.trim() || "",
+        logoUri: token.logoURI || "",
       }));
 
     return NextResponse.json({ ok: true, tokens });
