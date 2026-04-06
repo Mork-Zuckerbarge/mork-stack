@@ -242,6 +242,7 @@ export default function JupiterPanel() {
           controls?: { executionAuthority?: ExecutionAuthority; startupCompleted?: boolean };
           walletProvisioning?: WalletProvisioning;
         };
+        state?: { controls?: { executionAuthority?: ExecutionAuthority }; walletProvisioning?: WalletProvisioning };
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
         setExecution(null);
@@ -249,8 +250,6 @@ export default function JupiterPanel() {
         return;
       }
       setExecution(data.state.controls.executionAuthority);
-      setArbStatus(data.state.arb?.status === "running" ? "running" : "stopped");
-      setStartupCompleted(Boolean(data.state.controls.startupCompleted));
       setWalletProvisioning(data.state.walletProvisioning ?? null);
     } catch {
       setExecution(null);
@@ -522,6 +521,8 @@ export default function JupiterPanel() {
           onRefresh={loadExecution}
           onRefreshWalletMemory={refreshWalletMemory}
           onEnsureArbOnStartup={ensureArbOnStartup}
+          onRefresh={loadExecution}
+          onRefreshWalletMemory={refreshWalletMemory}
           onSave={saveExecution}
         />
 
@@ -774,6 +775,8 @@ function ExecutionControls({
   onRefresh,
   onRefreshWalletMemory,
   onEnsureArbOnStartup,
+  onRefresh,
+  onRefreshWalletMemory,
   onSave,
 }: {
   execution: ExecutionAuthority | null;
@@ -789,6 +792,8 @@ function ExecutionControls({
   onRefresh: () => void;
   onRefreshWalletMemory: () => void;
   onEnsureArbOnStartup: () => void;
+  onRefresh: () => void;
+  onRefreshWalletMemory: () => void;
   onSave: (input: ExecutionAuthority) => void;
 }) {
   const [mode, setMode] = useState<ExecutionMode>(execution?.mode ?? "user_only");
