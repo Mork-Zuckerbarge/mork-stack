@@ -20,6 +20,12 @@ type ExecResult = {
   code: number;
 };
 
+const GIT_ENV = {
+  ...process.env,
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "Never",
+};
+
 function runGit(args: string[], cwd?: string): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -27,22 +33,18 @@ function runGit(args: string[], cwd?: string): Promise<ExecResult> {
       args,
       {
         cwd,
-        env: {
-          ...process.env,
-          GIT_TERMINAL_PROMPT: "0",
-          GCM_INTERACTIVE: "Never",
-        },
+        env: GIT_ENV,
         timeout: 30000,
       },
       (error, stdout, stderr) => {
-      if (error) {
-        const code = typeof (error as NodeJS.ErrnoException & { code?: number }).code === "number"
-          ? (error as NodeJS.ErrnoException & { code: number }).code
-          : 1;
-        reject(new Error(`git ${args.join(" ")} failed (${code}): ${stderr || stdout}`));
-        return;
-      }
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: 0 });
+        if (error) {
+          const code = typeof (error as NodeJS.ErrnoException & { code?: number }).code === "number"
+            ? (error as NodeJS.ErrnoException & { code: number }).code
+            : 1;
+          reject(new Error(`git ${args.join(" ")} failed (${code}): ${stderr || stdout}`));
+          return;
+        }
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: 0 });
       },
     );
   });
@@ -57,7 +59,11 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
-async function detectGitState({ refreshRemote }: { refreshRemote: boolean }) {
+type GitStateOptions = {
+  refreshRemote: boolean;
+};
+
+async function detectGitState({ refreshRemote }: GitStateOptions) {
   const topLevel = (await runGit(["rev-parse", "--show-toplevel"])).stdout;
   const branch = (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], topLevel)).stdout;
 
