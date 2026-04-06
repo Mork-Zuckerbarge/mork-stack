@@ -20,18 +20,33 @@ type ExecResult = {
   code: number;
 };
 
+const GIT_ENV = {
+  ...process.env,
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "Never",
+};
+
 function runGit(args: string[], cwd?: string): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd }, (error, stdout, stderr) => {
-      if (error) {
-        const code = typeof (error as NodeJS.ErrnoException & { code?: number }).code === "number"
-          ? (error as NodeJS.ErrnoException & { code: number }).code
-          : 1;
-        reject(new Error(`git ${args.join(" ")} failed (${code}): ${stderr || stdout}`));
-        return;
-      }
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: 0 });
-    });
+    execFile(
+      "git",
+      args,
+      {
+        cwd,
+        env: GIT_ENV,
+        timeout: 30000,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          const code = typeof (error as NodeJS.ErrnoException & { code?: number }).code === "number"
+            ? (error as NodeJS.ErrnoException & { code: number }).code
+            : 1;
+          reject(new Error(`git ${args.join(" ")} failed (${code}): ${stderr || stdout}`));
+          return;
+        }
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: 0 });
+      },
+    );
   });
 }
 
@@ -99,7 +114,7 @@ async function restorePreservedFiles(repoRoot: string, backupRoot: string, copie
 
 export async function GET() {
   try {
-    const state = await detectGitState();
+    const state = await detectGitState({ refreshRemote: false });
     return NextResponse.json({
       ok: true,
       update: {
@@ -125,7 +140,7 @@ export async function POST() {
   let copiedFiles: string[] = [];
 
   try {
-    const state = await detectGitState();
+    const state = await detectGitState({ refreshRemote: true });
     repoRoot = state.topLevel;
 
     backupRoot = await mkdtemp(path.join(os.tmpdir(), "mork-update-"));
@@ -134,7 +149,7 @@ export async function POST() {
     const pullResult = await runGit(["pull", "--rebase", "--autostash"], repoRoot);
     await restorePreservedFiles(repoRoot, backupRoot, copiedFiles);
 
-    const after = await detectGitState();
+    const after = await detectGitState({ refreshRemote: false });
     return NextResponse.json({
       ok: true,
       message: after.behind > 0 ? "Update attempted (still behind upstream)." : "Repository updated.",

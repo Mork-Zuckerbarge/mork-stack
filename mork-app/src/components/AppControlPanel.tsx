@@ -77,10 +77,16 @@ export default function AppControlPanel() {
     const data = await res.json();
     if (data?.ok) setState(data.state);
 
-    const updateRes = await fetch("/api/system/update", { cache: "no-store" });
-    const updateData = await updateRes.json();
-    if (updateData?.ok && updateData?.update) {
-      setUpdateState(updateData.update);
+    try {
+      const updateRes = await fetch("/api/system/update", { cache: "no-store" });
+      const updateData = await updateRes.json();
+      if (updateData?.ok && updateData?.update) {
+        setUpdateState(updateData.update);
+      } else {
+        setUpdateState(null);
+      }
+    } catch {
+      setUpdateState(null);
     }
   }
 
@@ -176,14 +182,16 @@ export default function AppControlPanel() {
         <div>
           <h2 className="mb-1 text-lg font-semibold">System</h2>
         </div>
-        <button
-          onClick={runSystemUpdate}
-          disabled={busy}
-          className="rounded-xl border border-cyan-300/40 bg-cyan-200/10 px-3 py-1.5 text-xs"
-          title="Checks upstream and pulls latest code while restoring wallet/env/credential files."
-        >
-          {busy ? "Updating…" : "Update"}
-        </button>
+        {updateState?.hasUpdates ? (
+          <button
+            onClick={runSystemUpdate}
+            disabled={busy}
+            className="rounded-xl border border-cyan-300/40 bg-cyan-200/10 px-3 py-1.5 text-xs"
+            title="Pull latest code while restoring wallet/env/credential files."
+          >
+            {busy ? "Updating…" : "Update"}
+          </button>
+        ) : null}
       </div>
       <p className="mb-3 text-xs text-white/60">One surface for models, personas, channels, and orchestration controls.</p>
 
