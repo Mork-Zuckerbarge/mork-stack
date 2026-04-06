@@ -245,13 +245,19 @@ export default function JupiterPanel() {
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
         setExecution(null);
+        setArbStatus("stopped");
+        setStartupCompleted(false);
         setWalletProvisioning(null);
         return;
       }
       setExecution(data.state.controls.executionAuthority);
+      setArbStatus(data.state.arb?.status === "running" ? "running" : "stopped");
+      setStartupCompleted(Boolean(data.state.controls.startupCompleted));
       setWalletProvisioning(data.state.walletProvisioning ?? null);
     } catch {
       setExecution(null);
+      setArbStatus("stopped");
+      setStartupCompleted(false);
       setWalletProvisioning(null);
     }
   }, []);
