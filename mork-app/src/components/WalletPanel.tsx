@@ -71,10 +71,10 @@ export default function WalletPanel() {
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <span className="rounded-full bg-white/10 px-3 py-1 text-center">
+            <span className="rounded-full bg-white/10 px-3 py-1 text-left">
               User Control: {wallet.address ? "Enabled" : "Needs Wallet"}
             </span>
-            <span className="rounded-full bg-white/10 px-3 py-1 text-center">
+            <span className="rounded-full bg-white/10 px-3 py-1 text-left">
               Agent Control: {wallet.address ? "Enabled" : "Locked"}
             </span>
           </div>

@@ -20,13 +20,13 @@ export default function HomePage() {
         <section className="lg:col-span-2 space-y-6">
           <ChatPanel />
           <JupiterPanel />
+          <WalletPanel />
           <SherpaPanel />
         </section>
 
         <section className="space-y-6">
           <AppControlPanel />
           <AgentStatusCard />
-          <WalletPanel />
           <PreflightStatusCard />
         </section>
       </div>

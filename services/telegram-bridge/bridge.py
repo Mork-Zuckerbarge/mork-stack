@@ -1,5 +1,5 @@
-import os, time, json, tempfile, subprocess
-import random
+import os
+import time
 import tempfile
 import subprocess
 import requests
@@ -9,17 +9,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-CORE_URL   = os.getenv("MORK_CORE_URL", "http://127.0.0.1:8790").strip().rstrip("/")
+CORE_URL = os.getenv("MORK_CORE_URL", "http://127.0.0.1:8790").strip().rstrip("/")
+CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/chat/respond").strip() or "/chat/respond"
 REPLY_MODE = os.getenv("REPLY_MODE", "mentions").strip().lower()  # mentions | all | dm
-COOLDOWN   = int(os.getenv("COOLDOWN_SECONDS", "20"))
+COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "20"))
 MAX_PER_10 = int(os.getenv("MAX_PER_10_MIN", "12"))
 
 # ElevenLabs (optional)
-ELEVENLABS_API_KEY  = os.getenv("ELEVENLABS_API_KEY", "").strip()
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2").strip()
-VOICE_DEFAULT_ON    = os.getenv("VOICE_DEFAULT_ON", "0").strip().lower() in ("1", "true", "yes", "on")
-VOICE_MAX_CHARS     = int(os.getenv("VOICE_MAX_CHARS", "700"))
+VOICE_DEFAULT_ON = os.getenv("VOICE_DEFAULT_ON", "0").strip().lower() in ("1", "true", "yes", "on")
+VOICE_MAX_CHARS = int(os.getenv("VOICE_MAX_CHARS", "700"))
 
 if not BOT_TOKEN:
     raise SystemExit("Missing TELEGRAM_BOT_TOKEN in .env")
@@ -27,11 +28,12 @@ if not BOT_TOKEN:
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 # Simple spam controls
-last_reply_ts = defaultdict(lambda: 0.0)            # per-user cooldown
-recent_hits = defaultdict(lambda: deque(maxlen=120)) # per-user rate window
+last_reply_ts = defaultdict(lambda: 0.0)  # per-user cooldown
+recent_hits = defaultdict(lambda: deque(maxlen=120))  # per-user rate window
 
 # Optional per-user voice toggle (in-memory; resets on restart)
 voice_enabled = defaultdict(lambda: VOICE_DEFAULT_ON)
+
 
 def within_rate_limit(user_id: int) -> bool:
     now = time.time()
@@ -42,10 +44,12 @@ def within_rate_limit(user_id: int) -> bool:
         dq.popleft()
     return len(dq) <= MAX_PER_10
 
+
 def is_reply_to_bot(msg: dict, bot_id: int) -> bool:
     rt = msg.get("reply_to_message") or {}
     frm = rt.get("from") or {}
     return bool(frm) and frm.get("is_bot") and frm.get("id") == bot_id
+
 
 def should_reply(msg: dict, bot_username: str, bot_id: int) -> bool:
     chat = msg.get("chat", {})
@@ -76,20 +80,37 @@ def should_reply(msg: dict, bot_username: str, bot_id: int) -> bool:
 
     return False
 
+
+def post_to_chat_endpoint(path: str, payload: dict) -> dict:
+    url = f"{CORE_URL}{path}"
+    response = requests.post(url, json=payload, timeout=20)
+    response.raise_for_status()
+    return response.json()
+
+
 def core_reply(handle: str, message: str) -> str:
     payload = {
-        "channel": "system",  # core currently validates channel enum; "telegram" isn't allowed in your core schema
+        "channel": "telegram",
         "handle": handle,
         "message": message,
         "maxChars": 900,
     }
-    r = requests.post(f"{CORE_URL}/chat/respond", json=payload, timeout=20)
-    r.raise_for_status()
-    j = r.json()
+
+    try:
+        j = post_to_chat_endpoint(CHAT_ENDPOINT, payload)
+    except Exception as primary_error:
+        # Compatibility path if bridge points to mork-app instead of mork-core.
+        try:
+            j = post_to_chat_endpoint("/api/chat/respond", payload)
+        except Exception as fallback_error:
+            raise RuntimeError(
+                f"chat upstream failed: primary={primary_error!r}; fallback={fallback_error!r}"
+            ) from fallback_error
+
     if not j.get("ok"):
         return "My thoughts failed to compile. Try again in a moment."
-    # core uses { reply: "..."} in your current server code, but accept older key too
     return (j.get("reply") or j.get("response") or "").strip() or "…"
+
 
 def send_message(chat_id: int, text: str, reply_to: int | None = None):
     data = {"chat_id": chat_id, "text": text}
@@ -97,6 +118,7 @@ def send_message(chat_id: int, text: str, reply_to: int | None = None):
         data["reply_to_message_id"] = reply_to
         data["allow_sending_without_reply"] = True
     requests.post(f"{API}/sendMessage", data=data, timeout=20)
+
 
 def elevenlabs_tts_mp3_bytes(text: str) -> bytes:
     if not (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID):
@@ -122,6 +144,7 @@ def elevenlabs_tts_mp3_bytes(text: str) -> bytes:
     r.raise_for_status()
     return r.content
 
+
 def ffmpeg_available() -> bool:
     try:
         p = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
@@ -129,21 +152,28 @@ def ffmpeg_available() -> bool:
     except Exception:
         return False
 
+
 def mp3_to_ogg_opus(mp3_path: str, ogg_path: str):
     # Telegram voice notes are happiest as OGG/OPUS
     cmd = [
         "ffmpeg",
         "-y",
-        "-i", mp3_path,
-        "-c:a", "libopus",
-        "-b:a", "32k",
-        "-vbr", "on",
-        "-compression_level", "10",
+        "-i",
+        mp3_path,
+        "-c:a",
+        "libopus",
+        "-b:a",
+        "32k",
+        "-vbr",
+        "on",
+        "-compression_level",
+        "10",
         ogg_path,
     ]
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {p.stderr[-400:]}")
+
 
 def send_voice(chat_id: int, text: str, reply_to: int | None = None):
     # Keep voice short-ish so it doesn't become a 2 minute monologue
@@ -181,16 +211,20 @@ def send_voice(chat_id: int, text: str, reply_to: int | None = None):
                 files = {"audio": af}
                 requests.post(f"{API}/sendAudio", data=data, files=files, timeout=40)
 
+
 def get_me():
     r = requests.get(f"{API}/getMe", timeout=20)
     r.raise_for_status()
     return r.json()["result"]
 
+
 def main():
     me = get_me()
     bot_username = me.get("username", "") or ""
     bot_id = int(me.get("id"))
-    print(f"[bridge] bot=@{bot_username} id={bot_id} core={CORE_URL} mode={REPLY_MODE}")
+    print(
+        f"[bridge] bot=@{bot_username} id={bot_id} core={CORE_URL} endpoint={CHAT_ENDPOINT} mode={REPLY_MODE}"
+    )
     if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
         print("[bridge] ElevenLabs: enabled (voice replies available)")
     else:
@@ -212,7 +246,6 @@ def main():
 
                 chat = msg.get("chat", {})
                 chat_id = chat.get("id")
-                chat_type = chat.get("type", "")
                 from_user = msg.get("from", {})
                 user_id = int(from_user.get("id") or 0)
                 handle = from_user.get("username") or from_user.get("first_name") or "user"
@@ -229,7 +262,7 @@ def main():
                 if text.lower().startswith("/voice"):
                     parts = text.lower().split()
                     if len(parts) >= 2 and parts[1] in ("on", "off"):
-                        voice_enabled[user_id] = (parts[1] == "on")
+                        voice_enabled[user_id] = parts[1] == "on"
                         send_message(chat_id, f"Voice replies: {'ON' if voice_enabled[user_id] else 'OFF'}", reply_to=msg.get("message_id"))
                     else:
                         send_message(chat_id, "Usage: /voice on  or  /voice off", reply_to=msg.get("message_id"))
@@ -264,6 +297,7 @@ def main():
         except Exception as e:
             print("[bridge] error:", repr(e))
             time.sleep(2)
+
 
 if __name__ == "__main__":
     main()
