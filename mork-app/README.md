@@ -1,6 +1,22 @@
 # Mork App
 
-> For fresh-machine Ubuntu bootstrap, use the repo-root guide in [`../README.md`](../README.md).
+## Fresh Ubuntu one-liner (locate + deps + build + launch)
+
+For a brand-new Ubuntu machine, this single command installs system deps, clones the repo, bootstraps the app, builds it, and launches the unified app surface:
+
+```bash
+bash -lc '\nset -euo pipefail; \
+sudo apt-get update; \
+sudo apt-get install -y git curl ca-certificates nodejs npm python3 python3-venv; \
+REPO_DIR="$HOME/mork-stack"; \
+if [ ! -d "$REPO_DIR/.git" ]; then git clone https://github.com/mork-ai/mork-stack.git "$REPO_DIR"; fi; \
+cd "$REPO_DIR"; \
+./setup.sh; \
+(cd mork-app && npm run build); \
+./start.sh\n'
+```
+
+> Note: `./start.sh` runs in the foreground to keep services alive.
 
 ## Quick start (single app command)
 
