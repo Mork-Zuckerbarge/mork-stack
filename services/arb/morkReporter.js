@@ -1,7 +1,8 @@
 const http = require("http");
 const https = require("https");
 const crypto = require("crypto");
-const BASE = (process.env.MORK_CORE_URL || "http://localhost:8787").replace(/\/+$/, "");
+const DEFAULT_CORE_PORT = process.env.MORK_CORE_PORT || process.env.PORT || "8790";
+const BASE = (process.env.MORK_CORE_URL || `http://localhost:${DEFAULT_CORE_PORT}`).replace(/\/+$/, "");
 console.log("[morkReporter] BASE =", BASE);
 const AUTH_HEADER_NAME = process.env.MORK_CORE_AUTH_HEADER || ""; // e.g. "x-api-key"
 const AUTH_HEADER_VALUE = process.env.MORK_CORE_AUTH || ""; // value
