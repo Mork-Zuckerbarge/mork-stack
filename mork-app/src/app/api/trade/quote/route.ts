@@ -30,6 +30,32 @@ type JupiterQuote = {
   routePlan?: JupiterRouteHop[];
 };
 
+type JupiterToken = {
+  decimals?: number;
+};
+
+async function getTokenDecimals(mint: string): Promise<number> {
+  if (mint === SOL_MINT) return 9;
+  try {
+    const tokenRes = await fetch(`${JUP_BASE}/tokens/v1/token/${mint}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!tokenRes.ok) return 0;
+    const token = (await tokenRes.json()) as JupiterToken;
+    return Number.isFinite(token.decimals) ? Number(token.decimals) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function fromRawAmount(rawAmount: string | number | undefined, decimals: number): number {
+  const base = Number(rawAmount ?? 0);
+  if (!Number.isFinite(base)) return 0;
+  return base / 10 ** decimals;
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as QuoteBody;
@@ -42,11 +68,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "amountSol must be > 0" }, { status: 400 });
     }
 
-    const lamports = Math.floor(amountSol * 1_000_000_000);
+    const [inputDecimals, outputDecimals] = await Promise.all([
+      getTokenDecimals(inputMint),
+      getTokenDecimals(outputMint),
+    ]);
+    const baseAmount = Math.floor(amountSol * 10 ** inputDecimals);
     const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
     quoteUrl.searchParams.set("inputMint", inputMint);
     quoteUrl.searchParams.set("outputMint", outputMint);
-    quoteUrl.searchParams.set("amount", String(lamports));
+    quoteUrl.searchParams.set("amount", String(baseAmount));
     quoteUrl.searchParams.set("slippageBps", String(slippageBps));
 
     const quoteRes = await fetch(quoteUrl.toString(), {
@@ -71,11 +101,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      inAmount: Number(quote.inAmount ?? 0),
-      outAmount: Number(quote.outAmount ?? 0),
-      otherAmountThreshold: Number(quote.otherAmountThreshold ?? 0),
+      inAmount: fromRawAmount(quote.inAmount, inputDecimals),
+      outAmount: fromRawAmount(quote.outAmount, outputDecimals),
+      otherAmountThreshold: fromRawAmount(quote.otherAmountThreshold, outputDecimals),
       priceImpactPct: quote.priceImpactPct ?? "0",
-      routeFeeAmount: feeInOutput,
+      routeFeeAmount: fromRawAmount(feeInOutput, outputDecimals),
       routeFeeSymbol: quote.outputMint === BBQ_MINT ? "BBQ" : quote.outputMint === SOL_MINT ? "SOL" : "token",
     });
   } catch (e: unknown) {

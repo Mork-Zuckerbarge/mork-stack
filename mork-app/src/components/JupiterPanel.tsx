@@ -70,6 +70,17 @@ type WalletProvisioning = {
   source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
 };
 
+function formatTokenAmount(value: number | undefined, maxFractionDigits = 9): string {
+  if (!Number.isFinite(value)) return "0";
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: maxFractionDigits });
+}
+
+function formatPriceImpact(value: string | undefined): string {
+  const parsed = Number(value ?? "0");
+  if (!Number.isFinite(parsed)) return "0.000";
+  return (parsed * 100).toFixed(3);
+}
+
 function TokenLogo({ mint, symbol, logoUri }: { mint: string; symbol: string; logoUri?: string }) {
   const src = logoUri || tokenLogos[mint] || "/globe.svg";
 
@@ -156,6 +167,10 @@ export default function JupiterPanel() {
     : `${selectedInputToken.symbol} → Select token`;
   const amountOut = quote?.ok ? quote.outAmount ?? 0 : 0;
   const rate = quote?.ok && amountOut > 0 && parsedAmountSol > 0 ? amountOut / parsedAmountSol : 0;
+  const showInputTokenOptions =
+    inputTokenResults.length > 1 || (inputTokenResults.length === 1 && inputTokenResults[0].mint !== selectedInputMint);
+  const showOutputTokenOptions =
+    outputTokenResults.length > 1 || (outputTokenResults.length === 1 && outputTokenResults[0].mint !== selectedOutputMint);
 
   const fetchTokenOptions = useCallback(async (query: string): Promise<TokenOption[]> => {
     const q = query.trim();
@@ -514,8 +529,9 @@ export default function JupiterPanel() {
 
   return (
     <div className="rounded-3xl border border-amber-300/20 bg-gradient-to-b from-amber-500/10 to-transparent p-5">
-      <h2 className="mb-1 text-lg font-semibold">wallet control</h2>
-      <div className="mb-3 flex items-center gap-2 text-xs">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold">wallet control</h2>
+        <div className="flex items-center gap-2 text-xs">
         <button
           type="button"
           onClick={refreshWalletControlPanel}
@@ -525,6 +541,7 @@ export default function JupiterPanel() {
           {panelRefreshBusy ? "Refreshing…" : "Refresh wallet control"}
         </button>
         {panelRefreshStatus ? <span className="text-white/60">{panelRefreshStatus}</span> : null}
+        </div>
       </div>
 
       <div className="mb-4 grid gap-2 sm:grid-cols-3">
@@ -617,31 +634,33 @@ export default function JupiterPanel() {
                 className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
               />
             </label>
-            <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
-              {inputTokenResults.map((token) => {
-                const selected = token.mint === selectedInputMint;
-                return (
-                  <button
-                    key={`input-${token.mint}`}
-                    type="button"
-                    onClick={() => {
-                      setSelectedInputMint(token.mint);
-                      setInputSearch(token.symbol);
-                    }}
-                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
-                      selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
-                    }`}
-                  >
-                    <TokenLogo mint={token.mint} symbol={token.symbol} logoUri={token.logoUri} />
-                    <div>
-                      <div className="text-sm font-medium">{token.symbol}</div>
-                      <div className="text-[11px] text-white/60">{token.name || shortMint(token.mint)}</div>
-                    </div>
-                    <span className="ml-auto text-white/60">{shortMint(token.mint)}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {showInputTokenOptions ? (
+              <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
+                {inputTokenResults.map((token) => {
+                  const selected = token.mint === selectedInputMint;
+                  return (
+                    <button
+                      key={`input-${token.mint}`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedInputMint(token.mint);
+                        setInputSearch(token.symbol);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
+                        selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
+                      }`}
+                    >
+                      <TokenLogo mint={token.mint} symbol={token.symbol} logoUri={token.logoUri} />
+                      <div>
+                        <div className="text-sm font-medium">{token.symbol}</div>
+                        <div className="text-[11px] text-white/60">{token.name || shortMint(token.mint)}</div>
+                      </div>
+                      <span className="ml-auto text-white/60">{shortMint(token.mint)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             <label className="mt-3 text-xs text-white/70">
               Amount ({selectedInputToken.symbol})
               <input
@@ -681,31 +700,33 @@ export default function JupiterPanel() {
                 className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
               />
             </label>
-            <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
-              {outputTokenResults.map((token) => {
-                const selected = token.mint === selectedOutputMint;
-                return (
-                  <button
-                    key={`output-${token.mint}`}
-                    type="button"
-                    onClick={() => {
-                      setSelectedOutputMint(token.mint);
-                      setOutputSearch(token.symbol);
-                    }}
-                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
-                      selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
-                    }`}
-                  >
-                    <TokenLogo mint={token.mint} symbol={token.symbol} logoUri={token.logoUri} />
-                    <div>
-                      <div className="text-sm font-medium">{token.symbol}</div>
-                      <div className="text-[11px] text-white/60">{token.name || shortMint(token.mint)}</div>
-                    </div>
-                    <span className="ml-auto text-white/60">{shortMint(token.mint)}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {showOutputTokenOptions ? (
+              <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-black/25 p-2">
+                {outputTokenResults.map((token) => {
+                  const selected = token.mint === selectedOutputMint;
+                  return (
+                    <button
+                      key={`output-${token.mint}`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedOutputMint(token.mint);
+                        setOutputSearch(token.symbol);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
+                        selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
+                      }`}
+                    >
+                      <TokenLogo mint={token.mint} symbol={token.symbol} logoUri={token.logoUri} />
+                      <div>
+                        <div className="text-sm font-medium">{token.symbol}</div>
+                        <div className="text-[11px] text-white/60">{token.name || shortMint(token.mint)}</div>
+                      </div>
+                      <span className="ml-auto text-white/60">{shortMint(token.mint)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_108px]">
             <div className="rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-[11px] text-white/80">
@@ -717,18 +738,18 @@ export default function JupiterPanel() {
               ) : quote.ok ? (
                   <div className="mt-1 space-y-1">
                   <div>
-                    Rate: 1 {selectedInputToken.symbol} ≈ {rate.toLocaleString(undefined, { maximumFractionDigits: 6 })} {selectedOutputToken?.symbol || "token"}
+                    Rate: 1 {selectedInputToken.symbol} ≈ {formatTokenAmount(rate, 6)} {selectedOutputToken?.symbol || "token"}
                   </div>
                   <div>
-                    Estimated output: {quote.outAmount?.toLocaleString()} {selectedOutputToken?.symbol || "token"}
+                    Estimated output: {formatTokenAmount(quote.outAmount)} {selectedOutputToken?.symbol || "token"}
                   </div>
                   <div>
-                    Min received (slippage applied): {quote.otherAmountThreshold?.toLocaleString()} {selectedOutputToken?.symbol || "token"}
+                    Min received (slippage applied): {formatTokenAmount(quote.otherAmountThreshold)} {selectedOutputToken?.symbol || "token"}
                   </div>
                   <div>
-                    Route fee: {quote.routeFeeAmount?.toLocaleString()} {quote.routeFeeSymbol || selectedOutputToken?.symbol || "token"}
+                    Route fee: {formatTokenAmount(quote.routeFeeAmount)} {quote.routeFeeSymbol || selectedOutputToken?.symbol || "token"}
                   </div>
-                  <div>Price impact: {quote.priceImpactPct || "0"}%</div>
+                  <div>Price impact: {formatPriceImpact(quote.priceImpactPct)}%</div>
                 </div>
               ) : (
                 <p className="mt-1 text-amber-200">{quote.error || "Quote unavailable"}</p>
