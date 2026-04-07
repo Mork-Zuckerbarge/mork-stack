@@ -284,26 +284,6 @@ export default function JupiterPanel() {
     }
   }, [loadExecution, walletRefreshBusy]);
 
-  const refreshWalletControlPanel = useCallback(async () => {
-    if (panelRefreshBusy) return;
-    setPanelRefreshBusy(true);
-    setPanelRefreshStatus("");
-    try {
-      await Promise.all([
-        loadWallet(),
-        loadExecution(),
-        loadPairBalances(),
-        loadQuote(),
-      ]);
-      await refreshWalletMemory();
-      setPanelRefreshStatus("Wallet control refreshed");
-    } catch {
-      setPanelRefreshStatus("Wallet control refresh failed");
-    } finally {
-      setPanelRefreshBusy(false);
-    }
-  }, [loadExecution, loadPairBalances, loadQuote, loadWallet, panelRefreshBusy, refreshWalletMemory]);
-
   const ensureArbOnStartup = useCallback(async () => {
     if (arbStartupBusy) return;
     setArbStartupBusy(true);
@@ -418,6 +398,26 @@ export default function JupiterPanel() {
       setPairBalancesLoading(false);
     }
   }, [hasValidPair, selectedInputMint, selectedOutputMint]);
+
+  const refreshWalletControlPanel = useCallback(async () => {
+    if (panelRefreshBusy) return;
+    setPanelRefreshBusy(true);
+    setPanelRefreshStatus("");
+    try {
+      await Promise.all([
+        loadWallet(),
+        loadExecution(),
+        loadPairBalances(),
+        loadQuote(),
+      ]);
+      await refreshWalletMemory();
+      setPanelRefreshStatus("Wallet control refreshed");
+    } catch {
+      setPanelRefreshStatus("Wallet control refresh failed");
+    } finally {
+      setPanelRefreshBusy(false);
+    }
+  }, [loadExecution, loadPairBalances, loadQuote, loadWallet, panelRefreshBusy, refreshWalletMemory]);
 
   useEffect(() => {
     void loadWallet();

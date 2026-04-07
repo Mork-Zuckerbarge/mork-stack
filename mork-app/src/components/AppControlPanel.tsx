@@ -133,6 +133,10 @@ export default function AppControlPanel() {
 
   async function runSystemUpdate() {
     if (busy) return;
+    const confirmed = window.confirm(
+      "Update available. Install now?\n\nYour credentials and .env files will be restored after update.",
+    );
+    if (!confirmed) return;
     setBusy(true);
     setStatusText("");
     try {
