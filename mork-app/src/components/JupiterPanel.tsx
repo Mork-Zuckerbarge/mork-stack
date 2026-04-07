@@ -111,7 +111,7 @@ export default function JupiterPanel() {
   const [amountSol, setAmountSol] = useState("0.05");
   const [slippageBps, setSlippageBps] = useState(50);
   const [busy, setBusy] = useState(false);
-  const [inputSearch, setInputSearch] = useState("");
+  const [inputSearch, setInputSearch] = useState("SOL");
   const [outputSearch, setOutputSearch] = useState("");
   const [selectedInputMint, setSelectedInputMint] = useState(SOL_MINT);
   const [selectedOutputMint, setSelectedOutputMint] = useState("");
@@ -210,18 +210,18 @@ export default function JupiterPanel() {
       return;
     }
 
-    setInputSearch(inputQuery);
-    setOutputSearch(outputQuery);
+    setInputSearch(bestInput.symbol);
+    setOutputSearch(bestOutput.symbol);
     setInputTokenResults(inputOptions);
     setOutputTokenResults(outputOptions);
     setSelectedInputMint(bestInput.mint);
     setSelectedOutputMint(bestOutput.mint);
   }, [fetchTokenOptions, findBestToken]);
 
-  function tradeMaxAmount() {
-    if (!wallet) return;
-    const max = Math.max(wallet.sol - 0.01, 0);
-    setAmountSol(max.toFixed(4));
+  function setSellAmountByPercent(percent: number) {
+    const inputBalance = pairBalances[selectedInputMint] ?? 0;
+    if (inputBalance <= 0) return;
+    setAmountSol((inputBalance * percent).toFixed(4));
   }
 
   const loadWallet = useCallback(async () => {
@@ -584,16 +584,31 @@ export default function JupiterPanel() {
           </div>
 
           <div className="mb-3 rounded-2xl border border-emerald-300/25 bg-slate-950/60 p-3">
-            <div className="mb-2 text-xs text-white/60">Sell</div>
-            <div className="mb-2 flex items-center gap-2">
-              <TokenLogo mint={selectedInputToken.mint} symbol={selectedInputToken.symbol} logoUri={selectedInputToken.logoUri} />
-              <span className="text-sm font-semibold">{selectedInputToken.symbol}</span>
-              <span className="ml-auto text-xs text-white/55">
-                {pairBalancesLoading ? "…" : (pairBalances[selectedInputMint] ?? 0).toFixed(4)}
-              </span>
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs text-white/60">Sell</div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSellAmountByPercent(1)}
+                  className="rounded-md border border-white/20 bg-black/40 px-1.5 py-0.5 text-[10px]"
+                >
+                  100%
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSellAmountByPercent(0.5)}
+                  className="rounded-md border border-white/20 bg-black/40 px-1.5 py-0.5 text-[10px]"
+                >
+                  50%
+                </button>
+              </div>
+            </div>
+            <div className="mb-2 flex items-center justify-between text-xs text-white/55">
+              <span>Balance</span>
+              <span>{pairBalancesLoading ? "…" : (pairBalances[selectedInputMint] ?? 0).toFixed(4)}</span>
             </div>
             <label className="block text-xs text-white/70">
-              Search token
+              Token
               <input
                 type="text"
                 value={inputSearch}
@@ -609,7 +624,10 @@ export default function JupiterPanel() {
                   <button
                     key={`input-${token.mint}`}
                     type="button"
-                    onClick={() => setSelectedInputMint(token.mint)}
+                    onClick={() => {
+                      setSelectedInputMint(token.mint);
+                      setInputSearch(token.symbol);
+                    }}
                     className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
                       selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
                     }`}
@@ -649,15 +667,12 @@ export default function JupiterPanel() {
 
           <div className="mb-3 rounded-2xl border border-cyan-300/20 bg-slate-950/60 p-3">
             <div className="mb-2 text-xs text-white/60">Buy</div>
-            <div className="mb-2 flex items-center gap-2">
-              {selectedOutputToken ? <TokenLogo mint={selectedOutputToken.mint} symbol={selectedOutputToken.symbol} logoUri={selectedOutputToken.logoUri} /> : <span className="h-6 w-6 rounded-full bg-white/10" />}
-              <span className="text-sm font-semibold">{selectedOutputToken?.symbol || "Select"}</span>
-              <span className="ml-auto text-xs text-white/55">
-                {pairBalancesLoading ? "…" : selectedOutputMint ? (pairBalances[selectedOutputMint] ?? 0).toFixed(4) : "—"}
-              </span>
+            <div className="mb-2 flex items-center justify-between text-xs text-white/55">
+              <span>Balance</span>
+              <span>{pairBalancesLoading ? "…" : selectedOutputMint ? (pairBalances[selectedOutputMint] ?? 0).toFixed(4) : "—"}</span>
             </div>
             <label className="block text-xs text-white/70">
-              Search token
+              Token
               <input
                 type="text"
                 value={outputSearch}
@@ -673,7 +688,10 @@ export default function JupiterPanel() {
                   <button
                     key={`output-${token.mint}`}
                     type="button"
-                    onClick={() => setSelectedOutputMint(token.mint)}
+                    onClick={() => {
+                      setSelectedOutputMint(token.mint);
+                      setOutputSearch(token.symbol);
+                    }}
                     className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
                       selected ? "bg-amber-300/15 text-amber-100" : "hover:bg-white/10"
                     }`}
@@ -689,54 +707,45 @@ export default function JupiterPanel() {
               })}
             </div>
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-            <button
-              type="button"
-              onClick={tradeMaxAmount}
-              className="rounded-lg border border-white/20 bg-black/40 px-2 py-1"
-            >
-              Trade max
-            </button>
-          </div>
-
-          <label className="mt-3 block text-xs text-white/70">
-            Slippage tolerance (bps)
-            <input
-              type="number"
-              min={10}
-              max={300}
-              step={5}
-              value={slippageBps}
-              onChange={(e) => setSlippageBps(Math.min(300, Math.max(10, Number(e.target.value) || 50)))}
-              className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
-            />
-          </label>
-
-          <div className="mt-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-[11px] text-white/80">
-            <div className="flex items-center justify-between">
-              <span>Quote</span>
-            </div>
-            {!quote ? (
-              <p className="mt-1 text-white/55">Enter an amount to view estimated output, fee, and min received.</p>
-            ) : quote.ok ? (
-                <div className="mt-1 space-y-1">
-                <div>
-                  Rate: 1 {selectedInputToken.symbol} ≈ {rate.toLocaleString(undefined, { maximumFractionDigits: 6 })} {selectedOutputToken?.symbol || "token"}
-                </div>
-                <div>
-                  Estimated output: {quote.outAmount?.toLocaleString()} {selectedOutputToken?.symbol || "token"}
-                </div>
-                <div>
-                  Min received (slippage applied): {quote.otherAmountThreshold?.toLocaleString()} {selectedOutputToken?.symbol || "token"}
-                </div>
-                <div>
-                  Route fee: {quote.routeFeeAmount?.toLocaleString()} {quote.routeFeeSymbol || selectedOutputToken?.symbol || "token"}
-                </div>
-                <div>Price impact: {quote.priceImpactPct || "0"}%</div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_108px]">
+            <div className="rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-[11px] text-white/80">
+              <div className="flex items-center justify-between">
+                <span>Quote</span>
               </div>
-            ) : (
-              <p className="mt-1 text-amber-200">{quote.error || "Quote unavailable"}</p>
-            )}
+              {!quote ? (
+                <p className="mt-1 text-white/55">Enter an amount to view estimated output, fee, and min received.</p>
+              ) : quote.ok ? (
+                  <div className="mt-1 space-y-1">
+                  <div>
+                    Rate: 1 {selectedInputToken.symbol} ≈ {rate.toLocaleString(undefined, { maximumFractionDigits: 6 })} {selectedOutputToken?.symbol || "token"}
+                  </div>
+                  <div>
+                    Estimated output: {quote.outAmount?.toLocaleString()} {selectedOutputToken?.symbol || "token"}
+                  </div>
+                  <div>
+                    Min received (slippage applied): {quote.otherAmountThreshold?.toLocaleString()} {selectedOutputToken?.symbol || "token"}
+                  </div>
+                  <div>
+                    Route fee: {quote.routeFeeAmount?.toLocaleString()} {quote.routeFeeSymbol || selectedOutputToken?.symbol || "token"}
+                  </div>
+                  <div>Price impact: {quote.priceImpactPct || "0"}%</div>
+                </div>
+              ) : (
+                <p className="mt-1 text-amber-200">{quote.error || "Quote unavailable"}</p>
+              )}
+            </div>
+            <label className="text-xs text-white/70">
+              Slippage (bps)
+              <input
+                type="number"
+                min={10}
+                max={300}
+                step={5}
+                value={slippageBps}
+                onChange={(e) => setSlippageBps(Math.min(300, Math.max(10, Number(e.target.value) || 50)))}
+                className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
+              />
+            </label>
           </div>
 
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
