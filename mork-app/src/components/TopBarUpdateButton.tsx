@@ -51,13 +51,33 @@ export default function TopBarUpdateButton() {
     }
   }
 
+  async function handleCheckOrInstall() {
+    if (busy) return;
+
+    if (!updateState) {
+      await loadUpdateState();
+      return;
+    }
+
+    if (!updateState.hasUpdates) {
+      await loadUpdateState();
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Update available. Install now?\n\nYour credentials and .env files will be restored after update.",
+    );
+    if (!confirmed) return;
+    await runUpdate();
+  }
+
   const hasUpdates = Boolean(updateState?.hasUpdates);
 
   return (
     <div className="flex flex-col items-end gap-1">
       <button
         type="button"
-        onClick={hasUpdates ? runUpdate : loadUpdateState}
+        onClick={handleCheckOrInstall}
         disabled={busy}
         className="rounded-xl border border-cyan-300/40 bg-cyan-200/10 px-3 py-1.5 text-xs"
         title="Check for updates and pull latest code while restoring wallet/env/credential files."
