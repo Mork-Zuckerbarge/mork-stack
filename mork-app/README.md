@@ -1,5 +1,7 @@
 # Mork App
 
+> For fresh-machine Ubuntu bootstrap, use the repo-root guide in [`../README.md`](../README.md).
+
 ## Quick start (single app command)
 
 From the repo root:
