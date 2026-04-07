@@ -10,6 +10,7 @@ const EVENT_COOLDOWN_MS = Number(process.env.MORK_REPORT_COOLDOWN_MS || 15_000);
 const MAX_EVENT_BYTES = Number(process.env.MORK_REPORT_MAX_BYTES || 16_000);
 const MIN_POST_GAP_MS = Number(process.env.MORK_REPORT_MIN_POST_GAP_MS || 250);
 const FAILURE_LOG_COOLDOWN_MS = Number(process.env.MORK_REPORT_FAILURE_LOG_COOLDOWN_MS || 30_000);
+const CORE_RECHECK_MS = Number(process.env.MORK_REPORT_CORE_RECHECK_MS || 30_000);
 
 const fetchFn =
   typeof fetch === "function"
@@ -97,6 +98,9 @@ function buildHeaders(extra = {}) {
 const _dedupe = new Map(); // key -> lastSentMs
 const _pathNextAt = new Map(); // path -> next allowed POST ms
 const _failureLogState = new Map(); // path -> { lastLogAt, suppressed }
+let _coreReachable = null;
+let _coreCheckedAt = 0;
+let _coreSuppressedUntil = 0;
 
 function hashKey(input) {
   return crypto.createHash("sha256").update(String(input)).digest("hex").slice(0, 16);
@@ -143,11 +147,28 @@ function logPostFailure(path, message) {
   _failureLogState.set(path, { ...state, suppressed: state.suppressed + 1 });
 }
 
+async function ensureCoreReachable() {
+  const now = Date.now();
+  if (_coreReachable === false && now < _coreSuppressedUntil) {
+    return false;
+  }
+  if (_coreReachable !== null && now - _coreCheckedAt < CORE_RECHECK_MS) {
+    return _coreReachable;
+  }
+  _coreReachable = await getOk("/health", { timeoutMs: 900 });
+  _coreCheckedAt = now;
+  if (!_coreReachable) {
+    _coreSuppressedUntil = now + CORE_RECHECK_MS;
+  }
+  return _coreReachable;
+}
+
 async function postJson(path, body, { retries = 2, timeoutMs = 2500, dedupeKey } = {}) {
   const url = `${BASE}${path}`;
   const agent = agentFor(url);
 
   if (dedupeKey && !canSend(dedupeKey)) return true; // treat as ok; we intentionally suppressed
+  if (!(await ensureCoreReachable())) return false;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
@@ -183,11 +204,16 @@ async function postJson(path, body, { retries = 2, timeoutMs = 2500, dedupeKey }
         return false;
       }
 
+      _coreReachable = true;
+      _coreCheckedAt = Date.now();
       return true;
     } catch (e) {
       const timedOut = e?.name === "AbortError";
       const msg = timedOut ? `timeout after ${timeoutMs}ms` : e?.message || String(e);
       if (attempt === retries) {
+        _coreReachable = false;
+        _coreCheckedAt = Date.now();
+        _coreSuppressedUntil = Date.now() + CORE_RECHECK_MS;
         logPostFailure(path, msg);
         return false;
       }
@@ -266,7 +292,13 @@ async function morkTick(reason = "arb_event") {
 }
 
 async function morkPing() {
-  return getOk("/health", { timeoutMs: 900 });
+  const ok = await getOk("/health", { timeoutMs: 900 });
+  _coreReachable = ok;
+  _coreCheckedAt = Date.now();
+  if (!ok) {
+    _coreSuppressedUntil = Date.now() + CORE_RECHECK_MS;
+  }
+  return ok;
 }
 
 const OPPORTUNITY_PATH = process.env.MORK_OPPORTUNITY_PATH || "/market/opportunity";
