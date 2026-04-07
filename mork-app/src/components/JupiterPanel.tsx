@@ -135,6 +135,8 @@ export default function JupiterPanel() {
   const [startupCompleted, setStartupCompleted] = useState(false);
   const [arbStartupBusy, setArbStartupBusy] = useState(false);
   const [arbStartupStatus, setArbStartupStatus] = useState("");
+  const [panelRefreshBusy, setPanelRefreshBusy] = useState(false);
+  const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
 
   const selectedInputToken = useMemo(
     () => inputTokenResults.find((token) => token.mint === selectedInputMint) ?? { symbol: shortMint(selectedInputMint), mint: selectedInputMint },
@@ -281,6 +283,26 @@ export default function JupiterPanel() {
       setWalletRefreshBusy(false);
     }
   }, [loadExecution, walletRefreshBusy]);
+
+  const refreshWalletControlPanel = useCallback(async () => {
+    if (panelRefreshBusy) return;
+    setPanelRefreshBusy(true);
+    setPanelRefreshStatus("");
+    try {
+      await Promise.all([
+        loadWallet(),
+        loadExecution(),
+        loadPairBalances(),
+        loadQuote(),
+      ]);
+      await refreshWalletMemory();
+      setPanelRefreshStatus("Wallet control refreshed");
+    } catch {
+      setPanelRefreshStatus("Wallet control refresh failed");
+    } finally {
+      setPanelRefreshBusy(false);
+    }
+  }, [loadExecution, loadPairBalances, loadQuote, loadWallet, panelRefreshBusy, refreshWalletMemory]);
 
   const ensureArbOnStartup = useCallback(async () => {
     if (arbStartupBusy) return;
@@ -493,7 +515,17 @@ export default function JupiterPanel() {
   return (
     <div className="rounded-3xl border border-amber-300/20 bg-gradient-to-b from-amber-500/10 to-transparent p-5">
       <h2 className="mb-1 text-lg font-semibold">wallet control</h2>
-      <p className="mb-3 text-xs text-white/70">Jupiter-style swap flow with execution risk gates and live pair details.</p>
+      <div className="mb-3 flex items-center gap-2 text-xs">
+        <button
+          type="button"
+          onClick={refreshWalletControlPanel}
+          disabled={panelRefreshBusy}
+          className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 disabled:opacity-50"
+        >
+          {panelRefreshBusy ? "Refreshing…" : "Refresh wallet control"}
+        </button>
+        {panelRefreshStatus ? <span className="text-white/60">{panelRefreshStatus}</span> : null}
+      </div>
 
       <div className="mb-4 grid gap-2 sm:grid-cols-3">
         <div className="rounded-2xl border border-white/15 bg-black/35 p-3">
@@ -517,14 +549,11 @@ export default function JupiterPanel() {
           busy={executionBusy}
           status={executionStatus}
           walletProvisioning={walletProvisioning}
-          walletRefreshBusy={walletRefreshBusy}
           walletRefreshStatus={walletRefreshStatus}
           arbStatus={arbStatus}
           startupCompleted={startupCompleted}
           arbStartupBusy={arbStartupBusy}
           arbStartupStatus={arbStartupStatus}
-          onRefresh={loadExecution}
-          onRefreshWalletMemory={refreshWalletMemory}
           onEnsureArbOnStartup={ensureArbOnStartup}
           onSave={saveExecution}
         />
@@ -668,13 +697,6 @@ export default function JupiterPanel() {
             >
               Trade max
             </button>
-            <button
-              type="button"
-              onClick={loadWallet}
-              className="rounded-lg border border-white/20 bg-black/40 px-2 py-1"
-            >
-              Refresh balances
-            </button>
           </div>
 
           <label className="mt-3 block text-xs text-white/70">
@@ -693,9 +715,6 @@ export default function JupiterPanel() {
           <div className="mt-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-[11px] text-white/80">
             <div className="flex items-center justify-between">
               <span>Quote</span>
-              <button type="button" onClick={loadQuote} className="rounded border border-white/20 px-1.5 py-0.5 text-[10px]">
-                Refresh
-              </button>
             </div>
             {!quote ? (
               <p className="mt-1 text-white/55">Enter an amount to view estimated output, fee, and min received.</p>
@@ -769,14 +788,11 @@ function ExecutionControls({
   busy,
   status,
   walletProvisioning,
-  walletRefreshBusy,
   walletRefreshStatus,
   arbStatus,
   startupCompleted,
   arbStartupBusy,
   arbStartupStatus,
-  onRefresh,
-  onRefreshWalletMemory,
   onEnsureArbOnStartup,
   onSave,
 }: {
@@ -784,14 +800,11 @@ function ExecutionControls({
   busy: boolean;
   status: string;
   walletProvisioning: WalletProvisioning | null;
-  walletRefreshBusy: boolean;
   walletRefreshStatus: string;
   arbStatus: RuntimeStatus;
   startupCompleted: boolean;
   arbStartupBusy: boolean;
   arbStartupStatus: string;
-  onRefresh: () => void;
-  onRefreshWalletMemory: () => void;
   onEnsureArbOnStartup: () => void;
   onSave: (input: ExecutionAuthority) => void;
 }) {
@@ -803,10 +816,7 @@ function ExecutionControls({
   return (
     <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">ARB Real Controls (Execution + Risk Gates)</h3>
-        <button type="button" onClick={onRefresh} className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-xs">
-          Refresh
-        </button>
+        <h3 className="text-sm font-semibold">Arb Control</h3>
       </div>
       {!execution ? (
         <p className="text-sm text-white/60">Unable to load execution controls.</p>
@@ -851,14 +861,6 @@ function ExecutionControls({
             <div className="mt-1 break-all">
               {walletProvisioning?.address || "No wallet configured yet (set MORK_WALLET or MORK_WALLET_SECRET_KEY)."}
             </div>
-            <button
-              type="button"
-              onClick={onRefreshWalletMemory}
-              disabled={walletRefreshBusy}
-              className="mt-2 rounded-lg border border-cyan-300/30 bg-cyan-200/10 px-2 py-1 text-xs disabled:opacity-60"
-            >
-              Refresh Wallet Memory
-            </button>
             {walletRefreshStatus ? <p className="mt-1 text-[11px] text-white/60">{walletRefreshStatus}</p> : null}
           </div>
           <button
