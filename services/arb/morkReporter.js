@@ -7,6 +7,8 @@ const AUTH_HEADER_NAME = process.env.MORK_CORE_AUTH_HEADER || ""; // e.g. "x-api
 const AUTH_HEADER_VALUE = process.env.MORK_CORE_AUTH || ""; // value
 const EVENT_COOLDOWN_MS = Number(process.env.MORK_REPORT_COOLDOWN_MS || 15_000);
 const MAX_EVENT_BYTES = Number(process.env.MORK_REPORT_MAX_BYTES || 16_000);
+const MIN_POST_GAP_MS = Number(process.env.MORK_REPORT_MIN_POST_GAP_MS || 250);
+const FAILURE_LOG_COOLDOWN_MS = Number(process.env.MORK_REPORT_FAILURE_LOG_COOLDOWN_MS || 30_000);
 
 const fetchFn =
   typeof fetch === "function"
@@ -92,6 +94,8 @@ function buildHeaders(extra = {}) {
 }
 
 const _dedupe = new Map(); // key -> lastSentMs
+const _pathNextAt = new Map(); // path -> next allowed POST ms
+const _failureLogState = new Map(); // path -> { lastLogAt, suppressed }
 
 function hashKey(input) {
   return crypto.createHash("sha256").update(String(input)).digest("hex").slice(0, 16);
@@ -113,6 +117,31 @@ function canSend(dedupeKey) {
   return true;
 }
 
+async function waitForPathGap(path) {
+  if (!MIN_POST_GAP_MS || MIN_POST_GAP_MS <= 0) return;
+  const now = Date.now();
+  const nextAllowedAt = _pathNextAt.get(path) || 0;
+  if (nextAllowedAt > now) {
+    await sleep(nextAllowedAt - now);
+  }
+  _pathNextAt.set(path, Date.now() + MIN_POST_GAP_MS);
+}
+
+function logPostFailure(path, message) {
+  const now = Date.now();
+  const state = _failureLogState.get(path) || { lastLogAt: 0, suppressed: 0 };
+  const since = now - state.lastLogAt;
+
+  if (since >= FAILURE_LOG_COOLDOWN_MS) {
+    const suffix = state.suppressed > 0 ? ` (suppressed ${state.suppressed} similar failures)` : "";
+    console.warn("[morkReporter] failed:", `${path}: ${message}${suffix}`);
+    _failureLogState.set(path, { lastLogAt: now, suppressed: 0 });
+    return;
+  }
+
+  _failureLogState.set(path, { ...state, suppressed: state.suppressed + 1 });
+}
+
 async function postJson(path, body, { retries = 2, timeoutMs = 2500, dedupeKey } = {}) {
   const url = `${BASE}${path}`;
   const agent = agentFor(url);
@@ -121,9 +150,11 @@ async function postJson(path, body, { retries = 2, timeoutMs = 2500, dedupeKey }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
+    let t;
     try {
+      await waitForPathGap(path);
       const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), timeoutMs);
+      t = setTimeout(() => controller.abort(), timeoutMs);
 
       const payload = safeJsonBytes(body);
 
@@ -147,17 +178,21 @@ async function postJson(path, body, { retries = 2, timeoutMs = 2500, dedupeKey }
           continue;
         }
 
-        console.warn("[morkReporter] non-ok:", msg);
+        logPostFailure(path, msg);
         return false;
       }
 
       return true;
     } catch (e) {
+      const timedOut = e?.name === "AbortError";
+      const msg = timedOut ? `timeout after ${timeoutMs}ms` : e?.message || String(e);
       if (attempt === retries) {
-        console.warn("[morkReporter] failed:", `${path}: ${e?.message || e}`);
+        logPostFailure(path, msg);
         return false;
       }
       await sleep(250 * (attempt + 1));
+    } finally {
+      if (t) clearTimeout(t);
     }
   }
 
@@ -208,8 +243,6 @@ async function morkGetPolicy(mint) {
   }
 }
 
-module.exports = { morkMemory, morkTick, morkPing, morkArbEvent, morkGetPolicy };
-
 async function morkMemory({
   type = "fact",
   content,
@@ -227,8 +260,8 @@ async function morkMemory({
 }
 
 async function morkTick(reason = "arb_event") {
-
-  return postJson("/planner/tick", { reason }, { retries: 0, timeoutMs: 1200 });
+  const dedupeKey = hashKey(`tick:${reason}`);
+  return postJson("/planner/tick", { reason }, { retries: 1, timeoutMs: 2500, dedupeKey });
 }
 
 async function morkPing() {
@@ -339,12 +372,14 @@ async function morkSignal({
 }
 
 module.exports = {
-
   morkMemory,
   morkTick,
   morkPing,
-
+  morkArbEvent,
+  morkGetPolicy,
   morkOpportunity,
   morkBalances,
   morkExecution,
+  morkWalletSnapshot,
+  morkSignal,
 };
