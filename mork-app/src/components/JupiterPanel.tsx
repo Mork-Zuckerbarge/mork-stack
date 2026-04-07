@@ -576,27 +576,16 @@ export default function JupiterPanel() {
         />
 
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
-          <div className="mb-3 flex items-center gap-2">
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2">
             <div className="flex -space-x-2">
               <TokenLogo mint={selectedInputToken.mint} symbol={selectedInputToken.symbol} logoUri={selectedInputToken.logoUri} />
               {selectedOutputToken ? <TokenLogo mint={selectedOutputToken.mint} symbol={selectedOutputToken.symbol} logoUri={selectedOutputToken.logoUri} /> : null}
             </div>
-            <div>
-              <p className="text-base font-semibold">{selectedPairLabel}</p>
-              <p className="text-sm font-semibold">{selectedInputToken.symbol}/{selectedOutputToken?.symbol || "—"}</p>
-            </div>
-          </div>
-          <div className="mb-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-xs text-white/80">
-            <div className="mb-1 text-[11px] text-white/60">Selected pair balances</div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span>{selectedInputToken.symbol}</span>
-                <span>{pairBalancesLoading ? "…" : (pairBalances[selectedInputMint] ?? 0).toFixed(6)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>{selectedOutputToken?.symbol || "Output token"}</span>
-                <span>{pairBalancesLoading ? "…" : selectedOutputMint ? (pairBalances[selectedOutputMint] ?? 0).toFixed(6) : "—"}</span>
-              </div>
+            <div className="min-w-0 text-right">
+              <p className="truncate text-base font-semibold">{selectedPairLabel}</p>
+              <p className="truncate text-xs text-white/70">
+                {shortMint(selectedInputToken.mint)}/{selectedOutputToken ? shortMint(selectedOutputToken.mint) : "—"}
+              </p>
             </div>
           </div>
 
