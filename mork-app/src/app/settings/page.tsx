@@ -49,7 +49,7 @@ export default function SettingsPage() {
       });
 
       if (!res.ok) throw new Error("Save failed");
-      setStatus("Saved");
+      setStatus("Saved. Restart app services to apply to running Sherpa/Telegram processes.");
     } catch {
       setStatus("Save failed");
     } finally {

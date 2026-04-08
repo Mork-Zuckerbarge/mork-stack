@@ -63,6 +63,7 @@ export default function AppControlPanel() {
   const [state, setState] = useState<AppControlState | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [sherpaBootstrapMessage, setSherpaBootstrapMessage] = useState("");
   const [sherpaBootstrapAction, setSherpaBootstrapAction] = useState("");
@@ -131,14 +132,36 @@ export default function AppControlPanel() {
     }
   }
 
-  async function runSystemUpdate() {
-    if (busy) return;
+  async function checkOrRunSystemUpdate() {
+    if (busy || checkingUpdates) return;
+
+    if (!updateState || !updateState.hasUpdates) {
+      setCheckingUpdates(true);
+      setStatusText("Checking for updates…");
+      try {
+        const res = await fetch("/api/system/update", { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok || !data?.ok || !data?.update) {
+          setStatusText(data?.error || `Update check failed (${res.status})`);
+          return;
+        }
+        setUpdateState(data.update);
+        setStatusText(data.update.hasUpdates ? `Update available (${data.update.behind} behind)` : "Already up to date");
+      } catch {
+        setStatusText("Update check failed");
+      } finally {
+        setCheckingUpdates(false);
+      }
+      return;
+    }
+
     const confirmed = window.confirm(
       "Update available. Install now?\n\nYour credentials and .env files will be restored after update.",
     );
     if (!confirmed) return;
+
     setBusy(true);
-    setStatusText("");
+    setStatusText("Installing update…");
     try {
       const res = await fetch("/api/system/update", { method: "POST" });
       const data = await res.json();
@@ -146,7 +169,7 @@ export default function AppControlPanel() {
         setStatusText(data?.error || `Update failed (${res.status})`);
       } else {
         setUpdateState(data.update ?? null);
-        setStatusText(data?.message || "System updated");
+        setStatusText(data?.message || "System updated. Restart services if you changed settings.");
       }
     } catch {
       setStatusText("Update failed");
@@ -161,16 +184,14 @@ export default function AppControlPanel() {
         <div>
           <h2 className="mb-1 text-lg font-semibold">System</h2>
         </div>
-        {updateState?.hasUpdates ? (
-          <button
-            onClick={runSystemUpdate}
-            disabled={busy}
-            className="rounded-xl border border-cyan-300/40 bg-cyan-200/10 px-3 py-1.5 text-xs"
-            title="Pull latest code while restoring wallet/env/credential files."
-          >
-            {busy ? "Updating…" : "Update"}
-          </button>
-        ) : null}
+        <button
+          onClick={checkOrRunSystemUpdate}
+          disabled={busy || checkingUpdates}
+          className="rounded-xl border border-cyan-300/40 bg-cyan-200/10 px-3 py-1.5 text-xs"
+          title="Check for updates and pull latest code while restoring wallet/env/credential files."
+        >
+          {busy ? "Updating…" : checkingUpdates ? "Checking…" : updateState?.hasUpdates ? `Update (${updateState.behind})` : "Check updates"}
+        </button>
       </div>
       <p className="mb-3 text-xs text-white/60">One surface for models, personas, channels, and orchestration controls.</p>
 
