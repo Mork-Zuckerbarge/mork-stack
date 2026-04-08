@@ -1,5 +1,7 @@
 import { prisma } from "./prisma";
-import { isMemoryEnabled, isPlannerEnabled } from "./orchestrator";
+import { getOrchestratorState, isMemoryEnabled, isPlannerEnabled } from "./orchestrator";
+import { getPreflightStatus } from "@/lib/bootstrap/preflight";
+import { getAppControlState } from "./appControl";
 
 type BuildContextArgs = {
   handle?: string;
@@ -55,7 +57,7 @@ export async function buildContext({
   const technical = isTechnicalMessage(message);
   const plannerEnabled = await isPlannerEnabled();
 
-  const [recentChat, walletMemory, tradeMemory, reflection, relationshipMemory] =
+  const [recentChat, walletMemory, tradeMemory, reflection, relationshipMemory, appControl, orchestratorState, preflight] =
     await Promise.all([
       prisma.memory.findMany({
         where: {
@@ -103,6 +105,12 @@ export async function buildContext({
             orderBy: { createdAt: "desc" },
           })
         : Promise.resolve(null),
+
+      getAppControlState(),
+
+      getOrchestratorState(),
+
+      getPreflightStatus(),
     ]);
 
   const recentChatBlock = recentChat.length
@@ -129,12 +137,40 @@ export async function buildContext({
     ? `RELATIONSHIP MEMORY:\n- ${relationshipMemory.content}`
     : "";
 
+  const failingHealth = Object.entries(orchestratorState.health)
+    .filter(([, record]) => record.status === "degraded" || record.status === "stopped")
+    .map(([component, record]) => `${component}: ${record.status} (${record.message})`);
+
+  const failingChecks = preflight.checks
+    .filter((check) => !check.ok)
+    .map((check) => `${check.key}: ${check.message}`);
+
+  const operationsBlock = [
+    "OPERATIONS SNAPSHOT:",
+    `- arb: ${appControl.arb.status} (updated ${appControl.arb.updatedAt})`,
+    `- sherpa: ${appControl.sherpa.status} (updated ${appControl.sherpa.updatedAt})`,
+    `- startupCompleted: ${appControl.controls.startupCompleted}`,
+    `- executionAuthority: ${appControl.controls.executionAuthority.mode} (maxTradeUsd ${appControl.controls.executionAuthority.maxTradeUsd}, cooldownMinutes ${appControl.controls.executionAuthority.cooldownMinutes})`,
+    `- channels: telegram=${appControl.controls.telegramEnabled}, x=${appControl.controls.xEnabled}`,
+    `- memoryEnabled: ${appControl.controls.memoryEnabled}, plannerEnabled: ${appControl.controls.plannerEnabled}`,
+    failingHealth.length
+      ? `- failingHealth: ${failingHealth.join("; ")}`
+      : "- failingHealth: none",
+    failingChecks.length
+      ? `- failingPreflightChecks: ${failingChecks.join("; ")}`
+      : "- failingPreflightChecks: none",
+    "TASK CONTROL CAPABILITIES:",
+    "- You can instruct users to use app control actions to start or stop ARB and Sherpa runtimes.",
+    "- If the user asks to start tasks, answer with the exact action(s) needed and call out current blockers first.",
+  ].join("\n");
+
   return [
     recentChatBlock,
     technical ? walletBlock : "",
     technical ? tradeBlock : "",
     reflectionBlock,
     relationshipBlock,
+    operationsBlock,
     `CURRENT MESSAGE:\n${message}`,
   ]
     .filter(Boolean)

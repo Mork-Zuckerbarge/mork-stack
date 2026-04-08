@@ -18,6 +18,36 @@ type WalletState = {
 let walletCache: WalletState | null = null;
 let walletCacheAt = 0;
 const WALLET_CACHE_MS = 15000;
+const RPC_RETRY_DELAYS_MS = [250, 600, 1200];
+
+function isRpcRateLimitError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("429") ||
+    lower.includes("too many requests") ||
+    lower.includes("rate limit")
+  );
+}
+
+async function withRpcRetry<T>(label: string, task: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= RPC_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      const canRetry = isRpcRateLimitError(error) && attempt < RPC_RETRY_DELAYS_MS.length;
+      if (!canRetry) break;
+      const delay = RPC_RETRY_DELAYS_MS[attempt];
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  const message = lastError instanceof Error ? lastError.message : String(lastError ?? "unknown RPC failure");
+  throw new Error(`${label} failed: ${message}`);
+}
 
 async function getSplBalance(
   connection: Connection,
@@ -26,9 +56,11 @@ async function getSplBalance(
 ): Promise<number> {
   const mintPk = new PublicKey(mint);
 
-  const accounts = await connection.getParsedTokenAccountsByOwner(owner, {
-    mint: mintPk,
-  });
+  const accounts = await withRpcRetry("getParsedTokenAccountsByOwner", () =>
+    connection.getParsedTokenAccountsByOwner(owner, {
+      mint: mintPk,
+    })
+  );
 
   let total = 0;
 
@@ -42,7 +74,11 @@ async function getSplBalance(
 }
 
 export async function getWalletBalancesForMints(mints: string[]): Promise<Record<string, number>> {
-  const RPC = process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com";
+  const RPC =
+    process.env.SOLANA_RPC_URL ||
+    process.env.SOLANA_RPC ||
+    process.env.RPC_URL ||
+    "https://api.mainnet-beta.solana.com";
   const WALLET = resolveWalletAddressFromEnv();
 
   if (!WALLET) {
@@ -58,7 +94,7 @@ export async function getWalletBalancesForMints(mints: string[]): Promise<Record
   await Promise.all(
     uniqueMints.map(async (mint) => {
       if (mint === SOL_MINT) {
-        const solLamports = await connection.getBalance(owner);
+        const solLamports = await withRpcRetry("getBalance", () => connection.getBalance(owner));
         balances[mint] = solLamports / 1e9;
         return;
       }
@@ -71,7 +107,11 @@ export async function getWalletBalancesForMints(mints: string[]): Promise<Record
 }
 
 async function fetchWalletState(): Promise<WalletState> {
-  const RPC = process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com";
+  const RPC =
+    process.env.SOLANA_RPC_URL ||
+    process.env.SOLANA_RPC ||
+    process.env.RPC_URL ||
+    "https://api.mainnet-beta.solana.com";
   const WALLET = resolveWalletAddressFromEnv();
 
   if (!WALLET) {
@@ -81,7 +121,7 @@ async function fetchWalletState(): Promise<WalletState> {
   const connection = new Connection(RPC);
   const owner = new PublicKey(WALLET);
 
-  const solLamports = await connection.getBalance(owner);
+  const solLamports = await withRpcRetry("getBalance", () => connection.getBalance(owner));
   const sol = solLamports / 1e9;
 
   const [bbq, usdc] = await Promise.all([

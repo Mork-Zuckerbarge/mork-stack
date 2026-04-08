@@ -70,8 +70,7 @@ export default function ChatPanel() {
 
   return (
     <div className="rounded-3xl border border-fuchsia-300/20 bg-gradient-to-b from-fuchsia-500/10 to-transparent p-5">
-      <h1 className="mb-1 text-2xl font-semibold">Vibecode Session</h1>
-      <p className="mb-4 text-sm text-white/70">Fast iterations for app logic, prompts, and runbook-level commands.</p>
+      <h1 className="mb-4 text-2xl font-semibold">TERMINAL</h1>
       {preflightWarning ? (
         <div className="mb-3 rounded-2xl border border-amber-300/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
           Chat dependency warning: {preflightWarning}
