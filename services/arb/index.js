@@ -392,6 +392,27 @@ async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function isRpcRateLimitError(err) {
+  const msg = String(err?.message || err || "");
+  return msg.includes('"code": 429') || msg.includes(" 429 ") || msg.includes("Too many requests");
+}
+
+async function withRetry(label, fn, { attempts = 4, baseDelayMs = 500 } = {}) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isRpcRateLimitError(err) || i === attempts - 1) break;
+      const waitMs = baseDelayMs * (i + 1) ** 2 + Math.floor(Math.random() * 250);
+      console.log(`⚠️ ${label} rate-limited (attempt ${i + 1}/${attempts}); retrying in ${waitMs}ms`);
+      await sleep(waitMs);
+    }
+  }
+  throw lastErr;
+}
+
 const WALLET_PATH = process.env.WALLET_PATH;
 const MAX_TRADE_USDC = Number(process.env.MAX_TRADE_USDC || 0);
 const WALLET_SECRET_KEY = process.env.MORK_WALLET_SECRET_KEY;
@@ -1074,10 +1095,12 @@ async function sendWalletSnapshotToMork(snap) {
 
 async function main() {
   console.log("RPC:", RPC_URL);
-  console.log("Cluster:", await connection.getVersion());
+  console.log("Cluster:", await withRetry("getVersion", () => connection.getVersion()));
 
   console.log("Checking bot wallet balances...");
-  const bootSnap = await getWalletSnapshotFull(connection, wallet.publicKey, { topN: 999 });
+  const bootSnap = await withRetry("boot wallet snapshot", () =>
+    getWalletSnapshotFull(connection, wallet.publicKey, { topN: 999 })
+  );
   printWalletSnapshot(bootSnap);
 
   sendWalletSnapshotToMork(bootSnap)
@@ -1100,14 +1123,18 @@ async function main() {
   const blacklist = new Set();
   const BATCH_SIZE = 3;
   let cursor = 0;
+  const SCAN_TIMEOUT_MS = Number(process.env.SCAN_TIMEOUT_MS || 12000);
+  const HEARTBEAT_EVERY = Number(process.env.HEARTBEAT_EVERY_LOOPS || 10);
+  let loopCount = 0;
 
   const BALANCE_CHECK_EVERY_MS = Number(process.env.BALANCE_CHECK_EVERY_MS || 600000);
 
   while (true) {
+    loopCount += 1;
     if (Date.now() - lastFeeCheck > FEE_CHECK_EVERY_MS) {
       lastFeeCheck = Date.now();
       try {
-        await ensureFeeBalance(connection, wallet);
+        await withRetry("ensureFeeBalance", () => ensureFeeBalance(connection, wallet));
       } catch (e) {
         console.log(`⚠ Fee upkeep error: ${e.message}`);
       }
@@ -1118,11 +1145,13 @@ async function main() {
 
       try {
         console.log("\n🔎 Balance check:");
-        const snap = await getWalletSnapshotFull(connection, wallet.publicKey, { topN: 999 });
+        const snap = await withRetry("periodic wallet snapshot", () =>
+          getWalletSnapshotFull(connection, wallet.publicKey, { topN: 999 })
+        );
         printWalletSnapshot(snap);
 
         // ⛔ gate (your BBQ rule) — keep this where it belongs
-        const bbqBal = await enforceBbqGateOrExit(connection, wallet.publicKey);
+        const bbqBal = await withRetry("BBQ gate", () => enforceBbqGateOrExit(connection, wallet.publicKey));
         console.log(`✅ BBQ gate passed. BBQ=${Number(bbqBal).toFixed(6)}`);
 
         sendWalletSnapshotToMork(snap)
@@ -1133,6 +1162,83 @@ async function main() {
       } catch (e) {
         console.log(`⚠ Balance check error: ${e.message}`);
       }
+    }
+
+    const batch = [];
+    const startCursor = cursor;
+    for (let i = 0; i < BATCH_SIZE; i++) {
+      batch.push(markets[(cursor + i) % markets.length]);
+    }
+    cursor = (cursor + BATCH_SIZE) % markets.length;
+
+    for (const m of batch) {
+      if (!m?.inMint || blacklist.has(m.inMint)) continue;
+
+      let scan = null;
+      try {
+        scan = await Promise.race([
+          scanMarketA(m),
+          sleep(SCAN_TIMEOUT_MS).then(() => ({ __timedOut: true })),
+        ]);
+      } catch (e) {
+        if (isSkippableJupError(e)) continue;
+        if (isRpcRateLimitError(e)) {
+          console.log(`⚠️ scan rate-limited for ${m.symbol || m.inMint}: ${e.message}`);
+          continue;
+        }
+        console.log(`⚠️ scan error ${m.symbol || m.inMint}: ${e.message}`);
+        continue;
+      }
+
+      if (scan?.__timedOut) {
+        console.log(`⏱️ scan timeout ${m.symbol || m.inMint} after ${SCAN_TIMEOUT_MS}ms`);
+        continue;
+      }
+      if (!scan || !scan.good) continue;
+
+      const hits = recordCandidateHit(m.inMint);
+      console.log(
+        `➡️  CANDIDATE ${m.symbol || m.inMint} edge=${scan.edgePct.toFixed(3)}% net≈$${scan.netUsdProfit.toFixed(4)} hits=${hits}/${CANDIDATE_THRESHOLD}`
+      );
+
+      if (hits < CANDIDATE_THRESHOLD) continue;
+
+      const gate = await riskAuthorize(
+        {
+          mint: m.inMint,
+          symbol: m.symbol || m.inMint,
+          spendUsd: scan.spendUsd || scan.usdNotional || 0,
+          netUsd: scan.netUsdProfit || 0,
+          edgePct: scan.edgePct || 0,
+        },
+        connection,
+        wallet.publicKey
+      );
+
+      if (!gate.ok) {
+        console.log(`⛔ RISK BLOCK ${m.symbol || m.inMint}: ${gate.reason}`);
+        continue;
+      }
+
+      recordTradeAttempt({ mint: m.inMint });
+      const exec = await executeRouteA(m, scan);
+      if (exec.ok) {
+        recordTradeResult({ ok: true, realizedPnlUsd: Number(exec.net) || 0 });
+        console.log(`✅ TRADE SENT ${m.symbol || m.inMint} sig=${exec.sig} net≈$${Number(exec.net || 0).toFixed(4)}`);
+      } else {
+        recordTradeResult({ ok: false, realizedPnlUsd: 0 });
+        console.log(`⚠ TRADE SKIP ${m.symbol || m.inMint}: ${exec.reason || "unknown reason"}`);
+        if (exec.blacklist) {
+          blacklist.add(m.inMint);
+          console.log(`⛔ BLACKLIST ${m.symbol || m.inMint} due to repeated execution errors`);
+        }
+      }
+    }
+
+    if (loopCount % HEARTBEAT_EVERY === 0) {
+      console.log(
+        `💓 heartbeat loops=${loopCount} cursor=${startCursor}->${cursor} batch=${batch.length} blacklist=${blacklist.size}`
+      );
     }
 
     await sleep(LOOP_DELAY_MS ?? 15000);
