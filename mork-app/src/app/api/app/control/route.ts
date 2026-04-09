@@ -29,11 +29,19 @@ type Action =
   | "execution.authority.set"
   | "response.params.set";
 
+function getArbRuntimeFromEnv() {
+  return {
+    armed: String(process.env.ARMED || "").toLowerCase() === "true",
+    paper: String(process.env.PAPER || "true").toLowerCase() === "true",
+  };
+}
+
 export async function GET() {
   const orchestrator = await getOrchestratorState();
   return NextResponse.json({
     ok: true,
     state: orchestrator.app,
+    arbRuntime: getArbRuntimeFromEnv(),
     orchestrator: {
       health: orchestrator.health,
       runtimeFlagOwner: orchestrator.runtimeFlagOwner,
@@ -181,6 +189,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       state: orchestrator.app,
+      arbRuntime: getArbRuntimeFromEnv(),
       orchestrator: {
         health: orchestrator.health,
         runtimeFlagOwner: orchestrator.runtimeFlagOwner,

@@ -70,6 +70,11 @@ type WalletProvisioning = {
   source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
 };
 
+type ArbRuntimeConfig = {
+  armed: boolean;
+  paper: boolean;
+};
+
 function formatTokenAmount(value: number | undefined, maxFractionDigits = 9): string {
   if (!Number.isFinite(value)) return "0";
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: maxFractionDigits });
@@ -148,6 +153,7 @@ export default function JupiterPanel() {
   const [arbStartupStatus, setArbStartupStatus] = useState("");
   const [panelRefreshBusy, setPanelRefreshBusy] = useState(false);
   const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
+  const [arbRuntimeConfig, setArbRuntimeConfig] = useState<ArbRuntimeConfig | null>(null);
 
   const selectedInputToken = useMemo(
     () => inputTokenResults.find((token) => token.mint === selectedInputMint) ?? { symbol: shortMint(selectedInputMint), mint: selectedInputMint },
@@ -259,23 +265,27 @@ export default function JupiterPanel() {
           controls?: { executionAuthority?: ExecutionAuthority; startupCompleted?: boolean };
           walletProvisioning?: WalletProvisioning;
         };
+        arbRuntime?: ArbRuntimeConfig;
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
         setExecution(null);
         setArbStatus("stopped");
         setStartupCompleted(false);
         setWalletProvisioning(null);
+        setArbRuntimeConfig(null);
         return;
       }
       setExecution(data.state.controls.executionAuthority);
       setArbStatus(data.state.arb?.status === "running" ? "running" : "stopped");
       setStartupCompleted(Boolean(data.state.controls.startupCompleted));
       setWalletProvisioning(data.state.walletProvisioning ?? null);
+      setArbRuntimeConfig(data.arbRuntime ?? null);
     } catch {
       setExecution(null);
       setArbStatus("stopped");
       setStartupCompleted(false);
       setWalletProvisioning(null);
+      setArbRuntimeConfig(null);
     }
   }, []);
 
@@ -571,6 +581,7 @@ export default function JupiterPanel() {
           startupCompleted={startupCompleted}
           arbStartupBusy={arbStartupBusy}
           arbStartupStatus={arbStartupStatus}
+          arbRuntimeConfig={arbRuntimeConfig}
           onEnsureArbOnStartup={ensureArbOnStartup}
           onSave={saveExecution}
         />
@@ -812,6 +823,7 @@ function ExecutionControls({
   startupCompleted,
   arbStartupBusy,
   arbStartupStatus,
+  arbRuntimeConfig,
   onEnsureArbOnStartup,
   onSave,
 }: {
@@ -824,6 +836,7 @@ function ExecutionControls({
   startupCompleted: boolean;
   arbStartupBusy: boolean;
   arbStartupStatus: string;
+  arbRuntimeConfig: ArbRuntimeConfig | null;
   onEnsureArbOnStartup: () => void;
   onSave: (input: ExecutionAuthority) => void;
 }) {
@@ -831,6 +844,24 @@ function ExecutionControls({
   const [maxTradeUsd, setMaxTradeUsd] = useState(String(execution?.maxTradeUsd ?? 50));
   const [cooldownMinutes, setCooldownMinutes] = useState(String(execution?.cooldownMinutes ?? 15));
   const [allowlist, setAllowlist] = useState(execution?.mintAllowlist.join(",") ?? "");
+  const [allowlistLoadStatus, setAllowlistLoadStatus] = useState("");
+
+  async function loadTopAllowlist() {
+    setAllowlistLoadStatus("");
+    try {
+      const res = await fetch("/api/arb/allowlist?limit=500", { cache: "no-store" });
+      const data = (await res.json()) as { ok?: boolean; count?: number; mints?: string[] };
+      if (!res.ok || !data.ok || !Array.isArray(data.mints)) {
+        setAllowlistLoadStatus("Unable to load whitelist.json");
+        return;
+      }
+
+      setAllowlist(data.mints.join(","));
+      setAllowlistLoadStatus(`Loaded top ${data.count ?? data.mints.length} mints from whitelist.json`);
+    } catch {
+      setAllowlistLoadStatus("Unable to load whitelist.json");
+    }
+  }
 
   return (
     <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
@@ -847,6 +878,9 @@ function ExecutionControls({
             </div>
             <div className="mt-1">
               Startup ready: {startupCompleted ? "yes" : "no"}
+            </div>
+            <div className="mt-1">
+              Execution env: {arbRuntimeConfig?.armed ? "ARMED" : "SAFE"} / {arbRuntimeConfig?.paper ? "paper" : "live"}
             </div>
             <button
               type="button"
@@ -868,6 +902,14 @@ function ExecutionControls({
           <input value={maxTradeUsd} onChange={(e) => setMaxTradeUsd(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <label className="text-white/70">Mint allowlist (comma separated)</label>
           <input value={allowlist} onChange={(e) => setAllowlist(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <button
+            type="button"
+            onClick={loadTopAllowlist}
+            className="rounded-lg border border-cyan-300/30 bg-cyan-200/10 px-2 py-1 text-left"
+          >
+            Load top-500 allowlist from arb/whitelist.json
+          </button>
+          {allowlistLoadStatus ? <p className="text-[11px] text-white/60">{allowlistLoadStatus}</p> : null}
           <label className="text-white/70">Cooldown (minutes)</label>
           <input value={cooldownMinutes} onChange={(e) => setCooldownMinutes(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <div className="mt-1 rounded-xl bg-black/30 p-2 text-white/70">

@@ -14,14 +14,39 @@ type AgentState = {
   };
 };
 
+type ChannelActivity = {
+  telegram?: {
+    count: number;
+    items: Array<{ createdAt: string; content: string; source: string | null }>;
+  };
+  arbLearning?: {
+    routeResearchCount: number;
+  };
+  latestEpisode?: {
+    createdAt: string;
+    learned: string;
+    summary: string;
+  } | null;
+  arbRuntime?: {
+    armed: boolean;
+    paper: boolean;
+  };
+};
+
 export default function AgentStatusCard() {
   const [state, setState] = useState<AgentState | null>(null);
+  const [activity, setActivity] = useState<ChannelActivity | null>(null);
 
   useEffect(() => {
     fetch("/api/agent/state")
       .then((r) => r.json())
       .then(setState)
       .catch(() => setState(null));
+
+    fetch("/api/channel/activity", { cache: "no-store" })
+      .then((r) => r.json())
+      .then(setActivity)
+      .catch(() => setActivity(null));
   }, []);
 
   return (
@@ -37,6 +62,30 @@ export default function AgentStatusCard() {
           <div><span className="text-white/50">Model: </span>{state.agent.model}</div>
           <div><span className="text-white/50">Arb: </span>{state.app?.arb?.status || "unknown"}</div>
           <div><span className="text-white/50">Sherpa: </span>{state.app?.sherpa?.status || "unknown"}</div>
+          <div>
+            <span className="text-white/50">Arb execution: </span>
+            {activity?.arbRuntime?.armed ? "ARMED" : "SAFE (not armed)"} / {activity?.arbRuntime?.paper ? "paper" : "live"}
+          </div>
+          <div><span className="text-white/50">Telegram memory events: </span>{activity?.telegram?.count ?? 0}</div>
+          <div><span className="text-white/50">Arb learning events: </span>{activity?.arbLearning?.routeResearchCount ?? 0}</div>
+
+          {activity?.telegram?.items?.length ? (
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-2 text-xs text-white/70">
+              <div className="mb-1 text-[11px] text-white/50">Recent Telegram activity</div>
+              {activity.telegram.items.slice(0, 3).map((item) => (
+                <div key={`${item.createdAt}-${item.content.slice(0, 32)}`} className="truncate">
+                  {item.content}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {activity?.latestEpisode?.learned ? (
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-2 text-xs text-white/70">
+              <div className="mb-1 text-[11px] text-white/50">Latest learning note</div>
+              <div className="line-clamp-3">{activity.latestEpisode.learned}</div>
+            </div>
+          ) : null}
 
           <div className="mt-3 space-y-2">
             <PersonaRow channel="App Control Panel" tone="Code-first copilot" enabled />
