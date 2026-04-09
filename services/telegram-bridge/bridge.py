@@ -8,7 +8,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+
+def normalize_bot_token(raw_token: str) -> str:
+    token = (raw_token or "").strip()
+    if token.lower().startswith("https://api.telegram.org/bot"):
+        token = token.split("/bot", 1)[1].split("/", 1)[0].strip()
+    if token.lower().startswith("bot"):
+        token = token[3:].strip()
+    return token
+
+
+BOT_TOKEN = normalize_bot_token(os.getenv("TELEGRAM_BOT_TOKEN", ""))
 CORE_URL = os.getenv("MORK_CORE_URL", "http://127.0.0.1:8790").strip().rstrip("/")
 CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/chat/respond").strip() or "/chat/respond"
 REPLY_MODE = os.getenv("REPLY_MODE", "mentions").strip().lower()  # mentions | all | dm
@@ -214,12 +224,27 @@ def send_voice(chat_id: int, text: str, reply_to: int | None = None):
 
 def get_me():
     r = requests.get(f"{API}/getMe", timeout=20)
+    if r.status_code == 404:
+        preview = f"{BOT_TOKEN[:8]}..." if BOT_TOKEN else "<empty>"
+        raise RuntimeError(
+            "Telegram getMe returned 404. TELEGRAM_BOT_TOKEN appears invalid "
+            f"(value starts with: {preview}). "
+            "Use the HTTP API bot token from @BotFather (format like 123456:ABC...). "
+            "Do not use a chat id."
+        )
     r.raise_for_status()
     return r.json()["result"]
 
 
 def main():
-    me = get_me()
+    me = None
+    while me is None:
+        try:
+            me = get_me()
+        except Exception as e:
+            print("[bridge] telegram auth/init error:", repr(e))
+            time.sleep(5)
+
     bot_username = me.get("username", "") or ""
     bot_id = int(me.get("id"))
     print(
