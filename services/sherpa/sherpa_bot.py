@@ -401,6 +401,7 @@ def _prune_backlog(backlog: list) -> list:
 # Constants
 ENCRYPTION_KEY_FILE = "encryption.key"
 CREDENTIALS_FILE = "encrypted_credentials.bin"
+CROSS_SERVICE_ENV_PATH = Path(__file__).resolve().parents[2] / "mork-app" / ".env.local"
 CHARACTERS_FILE = "encrypted_characters.bin"
 FEED_CONFIG_FILE = "encrypted_feed_config.bin"  # New file for feed selection
 MAX_TWEETS_PER_MONTH = 500
@@ -1384,6 +1385,7 @@ class TwitterBot:
                 # keep existing client if you want; or set to None to be strict
                 print("Twitter client not re-initialized (missing one or more X keys).")
 
+            self.sync_telegram_env(credentials)
             return True
 
         except Exception as e:
@@ -1391,6 +1393,37 @@ class TwitterBot:
             import traceback
             traceback.print_exc()
             return False
+
+    def sync_telegram_env(self, credentials):
+        token = (credentials.get("telegram_bot_token") or "").strip()
+        chat_id = (credentials.get("telegram_chat_id") or "").strip()
+        if not token and not chat_id:
+            return
+
+        env_path = CROSS_SERVICE_ENV_PATH
+        try:
+            lines = []
+            if env_path.exists():
+                lines = env_path.read_text(encoding="utf-8").splitlines()
+
+            def upsert(lines_in, key, value):
+                new_line = f'{key}="{value}"'
+                for idx, line in enumerate(lines_in):
+                    if line.strip().startswith(f"{key}="):
+                        lines_in[idx] = new_line
+                        return
+                lines_in.append(new_line)
+
+            if token:
+                upsert(lines, "TELEGRAM_BOT_TOKEN", token)
+            if chat_id:
+                upsert(lines, "TELEGRAM_CHAT_ID", chat_id)
+
+            env_path.parent.mkdir(parents=True, exist_ok=True)
+            env_path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+            print(f"[creds] Updated telegram values in {env_path}")
+        except Exception as e:
+            print(f"[creds] Failed to sync telegram env file: {e}")
     
         
     def get_article_content(self, url):
