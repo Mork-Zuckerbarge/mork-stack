@@ -30,7 +30,13 @@ The start command will:
 - run setup/bootstrap first,
 - then launch the web app in dev mode,
 - auto-start arb (`services/arb/index.js`) in the same launch flow,
-- auto-start Sherpa (`services/sherpa/sherpa_bot.py`) when `services/sherpa/.venv` exists.
+- auto-start Sherpa (`services/sherpa/sherpa_bot.py`) when `services/sherpa/.venv` exists,
+- auto-start Telegram bridge (`services/telegram-bridge/bridge.py`) when `TELEGRAM_BOT_TOKEN` is set.
+
+Telegram bridge notes for local `./start.sh`:
+- `MORK_CORE_URL` defaults to `http://127.0.0.1:3000` for local runs (so both arb reporter + telegram bridge can call `mork-app` APIs locally),
+- set `MORK_CORE_URL` explicitly in `mork-app/.env.local` if your API endpoint runs elsewhere.
+- Background process logs are written to `.logs/arb.log`, `.logs/sherpa.log`, and `.logs/telegram-bridge.log`.
 
 Bootstrap includes:
 - install app dependencies,
