@@ -846,7 +846,7 @@ function ExecutionControls({
   const [allowlist, setAllowlist] = useState(execution?.mintAllowlist.join(",") ?? "");
   const [allowlistLoadStatus, setAllowlistLoadStatus] = useState("");
 
-  async function loadTopAllowlist() {
+  const loadTopAllowlist = useCallback(async () => {
     setAllowlistLoadStatus("");
     try {
       const res = await fetch("/api/arb/allowlist?limit=500", { cache: "no-store" });
@@ -861,7 +861,16 @@ function ExecutionControls({
     } catch {
       setAllowlistLoadStatus("Unable to load whitelist.json");
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!execution) return;
+    if (execution.mintAllowlist.length > 0) return;
+    const id = window.setTimeout(() => {
+      void loadTopAllowlist();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [execution, loadTopAllowlist]);
 
   return (
     <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
