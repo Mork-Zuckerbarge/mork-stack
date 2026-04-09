@@ -8,7 +8,13 @@ export const runtime = "nodejs";
 
 const PRESERVED_FILES = [
   ".env",
+  ".env.local",
+  "mork-app/.env",
   "mork-app/.env.local",
+  "services/arb/.env",
+  "services/mork-core/.env",
+  "services/telegram-bridge/.env",
+  "services/sherpa/.env",
   "services/sherpa/encrypted_credentials.bin",
   "services/sherpa/encrypted_characters.bin",
   "services/sherpa/encrypted_feed_config.bin",
