@@ -7,6 +7,9 @@ ARB_DIR="$ROOT_DIR/services/arb"
 SHERPA_DIR="$ROOT_DIR/services/sherpa"
 TELEGRAM_BRIDGE_DIR="$ROOT_DIR/services/telegram-bridge"
 LOG_DIR="$ROOT_DIR/.logs"
+PERSIST_DIR="${MORK_PERSIST_DIR:-${HOME:-$ROOT_DIR}/.mork-stack}"
+PERSIST_ENV_FILE="$PERSIST_DIR/mork-app/.env.local"
+PERSIST_SHERPA_CREDS_FILE="$PERSIST_DIR/services/sherpa/encrypted_credentials.bin"
 
 ARB_PID=""
 SHERPA_PID=""
@@ -15,7 +18,35 @@ TELEGRAM_PID=""
 log() { printf "\n[%s] %s\n" "start" "$1"; }
 warn() { printf "\n[%s] %s\n" "warn" "$1"; }
 
+restore_persistent_state() {
+  if [[ -f "$PERSIST_ENV_FILE" && ! -f "$APP_DIR/.env.local" ]]; then
+    mkdir -p "$APP_DIR"
+    cp "$PERSIST_ENV_FILE" "$APP_DIR/.env.local"
+    log "Restored mork-app/.env.local from persistent state ($PERSIST_DIR)"
+  fi
+
+  if [[ -f "$PERSIST_SHERPA_CREDS_FILE" && ! -f "$SHERPA_DIR/encrypted_credentials.bin" ]]; then
+    mkdir -p "$SHERPA_DIR"
+    cp "$PERSIST_SHERPA_CREDS_FILE" "$SHERPA_DIR/encrypted_credentials.bin"
+    log "Restored Sherpa encrypted credentials from persistent state ($PERSIST_DIR)"
+  fi
+}
+
+sync_persistent_state() {
+  mkdir -p "$PERSIST_DIR/mork-app" "$PERSIST_DIR/services/sherpa"
+
+  if [[ -f "$APP_DIR/.env.local" ]]; then
+    cp "$APP_DIR/.env.local" "$PERSIST_ENV_FILE"
+  fi
+
+  if [[ -f "$SHERPA_DIR/encrypted_credentials.bin" ]]; then
+    cp "$SHERPA_DIR/encrypted_credentials.bin" "$PERSIST_SHERPA_CREDS_FILE"
+  fi
+}
+
 cleanup() {
+  sync_persistent_state
+
   if [[ -n "$ARB_PID" ]] && kill -0 "$ARB_PID" >/dev/null 2>&1; then
     log "Stopping arb service (pid=$ARB_PID)"
     kill "$ARB_PID" >/dev/null 2>&1 || true
@@ -37,9 +68,12 @@ if [[ ! -d "$APP_DIR" ]]; then
   exit 1
 fi
 
+restore_persistent_state
+
 log "Bootstrapping local dependencies"
 "$ROOT_DIR/setup.sh"
 mkdir -p "$LOG_DIR"
+sync_persistent_state
 
 if [[ -f "$APP_DIR/.env.local" ]]; then
   log "Loading environment from mork-app/.env.local"
