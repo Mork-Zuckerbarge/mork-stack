@@ -40,6 +40,7 @@ export type AppControlState = {
       allowUserMessageQuotes: boolean;
       behaviorGuidelines: string;
     };
+    activePanel: "arb" | "trade";
   };
   walletProvisioning: {
     status: "provisioned_existing" | "needs_setup";
@@ -93,6 +94,7 @@ const state: AppControlState = {
       behaviorGuidelines:
         "Do NOT act like the TV character from Mork & Mindy.\nNever say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\nDo not create false information.\nIf you do not know something, say so plainly.",
     },
+    activePanel: "trade",
   },
   walletProvisioning: {
     status: "needs_setup",
@@ -284,6 +286,9 @@ function applyPersistedState(raw: unknown) {
       if (typeof responsePolicy.behaviorGuidelines === "string") {
         state.controls.responsePolicy.behaviorGuidelines = responsePolicy.behaviorGuidelines;
       }
+    }
+    if (controls.activePanel === "arb" || controls.activePanel === "trade") {
+      state.controls.activePanel = controls.activePanel;
     }
   }
 }
@@ -529,4 +534,11 @@ export async function setResponsePolicy(input: {
   };
   await persistState();
   return structuredClone(state.controls.responsePolicy);
+}
+
+export async function setActivePanel(panel: "arb" | "trade") {
+  await ensureStateLoaded();
+  state.controls.activePanel = panel;
+  await persistState();
+  return state.controls.activePanel;
 }

@@ -9,6 +9,7 @@ import {
   setRuntimePersonaGuidelines,
   setRuntimePersonaMode,
   setRuntimeStartupCompleted,
+  setRuntimeActivePanel,
   setRuntimeResponsePolicy,
   startRuntime,
   stopRuntime,
@@ -27,7 +28,8 @@ type Action =
   | "ollama.model.set"
   | "startup.completed.set"
   | "execution.authority.set"
-  | "response.params.set";
+  | "response.params.set"
+  | "runtime.panel.set";
 
 function getArbRuntimeFromEnv() {
   return {
@@ -181,6 +183,15 @@ export async function POST(req: NextRequest) {
         allowUserMessageQuotes,
         behaviorGuidelines,
       });
+    } else if (action === "runtime.panel.set") {
+      const panel = body?.panel;
+      if (panel !== "arb" && panel !== "trade") {
+        return NextResponse.json(
+          { ok: false, error: "runtime.panel.set requires panel=arb|trade" },
+          { status: 400 }
+        );
+      }
+      await setRuntimeActivePanel(panel);
     } else {
       return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
     }

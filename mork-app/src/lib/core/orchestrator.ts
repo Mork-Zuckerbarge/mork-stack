@@ -7,6 +7,7 @@ import {
   setPersonaMode,
   setSelectedOllamaModel,
   setStartupCompleted,
+  setActivePanel,
   startArb,
   startSherpa,
   stopArb,
@@ -124,6 +125,11 @@ export async function setRuntimeResponsePolicy(input: {
   behaviorGuidelines: string;
 }) {
   await setResponsePolicy(input);
+  return getOrchestratorState();
+}
+
+export async function setRuntimeActivePanel(panel: "arb" | "trade") {
+  await setActivePanel(panel);
   return getOrchestratorState();
 }
 
