@@ -1,5 +1,7 @@
 import { prisma } from "./prisma";
 import { resolveWalletConfigFromEnv } from "./walletConfig";
+import fs from "node:fs";
+import path from "node:path";
 
 export type RuntimeStatus = "running" | "stopped";
 
@@ -51,6 +53,9 @@ type BooleanControlKey = "memoryEnabled" | "plannerEnabled" | "telegramEnabled" 
 const nowIso = () => new Date().toISOString();
 const APP_CONTROL_FACT_KEY = "__app_control_state_v1__";
 const AUTO_START_ON_BOOT = process.env.MORK_AUTO_START_ON_BOOT !== "0";
+const STARTUP_ALLOWLIST_LIMIT = 500;
+const FALLBACK_TOKEN_CSV =
+  "https://raw.githubusercontent.com/igneous-labs/jup-token-list/main/validated-tokens.csv";
 
 const state: AppControlState = {
   arb: {
@@ -97,6 +102,91 @@ const state: AppControlState = {
 };
 
 let hasLoadedPersistedState = false;
+
+function normalizeMintList(values: Array<string | null | undefined>, limit: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const mint = (value || "").trim();
+    if (!mint || seen.has(mint)) continue;
+    seen.add(mint);
+    out.push(mint);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    const next = line[i + 1];
+    if (ch === "\"" && next === "\"") {
+      cur += "\"";
+      i += 1;
+      continue;
+    }
+    if (ch === "\"") {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+function pickHeaderIndex(headers: string[], candidates: string[]): number {
+  const normalized = headers.map((item) => item.toLowerCase());
+  for (const candidate of candidates) {
+    const idx = normalized.indexOf(candidate);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+function readWhitelistMints(limit: number): string[] {
+  const whitelistPath = path.resolve(process.cwd(), "../services/arb/whitelist.json");
+  if (!fs.existsSync(whitelistPath)) return [];
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(whitelistPath, "utf8"));
+    if (!Array.isArray(parsed)) return [];
+    const mints = parsed.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object" && "inMint" in item && typeof item.inMint === "string") return item.inMint;
+      return "";
+    });
+    return normalizeMintList(mints, limit);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchFallbackMints(limit: number): Promise<string[]> {
+  try {
+    const response = await fetch(FALLBACK_TOKEN_CSV, {
+      headers: { accept: "text/plain" },
+      cache: "no-store",
+    });
+    if (!response.ok) return [];
+    const csv = await response.text();
+    const lines = csv.split(/\r?\n/).filter(Boolean);
+    if (lines.length < 2) return [];
+    const headers = parseCsvLine(lines[0]);
+    const mintIdx = pickHeaderIndex(headers, ["address", "mint", "mintaddress", "token_address"]);
+    if (mintIdx < 0) return [];
+    return normalizeMintList(lines.slice(1).map((line) => parseCsvLine(line)[mintIdx] || ""), limit);
+  } catch {
+    return [];
+  }
+}
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -232,6 +322,15 @@ async function ensureStateLoaded() {
     }
 
     if (shouldPersist) {
+      await persistState();
+    }
+  }
+
+  if (state.controls.executionAuthority.mintAllowlist.length === 0) {
+    const startupMints = readWhitelistMints(STARTUP_ALLOWLIST_LIMIT);
+    const fallbackMints = startupMints.length > 0 ? startupMints : await fetchFallbackMints(STARTUP_ALLOWLIST_LIMIT);
+    if (fallbackMints.length > 0) {
+      state.controls.executionAuthority.mintAllowlist = fallbackMints;
       await persistState();
     }
   }
