@@ -29,6 +29,7 @@ cd ~/mork-stack
 
 `./update.sh` does a fast-forward `git pull` on your current branch, then runs `./start.sh`.
 This keeps local runtime files in place and works with the persistent credential sync in `start.sh`.
+If local changes exist, `./update.sh` auto-stashes them before pulling and then restores them after update.
 
 ## Repo guide
 
