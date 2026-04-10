@@ -18,6 +18,19 @@ cd "$REPO_DIR"; \
 
 > `./start.sh` runs in the foreground to keep services alive.
 
+## Updating without deleting local state
+
+Do **not** remove/re-clone the repo for normal updates. Use:
+
+```bash
+cd ~/mork-stack
+./update.sh
+```
+
+`./update.sh` does a fast-forward `git pull` on your current branch, then runs `./start.sh`.
+This keeps local runtime files in place and works with the persistent credential sync in `start.sh`.
+If local changes exist, `./update.sh` auto-stashes them before pulling and then restores them after update.
+
 ## Repo guide
 
 - App/runtime docs: [`mork-app/README.md`](mork-app/README.md)
