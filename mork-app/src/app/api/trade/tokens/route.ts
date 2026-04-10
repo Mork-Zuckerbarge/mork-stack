@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAppControlState } from "@/lib/core/appControl";
 
 export const runtime = "nodejs";
 
@@ -27,6 +28,11 @@ function normalizeToken(token: JupiterToken) {
 
 export async function GET(req: Request) {
   try {
+    const control = await getAppControlState();
+    if (control.arb.status === "running" || control.controls.activePanel !== "trade") {
+      return NextResponse.json({ ok: true, tokens: [] });
+    }
+
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q")?.trim() ?? "";
 

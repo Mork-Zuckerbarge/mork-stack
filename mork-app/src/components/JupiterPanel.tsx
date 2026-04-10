@@ -63,6 +63,7 @@ type ExecutionAuthority = {
 };
 
 type RuntimeStatus = "running" | "stopped";
+type ActivePanel = "arb" | "trade";
 
 type WalletProvisioning = {
   status: "provisioned_existing" | "needs_setup";
@@ -154,6 +155,7 @@ export default function JupiterPanel() {
   const [panelRefreshBusy, setPanelRefreshBusy] = useState(false);
   const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
   const [arbRuntimeConfig, setArbRuntimeConfig] = useState<ArbRuntimeConfig | null>(null);
+  const [activePanel, setActivePanel] = useState<ActivePanel>("trade");
 
   const selectedInputToken = useMemo(
     () => inputTokenResults.find((token) => token.mint === selectedInputMint) ?? { symbol: shortMint(selectedInputMint), mint: selectedInputMint },
@@ -177,6 +179,8 @@ export default function JupiterPanel() {
     inputTokenResults.length > 1 || (inputTokenResults.length === 1 && inputTokenResults[0].mint !== selectedInputMint);
   const showOutputTokenOptions =
     outputTokenResults.length > 1 || (outputTokenResults.length === 1 && outputTokenResults[0].mint !== selectedOutputMint);
+  const tradePaused = arbStatus === "running" || activePanel !== "trade";
+  const arbPaused = activePanel !== "arb";
 
   const fetchTokenOptions = useCallback(async (query: string): Promise<TokenOption[]> => {
     const q = query.trim();
@@ -262,7 +266,7 @@ export default function JupiterPanel() {
         ok?: boolean;
         state?: {
           arb?: { status?: RuntimeStatus };
-          controls?: { executionAuthority?: ExecutionAuthority; startupCompleted?: boolean };
+          controls?: { executionAuthority?: ExecutionAuthority; startupCompleted?: boolean; activePanel?: ActivePanel };
           walletProvisioning?: WalletProvisioning;
         };
         arbRuntime?: ArbRuntimeConfig;
@@ -278,12 +282,14 @@ export default function JupiterPanel() {
       setExecution(data.state.controls.executionAuthority);
       setArbStatus(data.state.arb?.status === "running" ? "running" : "stopped");
       setStartupCompleted(Boolean(data.state.controls.startupCompleted));
+      setActivePanel(data.state.controls.activePanel === "arb" ? "arb" : "trade");
       setWalletProvisioning(data.state.walletProvisioning ?? null);
       setArbRuntimeConfig(data.arbRuntime ?? null);
     } catch {
       setExecution(null);
       setArbStatus("stopped");
       setStartupCompleted(false);
+      setActivePanel("trade");
       setWalletProvisioning(null);
       setArbRuntimeConfig(null);
     }
@@ -376,6 +382,10 @@ export default function JupiterPanel() {
   }
 
   const loadQuote = useCallback(async () => {
+    if (tradePaused) {
+      setQuote(null);
+      return;
+    }
     if (!Number.isFinite(parsedAmountSol) || parsedAmountSol <= 0 || !hasValidPair) {
       setQuote(null);
       return;
@@ -396,9 +406,13 @@ export default function JupiterPanel() {
     } catch {
       setQuote({ ok: false, error: "Quote unavailable" });
     }
-  }, [hasValidPair, parsedAmountSol, selectedInputMint, selectedOutputMint, slippageBps]);
+  }, [hasValidPair, parsedAmountSol, selectedInputMint, selectedOutputMint, slippageBps, tradePaused]);
 
   const loadPairBalances = useCallback(async () => {
+    if (tradePaused) {
+      setPairBalances({});
+      return;
+    }
     if (!hasValidPair) {
       setPairBalances({});
       return;
@@ -422,7 +436,7 @@ export default function JupiterPanel() {
     } finally {
       setPairBalancesLoading(false);
     }
-  }, [hasValidPair, selectedInputMint, selectedOutputMint]);
+  }, [hasValidPair, selectedInputMint, selectedOutputMint, tradePaused]);
 
   const refreshWalletControlPanel = useCallback(async () => {
     if (panelRefreshBusy) return;
@@ -483,6 +497,13 @@ export default function JupiterPanel() {
   }, [loadPairBalances]);
 
   async function submitDirectSwap() {
+    if (tradePaused) {
+      setStatus({
+        kind: "error",
+        text: "Trade window is frozen. Stop ARB and switch panel control to Trade.",
+      });
+      return;
+    }
     if (!hasValidPair) {
       setStatus({
         kind: "error",
@@ -527,6 +548,7 @@ export default function JupiterPanel() {
   }
 
   function reverseTradeFlow() {
+    if (tradePaused) return;
     if (!selectedOutputMint) return;
     const nextInput = selectedOutputMint;
     const nextOutput = selectedInputMint;
@@ -583,10 +605,37 @@ export default function JupiterPanel() {
           arbStartupStatus={arbStartupStatus}
           arbRuntimeConfig={arbRuntimeConfig}
           onEnsureArbOnStartup={ensureArbOnStartup}
+          arbPaused={arbPaused}
           onSave={saveExecution}
+          onSetActivePanel={async (nextPanel) => {
+            try {
+              const res = await fetch("/api/app/control", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "runtime.panel.set", panel: nextPanel }),
+              });
+              const data = (await res.json()) as {
+                ok?: boolean;
+                state?: { controls?: { activePanel?: ActivePanel } };
+              };
+              if (res.ok && data.ok) {
+                setActivePanel(data.state?.controls?.activePanel === "arb" ? "arb" : "trade");
+                return;
+              }
+            } catch {
+              // fall through to refresh fallback
+            }
+            void loadExecution();
+          }}
+          activePanel={activePanel}
         />
 
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
+          {tradePaused ? (
+            <div className="mb-3 rounded-xl border border-amber-300/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+              Trade side is paused while ARB is active.
+            </div>
+          ) : null}
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2">
             <div className="flex -space-x-2">
               <TokenLogo mint={selectedInputToken.mint} symbol={selectedInputToken.symbol} logoUri={selectedInputToken.logoUri} />
@@ -607,6 +656,7 @@ export default function JupiterPanel() {
                 <button
                   type="button"
                   onClick={() => setSellAmountByPercent(1)}
+                  disabled={tradePaused}
                   className="rounded-md border border-white/20 bg-black/40 px-1.5 py-0.5 text-[10px]"
                 >
                   100%
@@ -614,6 +664,7 @@ export default function JupiterPanel() {
                 <button
                   type="button"
                   onClick={() => setSellAmountByPercent(0.5)}
+                  disabled={tradePaused}
                   className="rounded-md border border-white/20 bg-black/40 px-1.5 py-0.5 text-[10px]"
                 >
                   50%
@@ -630,6 +681,7 @@ export default function JupiterPanel() {
                 type="text"
                 value={inputSearch}
                 onChange={(e) => setInputSearch(e.target.value)}
+                disabled={tradePaused}
                 placeholder="Search name, symbol, or CA"
                 className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
               />
@@ -643,6 +695,7 @@ export default function JupiterPanel() {
                       key={`input-${token.mint}`}
                       type="button"
                       onClick={() => {
+                        if (tradePaused) return;
                         setSelectedInputMint(token.mint);
                         setInputSearch(token.symbol);
                       }}
@@ -669,6 +722,7 @@ export default function JupiterPanel() {
                 step="0.001"
                 value={amountSol}
                 onChange={(e) => setAmountSol(e.target.value)}
+                disabled={tradePaused}
                 className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
               />
             </label>
@@ -678,6 +732,7 @@ export default function JupiterPanel() {
             <button
               type="button"
               onClick={reverseTradeFlow}
+              disabled={tradePaused}
               className="absolute -top-5 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/15 bg-slate-900 px-2 py-1 text-sm"
             >
               ⇅
@@ -696,6 +751,7 @@ export default function JupiterPanel() {
                 type="text"
                 value={outputSearch}
                 onChange={(e) => setOutputSearch(e.target.value)}
+                disabled={tradePaused}
                 placeholder="Search name, symbol, or CA"
                 className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
               />
@@ -709,6 +765,7 @@ export default function JupiterPanel() {
                       key={`output-${token.mint}`}
                       type="button"
                       onClick={() => {
+                        if (tradePaused) return;
                         setSelectedOutputMint(token.mint);
                         setOutputSearch(token.symbol);
                       }}
@@ -764,6 +821,7 @@ export default function JupiterPanel() {
                 step={5}
                 value={slippageBps}
                 onChange={(e) => setSlippageBps(Math.min(300, Math.max(10, Number(e.target.value) || 50)))}
+                disabled={tradePaused}
                 className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
               />
             </label>
@@ -788,7 +846,7 @@ export default function JupiterPanel() {
 
           <button
             onClick={submitDirectSwap}
-            disabled={busy || !hasValidPair}
+            disabled={busy || !hasValidPair || tradePaused}
             className="mt-3 w-full rounded-xl border border-amber-200/40 bg-amber-300/10 px-3 py-2 text-sm disabled:opacity-50"
           >
             {busy ? "Submitting…" : `Swap ${selectedInputToken.symbol} → ${selectedOutputToken?.symbol || "token"}`}
@@ -825,7 +883,10 @@ function ExecutionControls({
   arbStartupStatus,
   arbRuntimeConfig,
   onEnsureArbOnStartup,
+  arbPaused,
   onSave,
+  onSetActivePanel,
+  activePanel,
 }: {
   execution: ExecutionAuthority | null;
   busy: boolean;
@@ -838,7 +899,10 @@ function ExecutionControls({
   arbStartupStatus: string;
   arbRuntimeConfig: ArbRuntimeConfig | null;
   onEnsureArbOnStartup: () => void;
+  arbPaused: boolean;
   onSave: (input: ExecutionAuthority) => void;
+  onSetActivePanel: (panel: ActivePanel) => void;
+  activePanel: ActivePanel;
 }) {
   const [mode, setMode] = useState<ExecutionMode>(execution?.mode ?? "user_only");
   const [maxTradeUsd, setMaxTradeUsd] = useState(String(execution?.maxTradeUsd ?? 50));
@@ -877,10 +941,31 @@ function ExecutionControls({
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold">Arb Control</h3>
       </div>
+      <div className="mb-2 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/30 p-2 text-[11px]">
+        <button
+          type="button"
+          onClick={() => onSetActivePanel("arb")}
+          className={`rounded-md border px-2 py-1 ${activePanel === "arb" ? "border-emerald-300/40 bg-emerald-200/15" : "border-white/15 bg-black/30"}`}
+        >
+          ARB side active
+        </button>
+        <button
+          type="button"
+          onClick={() => onSetActivePanel("trade")}
+          className={`rounded-md border px-2 py-1 ${activePanel === "trade" ? "border-cyan-300/40 bg-cyan-200/15" : "border-white/15 bg-black/30"}`}
+        >
+          Trade side active
+        </button>
+      </div>
       {!execution ? (
         <p className="text-sm text-white/60">Unable to load execution controls.</p>
       ) : (
         <div className="grid grid-cols-1 gap-2 text-xs">
+          {arbPaused ? (
+            <p className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-2 py-1 text-cyan-100">
+              ARB controls are paused while Trade side is active.
+            </p>
+          ) : null}
           <div className="mb-1 rounded-xl bg-black/30 p-2 text-white/70">
             <div>
               ARB runtime: <span className={arbStatus === "running" ? "text-emerald-300" : "text-amber-200"}>{arbStatus}</span>
@@ -894,7 +979,7 @@ function ExecutionControls({
             <button
               type="button"
               onClick={onEnsureArbOnStartup}
-              disabled={arbStartupBusy}
+              disabled={arbStartupBusy || arbPaused}
               className="mt-2 rounded-lg border border-emerald-300/30 bg-emerald-200/10 px-2 py-1 text-xs disabled:opacity-60"
             >
               {arbStartupBusy ? "Arming…" : "Arm ARB for next startup"}
@@ -902,25 +987,26 @@ function ExecutionControls({
             {arbStartupStatus ? <p className="mt-1 text-[11px] text-white/60">{arbStartupStatus}</p> : null}
           </div>
           <label className="text-white/70">Mode</label>
-          <select value={mode} onChange={(e) => setMode(e.target.value as ExecutionMode)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1">
+          <select value={mode} onChange={(e) => setMode(e.target.value as ExecutionMode)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1">
             <option value="user_only">User-only mode</option>
             <option value="agent_assisted">Agent-assisted mode</option>
             <option value="emergency_stop">Emergency stop</option>
           </select>
           <label className="text-white/70">Max trade (USD)</label>
-          <input value={maxTradeUsd} onChange={(e) => setMaxTradeUsd(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <input value={maxTradeUsd} onChange={(e) => setMaxTradeUsd(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <label className="text-white/70">Mint allowlist (comma separated)</label>
-          <input value={allowlist} onChange={(e) => setAllowlist(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <input value={allowlist} onChange={(e) => setAllowlist(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <button
             type="button"
             onClick={loadTopAllowlist}
+            disabled={arbPaused}
             className="rounded-lg border border-cyan-300/30 bg-cyan-200/10 px-2 py-1 text-left"
           >
             Load top-500 allowlist from arb/whitelist.json
           </button>
           {allowlistLoadStatus ? <p className="text-[11px] text-white/60">{allowlistLoadStatus}</p> : null}
           <label className="text-white/70">Cooldown (minutes)</label>
-          <input value={cooldownMinutes} onChange={(e) => setCooldownMinutes(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <input value={cooldownMinutes} onChange={(e) => setCooldownMinutes(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <div className="mt-1 rounded-xl bg-black/30 p-2 text-white/70">
             <div>
               Wallet Provisioning: {" "}
@@ -942,7 +1028,7 @@ function ExecutionControls({
                 mintAllowlist: allowlist.split(",").map((item) => item.trim()).filter(Boolean),
               })
             }
-            disabled={busy}
+            disabled={busy || arbPaused}
             className="mt-1 rounded-lg border border-white/10 px-2 py-1"
           >
             Save execution policy

@@ -20,7 +20,7 @@ def normalize_bot_token(raw_token: str) -> str:
 
 BOT_TOKEN = normalize_bot_token(os.getenv("TELEGRAM_BOT_TOKEN", ""))
 CORE_URL = os.getenv("MORK_CORE_URL", "http://127.0.0.1:8790").strip().rstrip("/")
-CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/chat/respond").strip() or "/chat/respond"
+CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/api/chat/respond").strip() or "/api/chat/respond"
 REPLY_MODE = os.getenv("REPLY_MODE", "mentions").strip().lower()  # mentions | all | dm
 COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "20"))
 MAX_PER_10 = int(os.getenv("MAX_PER_10_MIN", "12"))
@@ -106,16 +106,24 @@ def core_reply(handle: str, message: str) -> str:
         "maxChars": 900,
     }
 
-    try:
-        j = post_to_chat_endpoint(CHAT_ENDPOINT, payload)
-    except Exception as primary_error:
-        # Compatibility path if bridge points to mork-app instead of mork-core.
+    candidate_paths = [CHAT_ENDPOINT]
+    if CHAT_ENDPOINT != "/api/chat/respond":
+        candidate_paths.append("/api/chat/respond")
+    if CHAT_ENDPOINT != "/chat/respond":
+        candidate_paths.append("/chat/respond")
+
+    last_error = None
+    j = None
+    for path in candidate_paths:
         try:
-            j = post_to_chat_endpoint("/api/chat/respond", payload)
-        except Exception as fallback_error:
-            raise RuntimeError(
-                f"chat upstream failed: primary={primary_error!r}; fallback={fallback_error!r}"
-            ) from fallback_error
+            j = post_to_chat_endpoint(path, payload)
+            break
+        except Exception as err:
+            last_error = err
+            continue
+
+    if j is None:
+        raise RuntimeError(f"chat upstream failed after paths={candidate_paths}: {last_error!r}")
 
     if not j.get("ok"):
         return "My thoughts failed to compile. Try again in a moment."

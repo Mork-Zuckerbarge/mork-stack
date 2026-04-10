@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAppControlState } from "@/lib/core/appControl";
 
 export const runtime = "nodejs";
 
@@ -58,6 +59,14 @@ function fromRawAmount(rawAmount: string | number | undefined, decimals: number)
 
 export async function POST(req: Request) {
   try {
+    const control = await getAppControlState();
+    if (control.arb.status === "running" || control.controls.activePanel !== "trade") {
+      return NextResponse.json(
+        { ok: false, error: "Trade panel is paused while ARB is active. Switch panel to Trade and stop ARB first." },
+        { status: 409 }
+      );
+    }
+
     const body = (await req.json()) as QuoteBody;
     const amountSol = Number(body.amountSol ?? 0);
     const slippageBps = Math.min(Math.max(Number(body.slippageBps ?? 50), 10), 300);

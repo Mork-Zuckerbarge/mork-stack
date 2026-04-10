@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
 import { prisma } from "@/lib/core/prisma";
+import { getAppControlState } from "@/lib/core/appControl";
 
 export const runtime = "nodejs";
 
@@ -40,6 +41,14 @@ function getSigner(): Keypair {
 
 export async function POST(req: Request) {
   try {
+    const control = await getAppControlState();
+    if (control.arb.status === "running" || control.controls.activePanel !== "trade") {
+      return NextResponse.json(
+        { ok: false, error: "Trade panel is paused while ARB is active. Switch panel to Trade and stop ARB first." },
+        { status: 409 }
+      );
+    }
+
     if (process.env.MORK_AGENT_SWAP_ENABLED !== "1") {
       return NextResponse.json(
         { ok: false, error: "Direct agent swap is disabled (set MORK_AGENT_SWAP_ENABLED=1 to enable)." },
