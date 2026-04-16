@@ -9,6 +9,17 @@ type BuildContextArgs = {
   message: string;
 };
 
+const MAX_HISTORY_ITEMS = 4;
+const MAX_RECENT_LINE_CHARS = 320;
+const MAX_MEMORY_BLOCK_CHARS = 900;
+
+function clipText(value: string | null | undefined, maxChars: number) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}…`;
+}
+
 function isTechnicalMessage(message: string) {
   const m = message.toLowerCase();
 
@@ -68,7 +79,7 @@ export async function buildContext({
           ],
         },
         orderBy: { createdAt: "desc" },
-        take: 6,
+        take: MAX_HISTORY_ITEMS,
       }),
 
       technical
@@ -117,24 +128,24 @@ export async function buildContext({
     ? "RECENT HISTORY:\n" +
       [...recentChat]
         .reverse()
-        .map((m) => `- [${m.source}/${m.type}] ${m.content}`)
+        .map((m) => `- [${m.source}/${m.type}] ${clipText(m.content, MAX_RECENT_LINE_CHARS)}`)
         .join("\n")
     : "";
 
   const walletBlock = walletMemory
-    ? `LATEST WALLET STATE:\n- ${walletMemory.content}`
+    ? `LATEST WALLET STATE:\n- ${clipText(walletMemory.content, MAX_MEMORY_BLOCK_CHARS)}`
     : "";
 
   const tradeBlock = tradeMemory
-    ? `LATEST TRADE / ARB STATE:\n- ${tradeMemory.content}`
+    ? `LATEST TRADE / ARB STATE:\n- ${clipText(tradeMemory.content, MAX_MEMORY_BLOCK_CHARS)}`
     : "";
 
   const reflectionBlock = reflection
-    ? `LATEST REFLECTION:\n- ${reflection.content}`
+    ? `LATEST REFLECTION:\n- ${clipText(reflection.content, MAX_MEMORY_BLOCK_CHARS)}`
     : "";
 
   const relationshipBlock = relationshipMemory
-    ? `RELATIONSHIP MEMORY:\n- ${relationshipMemory.content}`
+    ? `RELATIONSHIP MEMORY:\n- ${clipText(relationshipMemory.content, MAX_MEMORY_BLOCK_CHARS)}`
     : "";
 
   const failingHealth = Object.entries(orchestratorState.health)

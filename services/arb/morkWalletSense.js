@@ -34,8 +34,15 @@ async function listTokenAccounts(connection, owner) {
   return out;
 }
 
-async function enforceBbqGateOrExit(connection, ownerPubkey, { minBbq = 1000 } = {}) {
-  const bbqBal = await getSplBalanceUi(connection, ownerPubkey, BBQ_MINT);
+async function enforceBbqGateOrExit(
+  connection,
+  ownerPubkey,
+  { minBbq = 1000, knownBbqBalance = null } = {}
+) {
+  const bbqBal =
+    typeof knownBbqBalance === "number" && Number.isFinite(knownBbqBalance)
+      ? knownBbqBalance
+      : await getSplBalanceUi(connection, ownerPubkey, BBQ_MINT);
 
   if (bbqBal < minBbq) {
     console.error(

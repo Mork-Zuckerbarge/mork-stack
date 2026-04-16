@@ -983,6 +983,12 @@ function printWalletSnapshot(snap) {
   }
 }
 
+function bbqBalanceFromSnapshot(snap) {
+  const found = (snap?.tokens || []).find((t) => t?.mint === BBQ_MINT);
+  return Number(found?.uiAmount || 0);
+}
+
+
 async function pushWalletSnapshotToMork(snap) {
   try {
     if (!snap) return;
@@ -1151,7 +1157,10 @@ async function main() {
         printWalletSnapshot(snap);
 
         // ⛔ gate (your BBQ rule) — keep this where it belongs
-        const bbqBal = await withRetry("BBQ gate", () => enforceBbqGateOrExit(connection, wallet.publicKey));
+        const knownBbqBalance = bbqBalanceFromSnapshot(snap);
+        const bbqBal = await withRetry("BBQ gate", () =>
+          enforceBbqGateOrExit(connection, wallet.publicKey, { knownBbqBalance })
+        );
         console.log(`✅ BBQ gate passed. BBQ=${Number(bbqBal).toFixed(6)}`);
 
         sendWalletSnapshotToMork(snap)
