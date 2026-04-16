@@ -21,7 +21,7 @@ def normalize_bot_token(raw_token: str) -> str:
 BOT_TOKEN = normalize_bot_token(os.getenv("TELEGRAM_BOT_TOKEN", ""))
 CORE_URL = os.getenv("MORK_CORE_URL", "http://127.0.0.1:8790").strip().rstrip("/")
 CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/api/chat/respond").strip() or "/api/chat/respond"
-REPLY_MODE = os.getenv("REPLY_MODE", "mentions").strip().lower()  # mentions | all | dm
+REPLY_MODE = os.getenv("REPLY_MODE", "all").strip().lower()  # mentions | all | dm
 COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "20"))
 MAX_PER_10 = int(os.getenv("MAX_PER_10_MIN", "12"))
 
@@ -93,7 +93,7 @@ def should_reply(msg: dict, bot_username: str, bot_id: int) -> bool:
 
 def post_to_chat_endpoint(path: str, payload: dict) -> dict:
     url = f"{CORE_URL}{path}"
-    response = requests.post(url, json=payload, timeout=20)
+    response = requests.post(url, json=payload, timeout=60)
     response.raise_for_status()
     return response.json()
 
@@ -314,19 +314,22 @@ def main():
                 # Strip the @mention from message so Mork doesn't parrot it
                 if bot_username:
                     text = text.replace(f"@{bot_username}", "").replace(f"@{bot_username.lower()}", "").strip()
-                reply = core_reply(handle=handle, message=text)
+                try:
+                    reply = core_reply(handle=handle, message=text)
 
-                # Voice OR text, not both
-                if voice_enabled[user_id] and (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID):
-                    try:
-                        send_voice(chat_id, reply, reply_to=msg.get("message_id"))
-                    except Exception as ve:
-                        print("[bridge] voice error:", repr(ve))
+                    # Voice OR text, not both
+                    if voice_enabled[user_id] and (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID):
+                        try:
+                            send_voice(chat_id, reply, reply_to=msg.get("message_id"))
+                        except Exception as ve:
+                            print("[bridge] voice error:", repr(ve))
+                            send_message(chat_id, reply, reply_to=msg.get("message_id"))
+                    else:
                         send_message(chat_id, reply, reply_to=msg.get("message_id"))
-                else:
-                    send_message(chat_id, reply, reply_to=msg.get("message_id"))
 
-                last_reply_ts[user_id] = now
+                    last_reply_ts[user_id] = now
+                except Exception as re:
+                    print("[bridge] reply error:", repr(re))
         except Exception as e:
             print("[bridge] error:", repr(e))
             time.sleep(2)

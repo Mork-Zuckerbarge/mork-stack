@@ -24,7 +24,8 @@ export async function ollama(prompt: string, mode: OllamaMode = "default") {
   const hostResolution = await resolveOllamaHost(process.env.OLLAMA_HOST);
   const host = hostResolution.host;
   const model = await pickModel(mode);
-  const ctx = Number(process.env.OLLAMA_CTX || 8192);
+  const ctx = Number(process.env.OLLAMA_CTX || 6144);
+  const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || 45000);
 
   if (!hasLoggedOllamaConfig) {
     console.log(`[mork] ollama host: ${host}`);
@@ -39,11 +40,14 @@ export async function ollama(prompt: string, mode: OllamaMode = "default") {
     hasLoggedOllamaConfig = true;
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const r = await fetch(`${host}/api/generate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
+    signal: controller.signal,
     body: JSON.stringify({
       model,
       prompt,
@@ -52,7 +56,7 @@ export async function ollama(prompt: string, mode: OllamaMode = "default") {
         num_ctx: ctx,
       },
     }),
-  });
+  }).finally(() => clearTimeout(timeout));
 
   if (!r.ok) {
     const text = await r.text();
