@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
 
     const result = await respondToChat({
       channel: resolveChannel(body?.channel),
-      handle: typeof body?.handle === "string" && body.handle.trim() ? body.handle.trim() : "frontend-coding",
+      handle: typeof body?.handle === "string" && body.handle.trim() ? body.handle.trim() : "app-user",
       message: typeof body?.message === "string" ? body.message : "",
       maxChars: typeof body?.maxChars === "number" ? body.maxChars : 12000,
     });
