@@ -11,13 +11,43 @@ function uiAmountFromParsedTokenAccount(parsed) {
   }
 }
 
+function isRpcRateLimitError(err) {
+  const msg = String(err?.message || err || "");
+  return msg.includes('"code": 429') || msg.includes(" 429 ") || msg.includes("Too many requests");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRpcRetry(fn, { attempts = 4, baseDelayMs = 400 } = {}) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isRpcRateLimitError(err) || i === attempts - 1) break;
+      const waitMs = baseDelayMs * (i + 1) ** 2 + Math.floor(Math.random() * 200);
+      await sleep(waitMs);
+    }
+  }
+  throw lastErr;
+}
+
 async function getSplBalanceUi(connection, owner, mint) {
-  const accounts = await connection.getParsedTokenAccountsByOwner(owner, { mint });
+  const accounts = await withRpcRetry(() =>
+    connection.getParsedTokenAccountsByOwner(owner, { mint })
+  );
   return uiAmountFromParsedTokenAccount(accounts.value?.[0]);
 }
 
 async function listTokenAccounts(connection, owner) {
-  const res = await connection.getParsedTokenAccountsByOwner(owner, { programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") });
+  const res = await withRpcRetry(() =>
+    connection.getParsedTokenAccountsByOwner(owner, {
+      programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+    })
+  );
   const out = [];
   for (const a of res.value || []) {
     const info = a.account?.data?.parsed?.info;
@@ -40,7 +70,7 @@ async function enforceBbqGateOrExit(
   { minBbq = 1000, knownBbqBalance = null } = {}
 ) {
   const bbqBal =
-    typeof knownBbqBalance === "number" && Number.isFinite(knownBbqBalance)
+    typeof knownBbqBalance === "number" && Number.isFinite(knownBbqBalance) && knownBbqBalance > 0
       ? knownBbqBalance
       : await getSplBalanceUi(connection, ownerPubkey, BBQ_MINT);
 

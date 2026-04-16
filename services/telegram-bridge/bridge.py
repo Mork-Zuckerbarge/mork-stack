@@ -93,7 +93,7 @@ def should_reply(msg: dict, bot_username: str, bot_id: int) -> bool:
 
 def post_to_chat_endpoint(path: str, payload: dict) -> dict:
     url = f"{CORE_URL}{path}"
-    response = requests.post(url, json=payload, timeout=20)
+    response = requests.post(url, json=payload, timeout=60)
     response.raise_for_status()
     return response.json()
 

@@ -99,7 +99,18 @@ export async function respondToChat(input: unknown) {
   const finalMaxChars = Math.min(maxChars, responsePolicy.maxResponseChars);
   let modeInstruction = "";
 
-  if (handle === "frontend-coding") {
+  if (handle === "app-user" || (channel === "system" && !handle)) {
+    const customGuidelines = controlState.controls.appPersonaGuidelines.trim();
+    modeInstruction =
+      `You are speaking to a live app user in the main Mork UI.\n` +
+      `Stay tightly focused on the user's request and current runtime state.\n` +
+      `Avoid poetic detours, roleplay scenes, or unrelated philosophy.\n` +
+      `If you do not know something, say what is unknown and give the next concrete check.\n` +
+      `Persona mode: ${controlState.controls.appPersonaMode}.\n`;
+    if (customGuidelines) {
+      modeInstruction += `Custom guidelines:\n${customGuidelines}\n`;
+    }
+  } else if (handle === "frontend-coding") {
     const customGuidelines = controlState.controls.appPersonaGuidelines.trim();
     modeInstruction =
       `You are Mork inside a coding workbench.\n` +
