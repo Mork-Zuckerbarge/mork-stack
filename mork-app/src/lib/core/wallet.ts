@@ -17,6 +17,7 @@ type WalletState = {
 
 let walletCache: WalletState | null = null;
 let walletCacheAt = 0;
+let walletFetchInFlight: Promise<WalletState> | null = null;
 const WALLET_CACHE_MS = 15000;
 const RPC_RETRY_DELAYS_MS = [250, 600, 1200];
 
@@ -145,10 +146,25 @@ export async function getWalletState(force = false) {
     return walletCache;
   }
 
-  const wallet = await fetchWalletState();
-  walletCache = wallet;
-  walletCacheAt = now;
-  return wallet;
+  if (!force && walletFetchInFlight) {
+    return walletFetchInFlight;
+  }
+
+  const fetchPromise = fetchWalletState()
+    .then((wallet) => {
+      walletCache = wallet;
+      walletCacheAt = Date.now();
+      return wallet;
+    })
+    .finally(() => {
+      if (walletFetchInFlight === fetchPromise) {
+        walletFetchInFlight = null;
+      }
+    });
+
+  walletFetchInFlight = fetchPromise;
+
+  return fetchPromise;
 }
 
 export async function refreshWalletMemory() {
