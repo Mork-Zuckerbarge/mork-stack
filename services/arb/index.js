@@ -17,7 +17,34 @@ const {
 } = require("@solana/web3.js");
 
 const { RPC_URL, LOOP_DELAY_MS, MIN_EDGE_PCT, MIN_ABS_PROFIT_USD } = require("./config");
-const connection = new Connection(RPC_URL, "processed");
+const RPC_URLS = [
+  ...new Set(
+    String(process.env.SOLANA_RPC_URLS || "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
+      .concat([RPC_URL])
+  ),
+];
+let rpcCursor = 0;
+
+function createRpcConnection(url) {
+  return new Connection(url, {
+    commitment: "processed",
+    disableRetryOnRateLimit: true,
+  });
+}
+
+let connection = createRpcConnection(RPC_URLS[rpcCursor]);
+
+function rotateRpcConnection(reason = "rate_limit") {
+  if (RPC_URLS.length <= 1) return connection.rpcEndpoint;
+  rpcCursor = (rpcCursor + 1) % RPC_URLS.length;
+  connection = createRpcConnection(RPC_URLS[rpcCursor]);
+  const endpoint = connection.rpcEndpoint;
+  console.log(`⚠️ Switched RPC endpoint (${reason}) -> ${endpoint}`);
+  return endpoint;
+}
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOL_MINT  = "So11111111111111111111111111111111111111112";
 const FEE_SOL_MIN = Number(process.env.FEE_SOL_MIN || 0.03);
@@ -405,6 +432,7 @@ async function withRetry(label, fn, { attempts = 4, baseDelayMs = 500 } = {}) {
     } catch (err) {
       lastErr = err;
       if (!isRpcRateLimitError(err) || i === attempts - 1) break;
+      rotateRpcConnection(label);
       const waitMs = baseDelayMs * (i + 1) ** 2 + Math.floor(Math.random() * 250);
       console.log(`⚠️ ${label} rate-limited (attempt ${i + 1}/${attempts}); retrying in ${waitMs}ms`);
       await sleep(waitMs);
@@ -1100,7 +1128,8 @@ async function sendWalletSnapshotToMork(snap) {
 }
 
 async function main() {
-  console.log("RPC:", RPC_URL);
+  console.log("RPC pool:", RPC_URLS.join(", "));
+  console.log("RPC active:", connection.rpcEndpoint);
   console.log("Cluster:", await withRetry("getVersion", () => connection.getVersion()));
 
   console.log("Checking bot wallet balances...");
@@ -1127,7 +1156,7 @@ async function main() {
   console.log("Scanning Jupiter quotes in batches... (Ctrl+C to stop)\n");
 
   const blacklist = new Set();
-  const BATCH_SIZE = 3;
+  const BATCH_SIZE = Math.max(1, Number(process.env.SCAN_BATCH_SIZE || 2));
   let cursor = 0;
   const SCAN_TIMEOUT_MS = Number(process.env.SCAN_TIMEOUT_MS || 12000);
   const HEARTBEAT_EVERY = Number(process.env.HEARTBEAT_EVERY_LOOPS || 10);
