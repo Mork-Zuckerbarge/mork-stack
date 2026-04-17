@@ -94,9 +94,9 @@ export default function ChatPanel() {
 
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
         {[
-          "Ship a safer trade flow",
-          "Draft Telegram CEO-style update",
-          "Write cynical X thread",
+          "hey tweet this: gm from the bunker",
+          "post this in telegram: gm chat",
+          "go buy $2 of $spx",
         ].map((preset) => (
           <button
             key={preset}
@@ -113,7 +113,7 @@ export default function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder="Ask Mork something..."
+          placeholder="Try: hey tweet this: ... | post this in telegram: ... | go buy $2 of $spx"
           className="flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 outline-none"
         />
         <button
