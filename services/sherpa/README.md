@@ -18,6 +18,21 @@
 
 ### Telegram Key (for sharing tweets to Telegram)
 
+### Reddit Keys (optional cross-post)
+- Reddit app client ID + secret
+- Reddit username + password (script app flow)
+- Target subreddit (without `r/`)
+- User agent string
+
+### Facebook Keys (optional cross-post)
+- Facebook Page ID
+- Facebook Page Access Token (with page publish permissions)
+
+### Instagram Keys (optional cross-post)
+- Instagram User ID (Graph API)
+- Instagram Access Token
+- Public image URL (required by Instagram Graph API publishing flow)
+
 ## Step 2: Install & Run
 
 ### On Windows:
@@ -78,6 +93,7 @@
 ## Important Notes
 - The bot posts every 1.5 hours
 - Maximum 500 tweets per month
+- Optional cross-posting can send content to Reddit, Facebook, and Instagram when those credentials are set
 - The following files are created automatically and contain your private data - never share them:
   - encryption.key
   - encrypted_credentials.bin

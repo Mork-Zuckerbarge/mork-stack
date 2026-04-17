@@ -1957,8 +1957,15 @@ class TwitterBot:
 
             if tweet_id:
                 username = (self.credentials.get("twitter_username") or "").lstrip("@")
+                tweet_url = None
                 if username:
-                    self.send_to_telegram(f"https://x.com/{username}/status/{tweet_id}")
+                    tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+                    self.send_to_telegram(tweet_url)
+
+                # Optional cross-posting targets (best effort; never fail the X post)
+                self.send_to_reddit(tweet_text, source_url=tweet_url)
+                self.send_to_facebook(tweet_text, source_url=tweet_url)
+                self.send_to_instagram(tweet_text)
 
             print(f"✅ Tweet sent successfully: {tweet_id}")
             return True
@@ -2228,6 +2235,107 @@ class TwitterBot:
             print("📨 Telegram status:", response.status_code, response.text)
         except Exception as e:
             print(f"❌ Telegram send failed: {e}")
+
+    def _short_post_title(self, text, fallback="Mork update", max_len=250):
+        base = (text or "").strip()
+        if not base:
+            return fallback
+        first = base.split("\n")[0].strip()
+        out = first if first else base
+        return out[:max_len]
+
+    def send_to_reddit(self, text, source_url=None):
+        subreddit = (self.credentials.get("reddit_subreddit") or "").strip().lstrip("r/").strip("/")
+        client_id = (self.credentials.get("reddit_client_id") or "").strip()
+        client_secret = (self.credentials.get("reddit_client_secret") or "").strip()
+        username = (self.credentials.get("reddit_username") or "").strip()
+        password = (self.credentials.get("reddit_password") or "").strip()
+        user_agent = (self.credentials.get("reddit_user_agent") or "mork-sherpa/1.0").strip()
+
+        if not (subreddit and client_id and client_secret and username and password):
+            return
+
+        try:
+            token_res = requests.post(
+                "https://www.reddit.com/api/v1/access_token",
+                auth=(client_id, client_secret),
+                data={"grant_type": "password", "username": username, "password": password},
+                headers={"User-Agent": user_agent},
+                timeout=20,
+            )
+            token_res.raise_for_status()
+            access_token = token_res.json().get("access_token")
+            if not access_token:
+                print("⚠️ Reddit token missing in auth response.")
+                return
+
+            title = self._short_post_title(text)
+            post_data = {"sr": subreddit, "title": title}
+            if source_url:
+                post_data.update({"kind": "link", "url": source_url})
+            else:
+                post_data.update({"kind": "self", "text": (text or "")[:40000]})
+
+            submit_res = requests.post(
+                "https://oauth.reddit.com/api/submit",
+                headers={"Authorization": f"bearer {access_token}", "User-Agent": user_agent},
+                data=post_data,
+                timeout=20,
+            )
+            print("📨 Reddit status:", submit_res.status_code, submit_res.text[:220])
+        except Exception as e:
+            print(f"❌ Reddit post failed: {e}")
+
+    def send_to_facebook(self, text, source_url=None):
+        page_id = (self.credentials.get("facebook_page_id") or "").strip()
+        page_token = (self.credentials.get("facebook_page_access_token") or "").strip()
+        if not page_id or not page_token:
+            return
+
+        payload = {"message": (text or "").strip()[:5000], "access_token": page_token}
+        if source_url:
+            payload["link"] = source_url
+
+        try:
+            res = requests.post(f"https://graph.facebook.com/v22.0/{page_id}/feed", data=payload, timeout=20)
+            print("📨 Facebook status:", res.status_code, res.text[:220])
+        except Exception as e:
+            print(f"❌ Facebook post failed: {e}")
+
+    def send_to_instagram(self, caption):
+        ig_user_id = (self.credentials.get("instagram_user_id") or "").strip()
+        ig_token = (self.credentials.get("instagram_access_token") or "").strip()
+        image_url = (self.credentials.get("instagram_image_url") or "").strip()
+        if not ig_user_id or not ig_token:
+            return
+        if not image_url:
+            print("⚠️ Instagram skipped: set instagram_image_url to publish.")
+            return
+
+        try:
+            create_res = requests.post(
+                f"https://graph.facebook.com/v22.0/{ig_user_id}/media",
+                data={
+                    "image_url": image_url,
+                    "caption": (caption or "").strip()[:2200],
+                    "access_token": ig_token,
+                },
+                timeout=20,
+            )
+            create_json = create_res.json() if create_res.content else {}
+            creation_id = (create_json or {}).get("id")
+            if not creation_id:
+                print("⚠️ Instagram media create failed:", create_res.status_code, create_res.text[:220])
+                return
+
+            publish_res = requests.post(
+                f"https://graph.facebook.com/v22.0/{ig_user_id}/media_publish",
+                data={"creation_id": creation_id, "access_token": ig_token},
+                timeout=20,
+            )
+            print("📨 Instagram status:", publish_res.status_code, publish_res.text[:220])
+        except Exception as e:
+            print(f"❌ Instagram post failed: {e}")
 
     def monitor_and_reply_to_mentions(self):
         """Daily: fetch new mentions, pick best <=2 <23h old, reply; try backlog first."""
@@ -2686,8 +2794,117 @@ class TwitterBot:
                         interactive=True,
                         value=self.credentials.get('bearer_token', '')
                     )
+                with gr.Row():
+                    reddit_client_id = gr.Textbox(
+                        label="Reddit Client ID",
+                        type="password",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('reddit_client_id', '')
+                    )
+                    reddit_client_secret = gr.Textbox(
+                        label="Reddit Client Secret",
+                        type="password",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('reddit_client_secret', '')
+                    )
+                with gr.Row():
+                    reddit_username = gr.Textbox(
+                        label="Reddit Username",
+                        type="text",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('reddit_username', '')
+                    )
+                    reddit_password = gr.Textbox(
+                        label="Reddit Password",
+                        type="password",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('reddit_password', '')
+                    )
+                with gr.Row():
+                    reddit_subreddit = gr.Textbox(
+                        label="Reddit Subreddit",
+                        type="text",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('reddit_subreddit', '')
+                    )
+                    reddit_user_agent = gr.Textbox(
+                        label="Reddit User Agent",
+                        type="text",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('reddit_user_agent', 'mork-sherpa/1.0')
+                    )
+                with gr.Row():
+                    facebook_page_id = gr.Textbox(
+                        label="Facebook Page ID",
+                        type="text",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('facebook_page_id', '')
+                    )
+                    facebook_page_access_token = gr.Textbox(
+                        label="Facebook Page Access Token",
+                        type="password",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('facebook_page_access_token', '')
+                    )
+                with gr.Row():
+                    instagram_user_id = gr.Textbox(
+                        label="Instagram User ID",
+                        type="text",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('instagram_user_id', '')
+                    )
+                    instagram_access_token = gr.Textbox(
+                        label="Instagram Access Token",
+                        type="password",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('instagram_access_token', '')
+                    )
+                with gr.Row():
+                    instagram_image_url = gr.Textbox(
+                        label="Instagram Image URL (required by Graph API)",
+                        type="text",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('instagram_image_url', '')
+                    )
 
-                def save_creds(key, api_key, api_secret, access_token, access_secret, telegram_token, telegram_chat, bearer_token):
+                def save_creds(
+                    key, api_key, api_secret, access_token, access_secret, telegram_token, telegram_chat, bearer_token,
+                    reddit_cid, reddit_csecret, reddit_user, reddit_pass, reddit_sr, reddit_agent,
+                    fb_page_id, fb_page_token, ig_user_id, ig_token, ig_image_url
+                ):
 
                     print("\nSaving credentials...")
                     print(f"OpenAI Key length: {len(key) if key else 0}")
@@ -2704,7 +2921,18 @@ class TwitterBot:
                         'twitter_access_token_secret': access_secret,
                         'telegram_bot_token': telegram_token,
                         'telegram_chat_id': telegram_chat,
-                        'bearer_token': bearer_token
+                        'bearer_token': bearer_token,
+                        'reddit_client_id': reddit_cid,
+                        'reddit_client_secret': reddit_csecret,
+                        'reddit_username': reddit_user,
+                        'reddit_password': reddit_pass,
+                        'reddit_subreddit': reddit_sr,
+                        'reddit_user_agent': reddit_agent,
+                        'facebook_page_id': fb_page_id,
+                        'facebook_page_access_token': fb_page_token,
+                        'instagram_user_id': ig_user_id,
+                        'instagram_access_token': ig_token,
+                        'instagram_image_url': ig_image_url,
                     }
                     
                     if self.save_credentials(credentials):
@@ -2720,7 +2948,18 @@ class TwitterBot:
                             gr.update(value=access_secret),
                             gr.update(value=telegram_token),
                             gr.update(value=telegram_chat),
-                            gr.update(value=bearer_token))
+                            gr.update(value=bearer_token),
+                            gr.update(value=reddit_cid),
+                            gr.update(value=reddit_csecret),
+                            gr.update(value=reddit_user),
+                            gr.update(value=reddit_pass),
+                            gr.update(value=reddit_sr),
+                            gr.update(value=reddit_agent),
+                            gr.update(value=fb_page_id),
+                            gr.update(value=fb_page_token),
+                            gr.update(value=ig_user_id),
+                            gr.update(value=ig_token),
+                            gr.update(value=ig_image_url))
 
                     else:
                         print("Failed to save credentials")
@@ -2732,7 +2971,18 @@ class TwitterBot:
                             gr.update(value=self.credentials.get('twitter_access_token_secret', '')),
                             gr.update(value=self.credentials.get('telegram_bot_token', '')),
                             gr.update(value=self.credentials.get('telegram_chat_id', '')),
-                            gr.update(value=self.credentials.get('bearer_token', '')))
+                            gr.update(value=self.credentials.get('bearer_token', '')),
+                            gr.update(value=self.credentials.get('reddit_client_id', '')),
+                            gr.update(value=self.credentials.get('reddit_client_secret', '')),
+                            gr.update(value=self.credentials.get('reddit_username', '')),
+                            gr.update(value=self.credentials.get('reddit_password', '')),
+                            gr.update(value=self.credentials.get('reddit_subreddit', '')),
+                            gr.update(value=self.credentials.get('reddit_user_agent', 'mork-sherpa/1.0')),
+                            gr.update(value=self.credentials.get('facebook_page_id', '')),
+                            gr.update(value=self.credentials.get('facebook_page_access_token', '')),
+                            gr.update(value=self.credentials.get('instagram_user_id', '')),
+                            gr.update(value=self.credentials.get('instagram_access_token', '')),
+                            gr.update(value=self.credentials.get('instagram_image_url', '')))
                 
                 with gr.Row():
                     save_button = gr.Button("Save Credentials", variant="primary")
@@ -2743,12 +2993,16 @@ class TwitterBot:
                 inputs=[
                     openai_key, twitter_api_key, twitter_api_secret,
                     twitter_access_token, twitter_access_token_secret,
-                    telegram_bot_token, telegram_chat_id, bearer_token
+                    telegram_bot_token, telegram_chat_id, bearer_token,
+                    reddit_client_id, reddit_client_secret, reddit_username, reddit_password, reddit_subreddit, reddit_user_agent,
+                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url
                 ],
                 outputs=[
                     save_status, openai_key, twitter_api_key, twitter_api_secret,
                     twitter_access_token, twitter_access_token_secret,
-                    telegram_bot_token, telegram_chat_id, bearer_token
+                    telegram_bot_token, telegram_chat_id, bearer_token,
+                    reddit_client_id, reddit_client_secret, reddit_username, reddit_password, reddit_subreddit, reddit_user_agent,
+                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url
                 ]
             )
 
