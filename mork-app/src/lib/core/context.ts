@@ -92,7 +92,7 @@ export async function buildContext({
       technical
         ? prisma.memory.findFirst({
             where: {
-              OR: [{ source: "arb-bot" }, { source: "trade" }],
+              OR: [{ source: "arb" }, { source: "arb-bot" }, { source: "trade" }],
             },
             orderBy: { createdAt: "desc" },
           })
