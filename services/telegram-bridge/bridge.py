@@ -264,75 +264,78 @@ def main():
         print("[bridge] ElevenLabs: not configured (text only)")
 
     offset = 0
-    while True:
-        try:
-            r = requests.get(f"{API}/getUpdates", params={"timeout": 30, "offset": offset}, timeout=35)
-            r.raise_for_status()
-            updates = r.json().get("result", [])
+    try:
+        while True:
+            try:
+                r = requests.get(f"{API}/getUpdates", params={"timeout": 30, "offset": offset}, timeout=35)
+                r.raise_for_status()
+                updates = r.json().get("result", [])
 
-            for upd in updates:
-                offset = max(offset, upd.get("update_id", 0) + 1)
+                for upd in updates:
+                    offset = max(offset, upd.get("update_id", 0) + 1)
 
-                msg = upd.get("message") or upd.get("edited_message")
-                if not msg:
-                    continue
+                    msg = upd.get("message") or upd.get("edited_message")
+                    if not msg:
+                        continue
 
-                chat = msg.get("chat", {})
-                chat_id = chat.get("id")
-                from_user = msg.get("from", {})
-                user_id = int(from_user.get("id") or 0)
-                handle = from_user.get("username") or from_user.get("first_name") or "user"
+                    chat = msg.get("chat", {})
+                    chat_id = chat.get("id")
+                    from_user = msg.get("from", {})
+                    user_id = int(from_user.get("id") or 0)
+                    handle = from_user.get("username") or from_user.get("first_name") or "user"
 
-                # Ignore bot messages (including ourselves)
-                if from_user.get("is_bot"):
-                    continue
+                    # Ignore bot messages (including ourselves)
+                    if from_user.get("is_bot"):
+                        continue
 
-                text = (msg.get("text") or "").strip()
-                if not text:
-                    continue
+                    text = (msg.get("text") or "").strip()
+                    if not text:
+                        continue
 
-                # Commands: toggle voice per-user
-                if text.lower().startswith("/voice"):
-                    parts = text.lower().split()
-                    if len(parts) >= 2 and parts[1] in ("on", "off"):
-                        voice_enabled[user_id] = parts[1] == "on"
-                        send_message(chat_id, f"Voice replies: {'ON' if voice_enabled[user_id] else 'OFF'}", reply_to=msg.get("message_id"))
-                    else:
-                        send_message(chat_id, "Usage: /voice on  or  /voice off", reply_to=msg.get("message_id"))
-                    continue
+                    # Commands: toggle voice per-user
+                    if text.lower().startswith("/voice"):
+                        parts = text.lower().split()
+                        if len(parts) >= 2 and parts[1] in ("on", "off"):
+                            voice_enabled[user_id] = parts[1] == "on"
+                            send_message(chat_id, f"Voice replies: {'ON' if voice_enabled[user_id] else 'OFF'}", reply_to=msg.get("message_id"))
+                        else:
+                            send_message(chat_id, "Usage: /voice on  or  /voice off", reply_to=msg.get("message_id"))
+                        continue
 
-                if not should_reply(msg, bot_username, bot_id):
-                    continue
+                    if not should_reply(msg, bot_username, bot_id):
+                        continue
 
-                # Cooldown + rate limit
-                now = time.time()
-                if now - last_reply_ts[user_id] < COOLDOWN:
-                    continue
-                if not within_rate_limit(user_id):
-                    continue
+                    # Cooldown + rate limit
+                    now = time.time()
+                    if now - last_reply_ts[user_id] < COOLDOWN:
+                        continue
+                    if not within_rate_limit(user_id):
+                        continue
 
-                # Strip the @mention from message so Mork doesn't parrot it
-                if bot_username:
-                    text = text.replace(f"@{bot_username}", "").replace(f"@{bot_username.lower()}", "").strip()
-                try:
-                    reply = core_reply(handle=handle, message=text)
+                    # Strip the @mention from message so Mork doesn't parrot it
+                    if bot_username:
+                        text = text.replace(f"@{bot_username}", "").replace(f"@{bot_username.lower()}", "").strip()
+                    try:
+                        reply = core_reply(handle=handle, message=text)
 
-                    # Voice OR text, not both
-                    if voice_enabled[user_id] and (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID):
-                        try:
-                            send_voice(chat_id, reply, reply_to=msg.get("message_id"))
-                        except Exception as ve:
-                            print("[bridge] voice error:", repr(ve))
+                        # Voice OR text, not both
+                        if voice_enabled[user_id] and (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID):
+                            try:
+                                send_voice(chat_id, reply, reply_to=msg.get("message_id"))
+                            except Exception as ve:
+                                print("[bridge] voice error:", repr(ve))
+                                send_message(chat_id, reply, reply_to=msg.get("message_id"))
+                        else:
                             send_message(chat_id, reply, reply_to=msg.get("message_id"))
-                    else:
-                        send_message(chat_id, reply, reply_to=msg.get("message_id"))
 
-                    last_reply_ts[user_id] = now
-                except Exception as re:
-                    print("[bridge] reply error:", repr(re))
-        except Exception as e:
-            print("[bridge] error:", repr(e))
-            time.sleep(2)
+                        last_reply_ts[user_id] = now
+                    except Exception as re:
+                        print("[bridge] reply error:", repr(re))
+            except Exception as e:
+                print("[bridge] error:", repr(e))
+                time.sleep(2)
+    except KeyboardInterrupt:
+        print("[bridge] KeyboardInterrupt received, shutting down cleanly.")
 
 
 if __name__ == "__main__":
