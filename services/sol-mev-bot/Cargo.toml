@@ -1,0 +1,51 @@
+[package]
+name = "solana-mev-engine"
+version = "1.0.0"
+edition = "2021"
+description = "High-performance Solana transaction builder and Jito bundle sender"
+
+[[bin]]
+name = "mev-engine"
+path = "src/main.rs"
+
+[dependencies]
+solana-client = "1.18"
+solana-sdk = "1.18"
+solana-transaction-status = "1.18"
+spl-token = { version = "4.0", features = ["no-entrypoint"] }
+
+# Jito
+jito-protos = "0.1"
+tonic = { version = "0.11", features = ["tls", "tls-roots"] }
+
+# Async runtime
+tokio = { version = "1.38", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+base64 = "0.22"
+bs58 = "0.5"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# IPC with Node.js orchestrator
+tokio-util = { version = "0.7", features = ["codec"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

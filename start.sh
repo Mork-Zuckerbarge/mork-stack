@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$ROOT_DIR/mork-app"
 ARB_DIR="$ROOT_DIR/services/arb"
 SHERPA_DIR="$ROOT_DIR/services/sherpa"
+SOL_MEV_BOT_DIR="$ROOT_DIR/services/sol-mev-bot"
 TELEGRAM_BRIDGE_DIR="$ROOT_DIR/services/telegram-bridge"
 LOG_DIR="$ROOT_DIR/.logs"
 PERSIST_DIR="${MORK_PERSIST_DIR:-${HOME:-$ROOT_DIR}/.mork-stack}"
@@ -13,6 +14,7 @@ PERSIST_SHERPA_CREDS_FILE="$PERSIST_DIR/services/sherpa/encrypted_credentials.bi
 
 ARB_PID=""
 SHERPA_PID=""
+SOL_MEV_BOT_PID=""
 TELEGRAM_PID=""
 
 log() { printf "\n[%s] %s\n" "start" "$1"; }
@@ -54,6 +56,10 @@ cleanup() {
   if [[ -n "$SHERPA_PID" ]] && kill -0 "$SHERPA_PID" >/dev/null 2>&1; then
     log "Stopping sherpa service (pid=$SHERPA_PID)"
     kill "$SHERPA_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$SOL_MEV_BOT_PID" ]] && kill -0 "$SOL_MEV_BOT_PID" >/dev/null 2>&1; then
+    log "Stopping sol-mev-bot service (pid=$SOL_MEV_BOT_PID)"
+    kill "$SOL_MEV_BOT_PID" >/dev/null 2>&1 || true
   fi
   if [[ -n "$TELEGRAM_PID" ]] && kill -0 "$TELEGRAM_PID" >/dev/null 2>&1; then
     log "Stopping telegram bridge (pid=$TELEGRAM_PID)"
@@ -106,6 +112,26 @@ if [[ -d "$ARB_DIR" ]]; then
   fi
 else
   log "Skipping arb service startup (missing $ARB_DIR)"
+fi
+
+if [[ -d "$SOL_MEV_BOT_DIR" ]]; then
+  if [[ ! -d "$SOL_MEV_BOT_DIR/node_modules" ]]; then
+    log "Installing sol-mev-bot dependencies"
+    npm --prefix "$SOL_MEV_BOT_DIR" install
+  fi
+
+  log "Starting sol-mev-bot service"
+  (
+    cd "$SOL_MEV_BOT_DIR"
+    npm run start >>"$LOG_DIR/sol-mev-bot.log" 2>&1
+  ) &
+  SOL_MEV_BOT_PID=$!
+  sleep 1
+  if ! kill -0 "$SOL_MEV_BOT_PID" >/dev/null 2>&1; then
+    warn "Sol-mev-bot exited immediately. Check $LOG_DIR/sol-mev-bot.log"
+  fi
+else
+  log "Skipping sol-mev-bot service startup (missing $SOL_MEV_BOT_DIR)"
 fi
 
 if [[ -x "$SHERPA_DIR/.venv/bin/python" ]]; then
