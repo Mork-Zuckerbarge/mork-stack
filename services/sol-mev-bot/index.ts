@@ -1,6 +1,8 @@
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import bs58 from 'bs58';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as dotenv from 'dotenv';
 import { logger } from './utils/logger';
 import { HeliusListener } from './utils/heliusListener';
 import { FeeSimulator } from './utils/feeSimulator';
@@ -13,12 +15,32 @@ import { PoolImbalanceDetector } from './strategies/poolImbalance';
 import { MomentumRunner } from './strategies/momentumRunner';
 import { AgentConfig } from './types';
 
+function loadEnvFiles(): void {
+  const candidates = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '..', '..', 'mork-app', '.env.local'),
+  ];
+
+  for (const envPath of candidates) {
+    if (!fs.existsSync(envPath)) continue;
+    dotenv.config({ path: envPath, override: false });
+  }
+}
+
 function loadConfig(): AgentConfig {
-  const required = ['WALLET_PRIVATE_KEY', 'HELIUS_API_KEY', 'HELIUS_RPC_URL', 'HELIUS_WS_URL'];
+  const hasWalletPrivateKey = Boolean((process.env.WALLET_PRIVATE_KEY || '').trim());
+  const hasMorkWalletSecretKey = Boolean((process.env.MORK_WALLET_SECRET_KEY || '').trim());
+  const required = ['HELIUS_API_KEY', 'HELIUS_RPC_URL', 'HELIUS_WS_URL'];
   const missing = required.filter((k) => !process.env[k]);
+  if (!hasWalletPrivateKey && !hasMorkWalletSecretKey) {
+    missing.unshift('WALLET_PRIVATE_KEY|MORK_WALLET_SECRET_KEY');
+  }
   if (missing.length) {
     logger.error('Missing required env vars', { missing });
-    logger.error('Copy config/.env.example → .env and fill in your values.');
+    logger.error(
+      'Add these vars in mork-app/.env.local (used by ./start.sh) or services/sol-mev-bot/.env. ' +
+      'Wallet can be WALLET_PRIVATE_KEY (base58) or MORK_WALLET_SECRET_KEY (JSON byte array).'
+    );
     process.exit(1);
   }
 
@@ -50,7 +72,31 @@ function loadConfig(): AgentConfig {
   };
 }
 
+function parseMorkWalletSecretKey(raw: string): Uint8Array {
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'number')) {
+    throw new Error('MORK_WALLET_SECRET_KEY must be a JSON array of bytes');
+  }
+  return Uint8Array.from(parsed);
+}
+
+function resolveWalletKeypair(): Keypair {
+  const walletPrivateKey = (process.env.WALLET_PRIVATE_KEY || '').trim();
+  if (walletPrivateKey) {
+    return Keypair.fromSecretKey(bs58.decode(walletPrivateKey));
+  }
+
+  const morkWalletSecretKey = (process.env.MORK_WALLET_SECRET_KEY || '').trim();
+  if (morkWalletSecretKey) {
+    return Keypair.fromSecretKey(parseMorkWalletSecretKey(morkWalletSecretKey));
+  }
+
+  throw new Error('Missing wallet key: set WALLET_PRIVATE_KEY or MORK_WALLET_SECRET_KEY');
+}
+
 async function main(): Promise<void> {
+  loadEnvFiles();
+
   for (const dir of ['logs']) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
@@ -74,9 +120,9 @@ async function main(): Promise<void> {
   // Wallet
   let wallet: Keypair;
   try {
-    wallet = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
+    wallet = resolveWalletKeypair();
   } catch {
-    logger.error('Invalid WALLET_PRIVATE_KEY — must be base58 encoded');
+    logger.error('Invalid wallet key. Use WALLET_PRIVATE_KEY (base58) or MORK_WALLET_SECRET_KEY (JSON byte array).');
     process.exit(1);
   }
   logger.info('Wallet', { pubkey: wallet.publicKey.toString() });
