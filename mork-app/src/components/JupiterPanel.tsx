@@ -26,6 +26,9 @@ type SwapResponse = {
   signature?: string;
   error?: string;
   wallet?: string;
+  amountIn?: number;
+  inputMint?: string;
+  outputMint?: string;
 };
 
 type WalletState = {
@@ -179,7 +182,8 @@ export default function JupiterPanel() {
     inputTokenResults.length > 1 || (inputTokenResults.length === 1 && inputTokenResults[0].mint !== selectedInputMint);
   const showOutputTokenOptions =
     outputTokenResults.length > 1 || (outputTokenResults.length === 1 && outputTokenResults[0].mint !== selectedOutputMint);
-  const tradePaused = arbStatus === "running" || activePanel !== "trade";
+  const tradePaused = activePanel !== "trade";
+  const swapBlocked = arbStatus === "running" || activePanel !== "trade";
   const arbPaused = activePanel !== "arb";
 
   const fetchTokenOptions = useCallback(async (query: string): Promise<TokenOption[]> => {
@@ -497,10 +501,10 @@ export default function JupiterPanel() {
   }, [loadPairBalances]);
 
   async function submitDirectSwap() {
-    if (tradePaused) {
+    if (swapBlocked) {
       setStatus({
         kind: "error",
-        text: "Trade window is frozen. Stop ARB and switch panel control to Trade.",
+        text: "Swap is blocked while ARB is running or panel is not set to Trade.",
       });
       return;
     }
@@ -521,7 +525,7 @@ export default function JupiterPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amountSol: amount,
+          amountIn: amount,
           slippageBps,
           inputMint: selectedInputMint,
           outputMint: selectedOutputMint,
@@ -540,6 +544,7 @@ export default function JupiterPanel() {
       });
       void loadWallet();
       void loadQuote();
+      void loadPairBalances();
     } catch {
       setStatus({ kind: "error", text: "Swap request failed" });
     } finally {
@@ -631,9 +636,9 @@ export default function JupiterPanel() {
         />
 
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
-          {tradePaused ? (
+          {swapBlocked ? (
             <div className="mb-3 rounded-xl border border-amber-300/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-              Trade side is paused while ARB is active.
+              Swap execution is blocked while ARB is active. You can still search pairs and inspect quotes.
             </div>
           ) : null}
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2">
@@ -846,7 +851,7 @@ export default function JupiterPanel() {
 
           <button
             onClick={submitDirectSwap}
-            disabled={busy || !hasValidPair || tradePaused}
+            disabled={busy || !hasValidPair || swapBlocked}
             className="mt-3 w-full rounded-xl border border-amber-200/40 bg-amber-300/10 px-3 py-2 text-sm disabled:opacity-50"
           >
             {busy ? "Submitting…" : `Swap ${selectedInputToken.symbol} → ${selectedOutputToken?.symbol || "token"}`}

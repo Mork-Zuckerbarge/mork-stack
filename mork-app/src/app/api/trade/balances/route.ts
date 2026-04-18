@@ -11,9 +11,9 @@ type BalancesBody = {
 export async function POST(req: Request) {
   try {
     const control = await getAppControlState();
-    if (control.arb.status === "running" || control.controls.activePanel !== "trade") {
+    if (control.controls.activePanel !== "trade") {
       return NextResponse.json(
-        { ok: false, error: "Trade panel is paused while ARB is active. Switch panel to Trade and stop ARB first." },
+        { ok: false, error: "Trade panel is paused. Switch panel control to Trade first." },
         { status: 409 }
       );
     }

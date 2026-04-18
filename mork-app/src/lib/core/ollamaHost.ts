@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 const DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434";
 const OLLAMA_TAGS_PATH = "/api/tags";
+const REACHABILITY_TIMEOUT_MS = Math.max(1000, Number(process.env.OLLAMA_REACHABILITY_TIMEOUT_MS ?? 4000));
 
 type HostCache = {
   host: string;
@@ -58,7 +59,7 @@ async function getHostCandidates(preferredHost?: string) {
 
 async function canReachOllama(host: string) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1200);
+  const timeout = setTimeout(() => controller.abort(), REACHABILITY_TIMEOUT_MS);
   try {
     const response = await fetch(`${host}${OLLAMA_TAGS_PATH}`, {
       signal: controller.signal,
