@@ -20,6 +20,10 @@ interface PoolInfo {
   lastUpdated: number;
 }
 
+interface JupiterQuote {
+  outAmount: string;
+}
+
 /**
  * PoolImbalanceDetector monitors on-chain swap events via Helius Geyser.
  * When a large swap moves a pool's price significantly away from the
@@ -213,13 +217,15 @@ export class PoolImbalanceDetector {
     inputMint: string,
     outputMint: string,
     amount: number
-  ): Promise<Record<string, unknown> | null> {
+  ): Promise<JupiterQuote | null> {
     try {
       const res = await axios.get(`${JUPITER_API}/quote`, {
         params: { inputMint, outputMint, amount, slippageBps: 50 },
         timeout: 3000,
       });
-      return res.data;
+      const outAmount = res.data?.outAmount;
+      if (typeof outAmount !== 'string') return null;
+      return { outAmount };
     } catch {
       return null;
     }

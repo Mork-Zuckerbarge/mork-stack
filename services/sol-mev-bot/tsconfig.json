@@ -10,6 +10,15 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "arbScanner.ts",
+    "poolImbalance.ts",
+    "momentumRunner.ts",
+    "poolStateReader.ts"
+  ]
 }
