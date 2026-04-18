@@ -20,6 +20,12 @@ TELEGRAM_PID=""
 log() { printf "\n[%s] %s\n" "start" "$1"; }
 warn() { printf "\n[%s] %s\n" "warn" "$1"; }
 
+is_valid_telegram_bot_token() {
+  local token="${1:-}"
+  token="${token#bot}"
+  [[ "$token" =~ ^[0-9]{6,}:[A-Za-z0-9_-]{20,}$ ]]
+}
+
 restore_persistent_state() {
   if [[ -f "$PERSIST_ENV_FILE" && ! -f "$APP_DIR/.env.local" ]]; then
     mkdir -p "$APP_DIR"
@@ -120,15 +126,33 @@ if [[ -d "$SOL_MEV_BOT_DIR" ]]; then
     npm --prefix "$SOL_MEV_BOT_DIR" install
   fi
 
+  SOL_MEV_CMD="npm run start"
+  if [[ ! -f "$SOL_MEV_BOT_DIR/dist/index.js" ]]; then
+    warn "sol-mev-bot dist/index.js missing; using ts-node transpile-only fallback"
+    SOL_MEV_CMD="node -r ts-node/register/transpile-only index.ts"
+  fi
+
   log "Starting sol-mev-bot service"
   (
     cd "$SOL_MEV_BOT_DIR"
-    npm run start >>"$LOG_DIR/sol-mev-bot.log" 2>&1
+    bash -lc "$SOL_MEV_CMD" >>"$LOG_DIR/sol-mev-bot.log" 2>&1
   ) &
   SOL_MEV_BOT_PID=$!
   sleep 1
   if ! kill -0 "$SOL_MEV_BOT_PID" >/dev/null 2>&1; then
     warn "Sol-mev-bot exited immediately. Check $LOG_DIR/sol-mev-bot.log"
+    if [[ "$SOL_MEV_CMD" == "npm run start" ]]; then
+      warn "Retrying sol-mev-bot with ts-node transpile-only fallback"
+      (
+        cd "$SOL_MEV_BOT_DIR"
+        node -r ts-node/register/transpile-only index.ts >>"$LOG_DIR/sol-mev-bot.log" 2>&1
+      ) &
+      SOL_MEV_BOT_PID=$!
+      sleep 1
+      if ! kill -0 "$SOL_MEV_BOT_PID" >/dev/null 2>&1; then
+        warn "Sol-mev-bot fallback also exited. Check $LOG_DIR/sol-mev-bot.log"
+      fi
+    fi
   fi
 else
   log "Skipping sol-mev-bot service startup (missing $SOL_MEV_BOT_DIR)"
@@ -150,7 +174,9 @@ else
 fi
 
 if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
-  if [[ -f "$TELEGRAM_BRIDGE_DIR/bridge.py" ]]; then
+  if ! is_valid_telegram_bot_token "$TELEGRAM_BOT_TOKEN"; then
+    warn "Skipping telegram bridge startup (invalid TELEGRAM_BOT_TOKEN format; expected BotFather token like 123456:ABC...)"
+  elif [[ -f "$TELEGRAM_BRIDGE_DIR/bridge.py" ]]; then
     TELEGRAM_PYTHON=""
     if [[ -x "$SHERPA_DIR/.venv/bin/python" ]]; then
       TELEGRAM_PYTHON="$SHERPA_DIR/.venv/bin/python"
