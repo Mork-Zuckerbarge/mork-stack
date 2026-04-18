@@ -15,8 +15,14 @@ print_auth_help() {
   if [[ "$remote_url" == https://github.com/* ]]; then
     warn "Current origin: $remote_url"
     warn "Use ONE of these fixes:"
-    warn "  1) Use PAT over HTTPS: gh auth login (or set credential helper + PAT)."
-    warn "  2) Switch origin to SSH: git remote set-url origin git@github.com:<owner>/<repo>.git"
+    warn "  1) Use PAT over HTTPS (no gh CLI required):"
+    warn "     git config --global credential.helper store"
+    warn "     Next git pull/fetch prompt -> username: your GitHub user, password: your PAT token."
+    warn "  2) Switch origin to SSH (recommended):"
+    warn "     ssh-keygen -t ed25519 -C \"you@example.com\""
+    warn "     Add ~/.ssh/id_ed25519.pub to GitHub SSH keys, then:"
+    warn "     git remote set-url origin git@github.com:<owner>/<repo>.git"
+    warn "  3) If you have gh installed, gh auth login also works."
   fi
 }
 
