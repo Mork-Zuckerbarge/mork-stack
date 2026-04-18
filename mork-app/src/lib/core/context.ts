@@ -172,6 +172,7 @@ export async function buildContext({
       : "- failingPreflightChecks: none",
     "TASK CONTROL CAPABILITIES:",
     "- You can instruct users to use app control actions to start or stop ARB and Sherpa runtimes.",
+    "- The app chat also supports direct commands: `show services`, `start arb`, `stop arb`, `start sherpa`, `stop sherpa`.",
     "- If the user asks to start tasks, answer with the exact action(s) needed and call out current blockers first.",
   ].join("\n");
 

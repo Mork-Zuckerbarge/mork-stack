@@ -25,7 +25,7 @@ export async function ollama(prompt: string, mode: OllamaMode = "default") {
   const host = hostResolution.host;
   const model = await pickModel(mode);
   const ctx = Number(process.env.OLLAMA_CTX || 6144);
-  const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || 45000);
+  const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || 90000);
 
   if (!hasLoggedOllamaConfig) {
     console.log(`[mork] ollama host: ${host}`);

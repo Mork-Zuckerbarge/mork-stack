@@ -58,6 +58,27 @@ Important wallet env note:
 - `mork-app/env.example` is only used as a template when `.env.local` is first created.
 - If `.env.local` already exists, edit `MORK_WALLET` or `MORK_WALLET_SECRET_KEY` in `.env.local` directly, then restart the app.
 
+## Local RPC + secret update map
+
+Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
+
+- Solana RPC for wallet and direct swap routes:
+  - `SOLANA_RPC_URL` (primary),
+  - `SOLANA_RPC` and/or `RPC_URL` (fallback compatibility for older paths/services),
+  - `SOLANA_RPC_URLS` (optional comma-separated pool used by arb failover rotation).
+- Wallet credentials:
+  - `MORK_WALLET` (public address only), and/or
+  - `MORK_WALLET_SECRET_KEY` (JSON byte array, required for server-side signing features like direct swaps).
+- Telegram posting via chat command route:
+  - `TELEGRAM_BOT_TOKEN`,
+  - `TELEGRAM_CHAT_ID`.
+- Ollama responsiveness:
+  - `OLLAMA_HOST`,
+  - `OLLAMA_MODEL`,
+  - `OLLAMA_TIMEOUT_MS` (increase if responses time out).
+
+After editing env values, restart `./start.sh` (or restart `npm run dev`) so running processes pick up changes.
+
 ## Docker Compose bootstrap
 
 For a reproducible containerized setup:
