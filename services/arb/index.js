@@ -142,6 +142,20 @@ function morkTradeResult(payload) {
   }).catch(() => {});
 }
 
+function morkRouteResearch(payload) {
+  return morkMemory({
+    type: "fact",
+    content: JSON.stringify({ kind: "route_research", ...payload }),
+    entities: [
+      "arb:route_research",
+      payload.mint ? `mint:${payload.mint}` : "mint:unknown",
+      payload.symbol ? `symbol:${payload.symbol}` : "symbol:unknown",
+    ],
+    importance: 0.7,
+    source: "arb",
+  }).catch(() => {});
+}
+
 function recordTradeAttempt({ mint }) {
   rotateGovernorWindows();
   gov.tradesThisHour += 1;
@@ -1238,6 +1252,17 @@ async function main() {
       console.log(
         `➡️  CANDIDATE ${m.symbol || m.inMint} edge=${scan.edgePct.toFixed(3)}% net≈$${scan.netUsdProfit.toFixed(4)} hits=${hits}/${CANDIDATE_THRESHOLD}`
       );
+      morkRouteResearch({
+        stage: "candidate",
+        mint: m.inMint,
+        symbol: m.symbol || m.inMint,
+        edgePct: scan.edgePct,
+        netUsd: scan.netUsdProfit,
+        hits,
+        threshold: CANDIDATE_THRESHOLD,
+        armed: ARMED,
+        paper: PAPER,
+      });
 
       if (hits < CANDIDATE_THRESHOLD) continue;
 
@@ -1255,6 +1280,16 @@ async function main() {
 
       if (!gate.ok) {
         console.log(`⛔ RISK BLOCK ${m.symbol || m.inMint}: ${gate.reason}`);
+        morkRouteResearch({
+          stage: "risk_block",
+          mint: m.inMint,
+          symbol: m.symbol || m.inMint,
+          edgePct: scan.edgePct,
+          netUsd: scan.netUsdProfit,
+          gateReason: gate.reason,
+          armed: ARMED,
+          paper: PAPER,
+        });
         continue;
       }
 
@@ -1263,9 +1298,30 @@ async function main() {
       if (exec.ok) {
         recordTradeResult({ ok: true, realizedPnlUsd: Number(exec.net) || 0 });
         console.log(`✅ TRADE SENT ${m.symbol || m.inMint} sig=${exec.sig} net≈$${Number(exec.net || 0).toFixed(4)}`);
+        morkRouteResearch({
+          stage: "executed",
+          mint: m.inMint,
+          symbol: m.symbol || m.inMint,
+          edgePct: scan.edgePct,
+          netUsd: scan.netUsdProfit,
+          signature: exec.sig || null,
+          armed: ARMED,
+          paper: PAPER,
+        });
       } else {
         recordTradeResult({ ok: false, realizedPnlUsd: 0 });
         console.log(`⚠ TRADE SKIP ${m.symbol || m.inMint}: ${exec.reason || "unknown reason"}`);
+        morkRouteResearch({
+          stage: "execution_skip",
+          mint: m.inMint,
+          symbol: m.symbol || m.inMint,
+          edgePct: scan.edgePct,
+          netUsd: scan.netUsdProfit,
+          reason: exec.reason || "unknown reason",
+          blacklist: !!exec.blacklist,
+          armed: ARMED,
+          paper: PAPER,
+        });
         if (exec.blacklist) {
           blacklist.add(m.inMint);
           console.log(`⛔ BLACKLIST ${m.symbol || m.inMint} due to repeated execution errors`);

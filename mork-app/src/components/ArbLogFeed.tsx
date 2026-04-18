@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type ArbLog = {
   id: string;
@@ -9,14 +9,17 @@ type ArbLog = {
   content: string;
 };
 
+type LogScope = "arb" | "core" | "sherpa" | "telegram" | "all";
+
 export default function ArbLogFeed() {
   const [logs, setLogs] = useState<ArbLog[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pollMs, setPollMs] = useState(15000);
+  const [scope, setScope] = useState<LogScope>("arb");
 
-  async function loadLogs() {
+  const loadLogs = useCallback(async () => {
     try {
-      const res = await fetch("/api/arb/logs?limit=30", { cache: "no-store" });
+      const res = await fetch(`/api/arb/logs?limit=30&scope=${scope}`, { cache: "no-store" });
       const data = (await res.json()) as { ok?: boolean; items?: ArbLog[]; error?: string };
       if (!res.ok || !data.ok) {
         setError(data.error || `Failed to load logs (${res.status})`);
@@ -27,7 +30,7 @@ export default function ArbLogFeed() {
     } catch {
       setError("Failed to load logs");
     }
-  }
+  }, [scope]);
 
   useEffect(() => {
     const kickoff = window.setTimeout(() => {
@@ -41,13 +44,24 @@ export default function ArbLogFeed() {
       window.clearTimeout(kickoff);
       window.clearInterval(timer);
     };
-  }, [pollMs]);
+  }, [pollMs, loadLogs]);
 
   return (
     <div className="mt-4 rounded-2xl border border-white/15 bg-black/30 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">ARB Logs Feed</h3>
+        <h3 className="text-sm font-semibold">Service Logs Feed</h3>
         <div className="flex items-center gap-2">
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value as LogScope)}
+            className="rounded-lg border border-white/20 bg-black/35 px-2 py-1 text-xs"
+          >
+            <option value="arb">Arb + Sol MEV</option>
+            <option value="core">Core</option>
+            <option value="sherpa">Sherpa</option>
+            <option value="telegram">Telegram bridge</option>
+            <option value="all">All services</option>
+          </select>
           <select
             value={pollMs}
             onChange={(e) => setPollMs(Number(e.target.value))}
@@ -67,7 +81,7 @@ export default function ArbLogFeed() {
 
       <div className="max-h-64 space-y-2 overflow-auto pr-1 text-xs">
         {logs.length === 0 ? (
-          <p className="text-white/60">No arb logs yet.</p>
+          <p className="text-white/60">No logs yet for this scope.</p>
         ) : (
           logs.map((log) => (
             <div key={log.id} className="rounded-lg border border-white/10 bg-black/35 px-2 py-1">

@@ -1400,6 +1400,33 @@ class TwitterBot:
         if not token and not chat_id:
             return
 
+        def normalize_bot_token(raw):
+            t = (raw or "").strip()
+            if t.lower().startswith("https://api.telegram.org/bot"):
+                t = t.split("/bot", 1)[1].split("/", 1)[0].strip()
+            if t.lower().startswith("bot"):
+                t = t[3:].strip()
+            return t
+
+        def is_chat_id(value):
+            v = (value or "").strip()
+            return bool(re.match(r"^-?\d{6,}$", v))
+
+        def is_bot_token(value):
+            v = normalize_bot_token(value)
+            return bool(re.match(r"^\d{6,}:[A-Za-z0-9_-]{20,}$", v))
+
+        normalized_token = normalize_bot_token(token)
+        if normalized_token and not is_bot_token(normalized_token):
+            if is_chat_id(normalized_token) and not chat_id:
+                chat_id = normalized_token
+            print(
+                "[creds] Telegram bot token looks invalid. "
+                "Expected BotFather token format like 123456:ABC... "
+                "Will not overwrite TELEGRAM_BOT_TOKEN until corrected."
+            )
+            normalized_token = ""
+
         env_path = CROSS_SERVICE_ENV_PATH
         try:
             lines = []
@@ -1414,8 +1441,8 @@ class TwitterBot:
                         return
                 lines_in.append(new_line)
 
-            if token:
-                upsert(lines, "TELEGRAM_BOT_TOKEN", token)
+            if normalized_token:
+                upsert(lines, "TELEGRAM_BOT_TOKEN", normalized_token)
             if chat_id:
                 upsert(lines, "TELEGRAM_CHAT_ID", chat_id)
 
