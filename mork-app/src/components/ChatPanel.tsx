@@ -35,11 +35,14 @@ export default function ChatPanel() {
     setMessages(next);
     setInput("");
     setLoading(true);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 120000);
     try {
       const res = await fetch("/api/chat/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, maxChars: 1600 }),
+        signal: controller.signal,
       });
 
       const data = await res.json();
@@ -54,7 +57,12 @@ export default function ChatPanel() {
 
       setMessages([...next, { role: "agent", content }]);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Something broke between thought and speech.";
+      const message =
+        e instanceof DOMException && e.name === "AbortError"
+          ? "Chat request timed out after 120s. Model is overloaded; try a shorter prompt or raise OLLAMA_TIMEOUT_MS."
+          : e instanceof Error
+          ? e.message
+          : "Something broke between thought and speech.";
       setMessages([
         ...next,
         {
@@ -63,6 +71,7 @@ export default function ChatPanel() {
         },
       ]);
     } finally {
+      window.clearTimeout(timeout);
       setLoading(false);
     }
 
