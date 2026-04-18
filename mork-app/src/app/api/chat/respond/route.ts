@@ -1,16 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { respondToChat } from "@/lib/core/chat";
+import { getAppControlState } from "@/lib/core/appControl";
+import { getOrchestratorState, startRuntime, stopRuntime } from "@/lib/core/orchestrator";
+import { prisma } from "@/lib/core/prisma";
 
 type ChatChannel = "system" | "telegram" | "x";
 
 type RoutedCommand =
   | { type: "tweet"; text: string }
   | { type: "telegram"; text: string }
-  | { type: "buy"; usd: number; symbol: string };
+  | { type: "buy"; usd: number; symbol: string }
+  | { type: "services.status" }
+  | { type: "service.start"; service: "arb" | "sherpa" }
+  | { type: "service.stop"; service: "arb" | "sherpa" };
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
+const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 const JUP_BASE = process.env.JUP_BASE_URL ?? "https://lite-api.jup.ag";
+const LAST_TRADE_FACT_KEY = "__agent_last_trade_iso_v1__";
 
 function resolveChannel(value: unknown): ChatChannel {
   if (value === "telegram" || value === "x") return value;
@@ -57,6 +65,20 @@ function parseCommand(message: string): RoutedCommand | null {
     };
   }
 
+  if (/^(?:services|service)\s+(?:status|list|show)$/i.test(trimmed) || /^show\s+services$/i.test(trimmed)) {
+    return { type: "services.status" };
+  }
+
+  const startMatch = trimmed.match(/^(?:start|enable)\s+(arb|sherpa)\s*$/i);
+  if (startMatch) {
+    return { type: "service.start", service: startMatch[1].toLowerCase() as "arb" | "sherpa" };
+  }
+
+  const stopMatch = trimmed.match(/^(?:stop|disable)\s+(arb|sherpa)\s*$/i);
+  if (stopMatch) {
+    return { type: "service.stop", service: stopMatch[1].toLowerCase() as "arb" | "sherpa" };
+  }
+
   return null;
 }
 
@@ -85,7 +107,122 @@ async function estimateSolForUsd(usd: number): Promise<number> {
   return outLamports / 1_000_000_000;
 }
 
+function formatMinutesFromNow(lastTradeIso: string) {
+  const millis = Date.now() - new Date(lastTradeIso).getTime();
+  if (!Number.isFinite(millis) || millis <= 0) return 0;
+  return Math.ceil(millis / 60_000);
+}
+
+async function enforceTradeAuthority(usd: number) {
+  const control = await getAppControlState();
+  const authority = control.controls.executionAuthority;
+
+  if (authority.mode === "emergency_stop") {
+    return {
+      ok: false,
+      status: 403,
+      error: "Trade execution is blocked: execution authority is in emergency_stop.",
+    };
+  }
+
+  if (authority.mode === "user_only") {
+    return {
+      ok: false,
+      status: 403,
+      error: "Trade execution is blocked: execution authority is user_only.",
+    };
+  }
+
+  if (usd > authority.maxTradeUsd) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Trade amount exceeds maxTradeUsd ($${authority.maxTradeUsd}) for agent_assisted mode.`,
+    };
+  }
+
+  const cooldownMinutes = Math.max(0, authority.cooldownMinutes);
+  if (cooldownMinutes > 0) {
+    const lastTrade = await prisma.memoryFact.findUnique({ where: { key: LAST_TRADE_FACT_KEY } });
+    const lastTradeIso = String(lastTrade?.value || "").trim();
+
+    if (lastTradeIso) {
+      const minutesSince = formatMinutesFromNow(lastTradeIso);
+      if (minutesSince < cooldownMinutes) {
+        return {
+          ok: false,
+          status: 429,
+          error: `Trade cooldown active: wait ${cooldownMinutes - minutesSince} more minute(s).`,
+        };
+      }
+    }
+  }
+
+  const allowlist = authority.mintAllowlist.map((item) => item.trim()).filter(Boolean);
+  if (allowlist.length > 0) {
+    const allowSet = new Set(allowlist);
+    if (!allowSet.has(BBQ_MINT) && !allowSet.has("BBQ")) {
+      return {
+        ok: false,
+        status: 403,
+        error: "Trade denied by execution authority mintAllowlist (BBQ mint not allowed).",
+      };
+    }
+  }
+
+  return { ok: true, status: 200 } as const;
+}
+
+async function noteTradeExecution() {
+  await prisma.memoryFact.upsert({
+    where: { key: LAST_TRADE_FACT_KEY },
+    update: { value: new Date().toISOString() },
+    create: { key: LAST_TRADE_FACT_KEY, value: new Date().toISOString(), source: "agent" },
+  });
+}
+
 async function executeCommand(req: NextRequest, command: RoutedCommand) {
+  if (command.type === "services.status") {
+    const orchestrator = await getOrchestratorState();
+    const authority = orchestrator.app.controls.executionAuthority;
+    return {
+      ok: true,
+      routed: "orchestrator",
+      command: "services.status",
+      response:
+        `Services:\n` +
+        `- arb: ${orchestrator.app.arb.status}\n` +
+        `- sherpa: ${orchestrator.app.sherpa.status}\n` +
+        `- startupCompleted: ${orchestrator.app.controls.startupCompleted}\n` +
+        `- trade authority: ${authority.mode} (maxTradeUsd=${authority.maxTradeUsd}, cooldownMinutes=${authority.cooldownMinutes})`,
+      status: 200,
+    };
+  }
+
+  if (command.type === "service.start") {
+    await startRuntime(command.service);
+    const orchestrator = await getOrchestratorState();
+    return {
+      ok: true,
+      routed: "orchestrator",
+      command: "service.start",
+      response: `Started ${command.service}. Current status: arb=${orchestrator.app.arb.status}, sherpa=${orchestrator.app.sherpa.status}.`,
+      status: 200,
+    };
+  }
+
+  if (command.type === "service.stop") {
+    await stopRuntime(command.service);
+    const orchestrator = await getOrchestratorState();
+    return {
+      ok: true,
+      routed: "orchestrator",
+      command: "service.stop",
+      response: `Stopped ${command.service}. Current status: arb=${orchestrator.app.arb.status}, sherpa=${orchestrator.app.sherpa.status}.`,
+      status: 200,
+    };
+  }
+
   if (command.type === "tweet") {
     const draft = await respondToChat({
       channel: "x",
@@ -161,6 +298,11 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     };
   }
 
+  const tradeAuthority = await enforceTradeAuthority(command.usd);
+  if (!tradeAuthority.ok) {
+    return tradeAuthority;
+  }
+
   const amountSol = await estimateSolForUsd(command.usd);
   const swapRes = await fetch(new URL("/api/trade/swap", req.url), {
     method: "POST",
@@ -182,6 +324,8 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
       error: swapJson.error || `Trade execution failed (${swapRes.status})`,
     };
   }
+
+  await noteTradeExecution();
 
   return {
     ok: true,

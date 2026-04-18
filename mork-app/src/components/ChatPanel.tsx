@@ -94,6 +94,9 @@ export default function ChatPanel() {
 
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
         {[
+          "show services",
+          "start arb",
+          "stop sherpa",
           "hey tweet this: gm from the bunker",
           "post this in telegram: gm chat",
           "go buy $2 of $spx",
@@ -113,7 +116,7 @@ export default function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder="Try: hey tweet this: ... | post this in telegram: ... | go buy $2 of $spx"
+          placeholder="Try: show services | start arb | hey tweet this: ... | go buy $2 of $spx"
           className="flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 outline-none"
         />
         <button
@@ -124,6 +127,10 @@ export default function ChatPanel() {
           {loading ? "Thinking..." : "Send"}
         </button>
       </div>
+      <p className="mt-2 text-xs text-white/55">
+        Chat waits longer for model replies now. If responses still time out, raise <code>OLLAMA_TIMEOUT_MS</code> in{" "}
+        <code>mork-app/.env.local</code> and restart.
+      </p>
     </div>
   );
 }
