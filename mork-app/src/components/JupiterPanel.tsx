@@ -79,6 +79,13 @@ type ArbRuntimeConfig = {
   paper: boolean;
 };
 
+type TradeRuntimeConfig = {
+  swapEnabled: boolean;
+  maxSwapSol: number;
+  jupiterBaseUrl: string;
+  jupiterTimeoutMs: number;
+};
+
 function formatTokenAmount(value: number | undefined, maxFractionDigits = 9): string {
   if (!Number.isFinite(value)) return "0";
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: maxFractionDigits });
@@ -158,6 +165,7 @@ export default function JupiterPanel() {
   const [panelRefreshBusy, setPanelRefreshBusy] = useState(false);
   const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
   const [arbRuntimeConfig, setArbRuntimeConfig] = useState<ArbRuntimeConfig | null>(null);
+  const [tradeRuntimeConfig, setTradeRuntimeConfig] = useState<TradeRuntimeConfig | null>(null);
   const [activePanel, setActivePanel] = useState<ActivePanel>("trade");
 
   const selectedInputToken = useMemo(
@@ -274,6 +282,7 @@ export default function JupiterPanel() {
           walletProvisioning?: WalletProvisioning;
         };
         arbRuntime?: ArbRuntimeConfig;
+        tradeRuntime?: TradeRuntimeConfig;
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
         setExecution(null);
@@ -281,6 +290,7 @@ export default function JupiterPanel() {
         setStartupCompleted(false);
         setWalletProvisioning(null);
         setArbRuntimeConfig(null);
+        setTradeRuntimeConfig(null);
         return;
       }
       setExecution(data.state.controls.executionAuthority);
@@ -289,6 +299,7 @@ export default function JupiterPanel() {
       setActivePanel(data.state.controls.activePanel === "arb" ? "arb" : "trade");
       setWalletProvisioning(data.state.walletProvisioning ?? null);
       setArbRuntimeConfig(data.arbRuntime ?? null);
+      setTradeRuntimeConfig(data.tradeRuntime ?? null);
     } catch {
       setExecution(null);
       setArbStatus("stopped");
@@ -296,6 +307,7 @@ export default function JupiterPanel() {
       setActivePanel("trade");
       setWalletProvisioning(null);
       setArbRuntimeConfig(null);
+      setTradeRuntimeConfig(null);
     }
   }, []);
 
@@ -609,6 +621,7 @@ export default function JupiterPanel() {
           arbStartupBusy={arbStartupBusy}
           arbStartupStatus={arbStartupStatus}
           arbRuntimeConfig={arbRuntimeConfig}
+          tradeRuntimeConfig={tradeRuntimeConfig}
           onEnsureArbOnStartup={ensureArbOnStartup}
           arbPaused={arbPaused}
           onSave={saveExecution}
@@ -887,6 +900,7 @@ function ExecutionControls({
   arbStartupBusy,
   arbStartupStatus,
   arbRuntimeConfig,
+  tradeRuntimeConfig,
   onEnsureArbOnStartup,
   arbPaused,
   onSave,
@@ -903,6 +917,7 @@ function ExecutionControls({
   arbStartupBusy: boolean;
   arbStartupStatus: string;
   arbRuntimeConfig: ArbRuntimeConfig | null;
+  tradeRuntimeConfig: TradeRuntimeConfig | null;
   onEnsureArbOnStartup: () => void;
   arbPaused: boolean;
   onSave: (input: ExecutionAuthority) => void;
@@ -1023,6 +1038,18 @@ function ExecutionControls({
               {walletProvisioning?.address || "No wallet configured yet (set MORK_WALLET or MORK_WALLET_SECRET_KEY)."}
             </div>
             {walletRefreshStatus ? <p className="mt-1 text-[11px] text-white/60">{walletRefreshStatus}</p> : null}
+          </div>
+          <div className="mt-1 rounded-xl bg-black/30 p-2 text-white/70">
+            <div className="font-medium text-white/80">Trade runtime controls</div>
+            <div className="mt-1">
+              Direct swap: <span className={tradeRuntimeConfig?.swapEnabled ? "text-emerald-300" : "text-amber-200"}>{tradeRuntimeConfig?.swapEnabled ? "enabled" : "disabled"}</span>
+            </div>
+            <div className="mt-1">Max swap size: {tradeRuntimeConfig?.maxSwapSol ?? 0.25} SOL</div>
+            <div className="mt-1 break-all">Jupiter base: {tradeRuntimeConfig?.jupiterBaseUrl ?? "https://lite-api.jup.ag"}</div>
+            <div className="mt-1">Jupiter timeout: {tradeRuntimeConfig?.jupiterTimeoutMs ?? 10000} ms</div>
+            <p className="mt-1 text-[11px] text-white/60">
+              These controls are sourced from env vars (MORK_AGENT_SWAP_ENABLED, MORK_AGENT_SWAP_MAX_SOL, JUP_BASE_URL, JUP_TIMEOUT_MS).
+            </p>
           </div>
           <button
             onClick={() =>

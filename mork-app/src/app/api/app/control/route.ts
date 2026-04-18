@@ -38,12 +38,22 @@ function getArbRuntimeFromEnv() {
   };
 }
 
+function getTradeRuntimeFromEnv() {
+  return {
+    swapEnabled: process.env.MORK_AGENT_SWAP_ENABLED === "1",
+    maxSwapSol: Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25),
+    jupiterBaseUrl: process.env.JUP_BASE_URL ?? "https://lite-api.jup.ag",
+    jupiterTimeoutMs: Math.max(2500, Number(process.env.JUP_TIMEOUT_MS ?? 10000)),
+  };
+}
+
 export async function GET() {
   const orchestrator = await getOrchestratorState();
   return NextResponse.json({
     ok: true,
     state: orchestrator.app,
     arbRuntime: getArbRuntimeFromEnv(),
+    tradeRuntime: getTradeRuntimeFromEnv(),
     orchestrator: {
       health: orchestrator.health,
       runtimeFlagOwner: orchestrator.runtimeFlagOwner,
@@ -201,6 +211,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       state: orchestrator.app,
       arbRuntime: getArbRuntimeFromEnv(),
+      tradeRuntime: getTradeRuntimeFromEnv(),
       orchestrator: {
         health: orchestrator.health,
         runtimeFlagOwner: orchestrator.runtimeFlagOwner,
