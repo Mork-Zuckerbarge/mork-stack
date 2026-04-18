@@ -7,15 +7,60 @@ import path from "node:path";
 
 export const runtime = "nodejs";
 
+const SOURCE_GROUPS = {
+  arb: ["arb", "arb-bot", "trade"],
+  core: ["mork-core", "system", "mork-app"],
+  sherpa: ["sherpa"],
+  telegram: ["telegram", "telegram-bridge"],
+  all: ["arb", "arb-bot", "trade", "mork-core", "system", "mork-app", "sherpa", "telegram", "telegram-bridge"],
+} as const;
+
+const SERVICE_LOG_FILES = {
+  arb: ["arb.log", "sol-mev-bot.log"],
+  core: ["mork-core.log"],
+  sherpa: ["sherpa.log"],
+  telegram: ["telegram-bridge.log"],
+  all: ["arb.log", "sol-mev-bot.log", "mork-core.log", "sherpa.log", "telegram-bridge.log"],
+} as const;
+
+type ServiceScope = keyof typeof SOURCE_GROUPS;
+
+function parseScope(raw: string | null): ServiceScope {
+  if (!raw) return "arb";
+  if (raw === "arb" || raw === "core" || raw === "sherpa" || raw === "telegram" || raw === "all") {
+    return raw;
+  }
+  return "arb";
+}
+
+async function readLogTail(fileName: string, perFileLimit: number) {
+  const logPath = path.resolve(process.cwd(), "..", ".logs", fileName);
+  const raw = await readFile(logPath, "utf8");
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-Math.max(perFileLimit, 0))
+    .map((line, idx) => ({
+      id: `${fileName}-${idx}`,
+      createdAt: new Date().toISOString(),
+      source: `file:${fileName}`,
+      content: line.length > 400 ? `${line.slice(0, 400)}…` : line,
+    }));
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? 30), 1), 100);
+    const scope = parseScope(searchParams.get("scope"));
+    const scopedSources = SOURCE_GROUPS[scope];
+    const scopedFiles = SERVICE_LOG_FILES[scope];
 
     const [items, appControl, orchestrator] = await Promise.all([
       prisma.memory.findMany({
         where: {
-          OR: [{ source: "arb" }, { source: "arb-bot" }, { source: "trade" }],
+          OR: scopedSources.map((source) => ({ source })),
         },
         orderBy: { createdAt: "desc" },
         take: limit,
@@ -38,32 +83,24 @@ export async function GET(req: Request) {
         `runtime arb=${appControl.arb.status} sherpa=${appControl.sherpa.status} ` +
         `startupCompleted=${appControl.controls.startupCompleted} ` +
         `health.arb=${orchestrator.health.arb.status} ` +
-        `health.wallet=${orchestrator.health.wallet.status}`,
+        `health.wallet=${orchestrator.health.wallet.status} ` +
+        `scope=${scope}`,
     };
 
-    const outItems = [runtimeSummary, ...items];
+    const perFileLimit = Math.max(2, Math.floor(limit / Math.max(scopedFiles.length, 1)));
+    const fileItems = (
+      await Promise.all(
+        scopedFiles.map(async (fileName) => {
+          try {
+            return await readLogTail(fileName, perFileLimit);
+          } catch {
+            return [];
+          }
+        })
+      )
+    ).flat();
 
-    if (items.length === 0) {
-      const logPath = path.resolve(process.cwd(), "..", ".logs", "arb.log");
-      try {
-        const raw = await readFile(logPath, "utf8");
-        const lines = raw
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .slice(-Math.max(limit - 1, 0))
-          .map((line, idx) => ({
-            id: `arb-log-${idx}`,
-            createdAt: new Date().toISOString(),
-            source: "arb-file",
-            content: line.length > 400 ? `${line.slice(0, 400)}…` : line,
-          }));
-
-        outItems.push(...lines.reverse());
-      } catch {
-        // file tail fallback is best-effort only
-      }
-    }
+    const outItems = [runtimeSummary, ...fileItems.reverse(), ...items];
 
     return NextResponse.json({
       ok: true,
