@@ -24,6 +24,10 @@ CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/api/chat/respond").strip() or 
 REPLY_MODE = os.getenv("REPLY_MODE", "all").strip().lower()  # mentions | all | dm
 COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "20"))
 MAX_PER_10 = int(os.getenv("MAX_PER_10_MIN", "12"))
+CHAT_TIMEOUT_SECONDS = int(os.getenv("CHAT_TIMEOUT_SECONDS", "25"))
+TELEGRAM_MAX_CHARS = int(os.getenv("TELEGRAM_MAX_CHARS", "700"))
+TELEGRAM_MEMORY_ENABLED_DEFAULT = os.getenv("TELEGRAM_MEMORY_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on")
+TELEGRAM_MEMORY_MAX = max(1, int(os.getenv("TELEGRAM_MEMORY_MAX", "10")))
 
 # ElevenLabs (optional)
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
@@ -43,6 +47,63 @@ recent_hits = defaultdict(lambda: deque(maxlen=120))  # per-user rate window
 
 # Optional per-user voice toggle (in-memory; resets on restart)
 voice_enabled = defaultdict(lambda: VOICE_DEFAULT_ON)
+# Optional per-user short memory toggle + ring buffer (in-memory; resets on restart)
+memory_enabled = defaultdict(lambda: TELEGRAM_MEMORY_ENABLED_DEFAULT)
+conversation_memory = defaultdict(list)
+
+
+def message_importance(text: str, msg: dict) -> int:
+    score = 0
+    t = (text or "").strip()
+    if not t:
+        return score
+    if "?" in t:
+        score += 2
+    if len(t) >= 140:
+        score += 1
+    if t.lower().startswith(("help", "how", "why", "what", "when", "where", "can you", "please")):
+        score += 1
+    if msg.get("reply_to_message"):
+        score += 2
+    return score
+
+
+def prune_conversation_memory(user_id: int):
+    items = conversation_memory[user_id]
+    while len(items) > TELEGRAM_MEMORY_MAX:
+        drop_idx = min(range(len(items)), key=lambda idx: (items[idx]["importance"], items[idx]["ts"]))
+        items.pop(drop_idx)
+
+
+def remember_message(user_id: int, role: str, text: str, msg: dict):
+    if not memory_enabled[user_id]:
+        return
+    content = (text or "").strip()
+    if not content:
+        return
+    conversation_memory[user_id].append(
+        {
+            "role": role,
+            "text": content,
+            "ts": time.time(),
+            "importance": message_importance(content, msg),
+        }
+    )
+    prune_conversation_memory(user_id)
+
+
+def build_context(user_id: int, latest_user_message: str) -> str:
+    if not memory_enabled[user_id]:
+        return latest_user_message
+    history = conversation_memory[user_id][-TELEGRAM_MEMORY_MAX:]
+    if not history:
+        return latest_user_message
+    lines = []
+    for item in history:
+        tag = "User" if item["role"] == "user" else "Assistant"
+        lines.append(f"{tag}: {item['text']}")
+    lines.append(f"User: {latest_user_message}")
+    return "Recent Telegram context (oldest -> newest):\n" + "\n".join(lines)
 
 
 def within_rate_limit(user_id: int) -> bool:
@@ -93,37 +154,58 @@ def should_reply(msg: dict, bot_username: str, bot_id: int) -> bool:
 
 def post_to_chat_endpoint(path: str, payload: dict) -> dict:
     url = f"{CORE_URL}{path}"
-    response = requests.post(url, json=payload, timeout=60)
+    response = requests.post(url, json=payload, timeout=CHAT_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
 
 
-def core_reply(handle: str, message: str) -> str:
+def build_candidate_paths() -> list[str]:
+    normalized = CHAT_ENDPOINT if CHAT_ENDPOINT.startswith("/") else f"/{CHAT_ENDPOINT}"
+
+    # Next.js app surface uses /api/chat/respond (default localhost:3000 in this stack).
+    if ":3000" in CORE_URL:
+        candidates: list[str] = []
+        if normalized.startswith("/api/"):
+            candidates.append(normalized)
+        if "/api/chat/respond" not in candidates:
+            candidates.append("/api/chat/respond")
+        return candidates
+
+    candidates: list[str] = []
+    if normalized:
+        candidates.append(normalized)
+
+    # mork-core compatibility fallback
+    if "/chat/respond" not in candidates:
+        candidates.append("/chat/respond")
+    if "/api/chat/respond" not in candidates:
+        candidates.append("/api/chat/respond")
+    return candidates
+
+
+def core_reply(handle: str, message: str, user_id: int) -> str:
+    prompt = build_context(user_id, message)
     payload = {
         "channel": "telegram",
         "handle": handle,
-        "message": message,
-        "maxChars": 900,
+        "message": prompt,
+        "maxChars": TELEGRAM_MAX_CHARS,
     }
 
-    candidate_paths = [CHAT_ENDPOINT]
-    if CHAT_ENDPOINT != "/api/chat/respond":
-        candidate_paths.append("/api/chat/respond")
-    if CHAT_ENDPOINT != "/chat/respond":
-        candidate_paths.append("/chat/respond")
+    candidate_paths = build_candidate_paths()
 
-    last_error = None
+    errors: list[str] = []
     j = None
     for path in candidate_paths:
         try:
             j = post_to_chat_endpoint(path, payload)
             break
         except Exception as err:
-            last_error = err
+            errors.append(f"{path}: {repr(err)}")
             continue
 
     if j is None:
-        raise RuntimeError(f"chat upstream failed after paths={candidate_paths}: {last_error!r}")
+        raise RuntimeError(f"chat upstream failed after paths={candidate_paths}: {' | '.join(errors)}")
 
     if not j.get("ok"):
         return "My thoughts failed to compile. Try again in a moment."
@@ -258,6 +340,7 @@ def main():
     print(
         f"[bridge] bot=@{bot_username} id={bot_id} core={CORE_URL} endpoint={CHAT_ENDPOINT} mode={REPLY_MODE}"
     )
+    print(f"[bridge] chat endpoint candidates={build_candidate_paths()}")
     if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
         print("[bridge] ElevenLabs: enabled (voice replies available)")
     else:
@@ -301,6 +384,17 @@ def main():
                         else:
                             send_message(chat_id, "Usage: /voice on  or  /voice off", reply_to=msg.get("message_id"))
                         continue
+                    if text.lower().startswith("/memory"):
+                        parts = text.lower().split()
+                        if len(parts) >= 2 and parts[1] in ("on", "off"):
+                            memory_enabled[user_id] = parts[1] == "on"
+                            send_message(chat_id, f"Memory: {'ON' if memory_enabled[user_id] else 'OFF'}", reply_to=msg.get("message_id"))
+                        elif len(parts) >= 2 and parts[1] == "clear":
+                            conversation_memory[user_id].clear()
+                            send_message(chat_id, "Memory cleared.", reply_to=msg.get("message_id"))
+                        else:
+                            send_message(chat_id, "Usage: /memory on | /memory off | /memory clear", reply_to=msg.get("message_id"))
+                        continue
 
                     if not should_reply(msg, bot_username, bot_id):
                         continue
@@ -316,7 +410,9 @@ def main():
                     if bot_username:
                         text = text.replace(f"@{bot_username}", "").replace(f"@{bot_username.lower()}", "").strip()
                     try:
-                        reply = core_reply(handle=handle, message=text)
+                        reply = core_reply(handle=handle, message=text, user_id=user_id)
+                        remember_message(user_id, "user", text, msg)
+                        remember_message(user_id, "assistant", reply, msg)
 
                         # Voice OR text, not both
                         if voice_enabled[user_id] and (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID):

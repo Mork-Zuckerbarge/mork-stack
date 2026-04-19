@@ -81,6 +81,29 @@ type TradeRuntimeConfig = {
   jupiterTimeoutMs: number;
 };
 
+type PoolWatchMode = "all_available";
+type RouteMode = "jupiter" | "direct";
+type StrategyEngines = {
+  poolImbalance: {
+    minImbalancePct: number;
+    poolsWatched: PoolWatchMode;
+    useJitoBundle: boolean;
+  };
+  crossDexArb: {
+    minNetProfitSol: number;
+    routeVia: RouteMode;
+    enableTriangularRoutes: boolean;
+  };
+  momentumRunner: {
+    entryVolSpikeMultiplier: number;
+    exitTrailingStopPct: number;
+    maxHoldMinutes: number;
+    hardStopLossPct: number;
+    watchPumpFunLaunches: boolean;
+    useBirdeyeTrendingFeed: boolean;
+  };
+};
+
 function formatTokenAmount(value: number | undefined, maxFractionDigits = 9): string {
   if (!Number.isFinite(value)) return "0";
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: maxFractionDigits });
@@ -157,6 +180,7 @@ export default function JupiterPanel() {
   const [panelRefreshBusy, setPanelRefreshBusy] = useState(false);
   const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
   const [tradeRuntimeConfig, setTradeRuntimeConfig] = useState<TradeRuntimeConfig | null>(null);
+  const [strategyEngines, setStrategyEngines] = useState<StrategyEngines | null>(null);
   const [activePanel, setActivePanel] = useState<ActivePanel>("trade");
 
   const selectedInputToken = useMemo(
@@ -269,7 +293,12 @@ export default function JupiterPanel() {
         ok?: boolean;
         state?: {
           arb?: { status?: RuntimeStatus };
-          controls?: { executionAuthority?: ExecutionAuthority; startupCompleted?: boolean; activePanel?: ActivePanel };
+          controls?: {
+            executionAuthority?: ExecutionAuthority;
+            startupCompleted?: boolean;
+            activePanel?: ActivePanel;
+            strategyEngines?: StrategyEngines;
+          };
           walletProvisioning?: WalletProvisioning;
         };
         tradeRuntime?: TradeRuntimeConfig;
@@ -286,12 +315,14 @@ export default function JupiterPanel() {
       setActivePanel(data.state.controls.activePanel === "arb" ? "arb" : "trade");
       setWalletProvisioning(data.state.walletProvisioning ?? null);
       setTradeRuntimeConfig(data.tradeRuntime ?? null);
+      setStrategyEngines(data.state.controls.strategyEngines ?? null);
     } catch {
       setExecution(null);
       setArbStatus("stopped");
       setActivePanel("trade");
       setWalletProvisioning(null);
       setTradeRuntimeConfig(null);
+      setStrategyEngines(null);
     }
   }, []);
 
@@ -340,6 +371,36 @@ export default function JupiterPanel() {
       setExecutionStatus("Execution policy updated");
     } catch {
       setExecutionStatus("Unable to save execution policy");
+    } finally {
+      setExecutionBusy(false);
+    }
+  }
+
+  async function saveStrategyEngines(next: StrategyEngines) {
+    setExecutionBusy(true);
+    setExecutionStatus("");
+    try {
+      const res = await fetch("/api/app/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "strategy.engines.set",
+          strategyEngines: next,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        state?: { controls?: { strategyEngines?: StrategyEngines } };
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.state?.controls?.strategyEngines) {
+        setExecutionStatus(data.error || `Save failed (${res.status})`);
+        return;
+      }
+      setStrategyEngines(data.state.controls.strategyEngines);
+      setExecutionStatus("Strategy controls updated");
+    } catch {
+      setExecutionStatus("Save failed");
     } finally {
       setExecutionBusy(false);
     }
@@ -596,15 +657,17 @@ export default function JupiterPanel() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ExecutionControls
-          key={JSON.stringify(execution)}
+          key={JSON.stringify({ execution, strategyEngines })}
           execution={execution}
           busy={executionBusy}
           status={executionStatus}
           walletProvisioning={walletProvisioning}
           walletRefreshStatus={walletRefreshStatus}
           tradeRuntimeConfig={tradeRuntimeConfig}
+          strategyEngines={strategyEngines}
           arbPaused={arbPaused}
           onSave={saveExecution}
+          onSaveStrategyEngines={saveStrategyEngines}
         />
 
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
@@ -855,8 +918,10 @@ function ExecutionControls({
   walletProvisioning,
   walletRefreshStatus,
   tradeRuntimeConfig,
+  strategyEngines,
   arbPaused,
   onSave,
+  onSaveStrategyEngines,
 }: {
   execution: ExecutionAuthority | null;
   busy: boolean;
@@ -864,14 +929,28 @@ function ExecutionControls({
   walletProvisioning: WalletProvisioning | null;
   walletRefreshStatus: string;
   tradeRuntimeConfig: TradeRuntimeConfig | null;
+  strategyEngines: StrategyEngines | null;
   arbPaused: boolean;
   onSave: (input: ExecutionAuthority) => void;
+  onSaveStrategyEngines: (input: StrategyEngines) => void;
 }) {
   const [mode, setMode] = useState<ExecutionMode>(execution?.mode ?? "user_only");
   const [maxTradeUsd, setMaxTradeUsd] = useState(String(execution?.maxTradeUsd ?? 50));
   const [cooldownMinutes, setCooldownMinutes] = useState(String(execution?.cooldownMinutes ?? 15));
   const [allowlist, setAllowlist] = useState(execution?.mintAllowlist.join(",") ?? "");
   const [allowlistLoadStatus, setAllowlistLoadStatus] = useState("");
+  const [minImbalancePct, setMinImbalancePct] = useState(String(strategyEngines?.poolImbalance.minImbalancePct ?? 5));
+  const [poolsWatched] = useState<PoolWatchMode>(strategyEngines?.poolImbalance.poolsWatched ?? "all_available");
+  const [jitoBundleEnabled, setJitoBundleEnabled] = useState(strategyEngines?.poolImbalance.useJitoBundle ?? true);
+  const [minNetProfitSol, setMinNetProfitSol] = useState(String(strategyEngines?.crossDexArb.minNetProfitSol ?? 0.001));
+  const [routeVia, setRouteVia] = useState<RouteMode>(strategyEngines?.crossDexArb.routeVia ?? "jupiter");
+  const [triangularRoutes, setTriangularRoutes] = useState(strategyEngines?.crossDexArb.enableTriangularRoutes ?? true);
+  const [entryVolSpike, setEntryVolSpike] = useState(String(strategyEngines?.momentumRunner.entryVolSpikeMultiplier ?? 5));
+  const [trailingStopPct, setTrailingStopPct] = useState(String(strategyEngines?.momentumRunner.exitTrailingStopPct ?? 15));
+  const [maxHoldMinutes, setMaxHoldMinutes] = useState(String(strategyEngines?.momentumRunner.maxHoldMinutes ?? 30));
+  const [hardStopLossPct, setHardStopLossPct] = useState(String(strategyEngines?.momentumRunner.hardStopLossPct ?? 20));
+  const [watchPumpFun, setWatchPumpFun] = useState(strategyEngines?.momentumRunner.watchPumpFunLaunches ?? false);
+  const [birdEyeTrending, setBirdEyeTrending] = useState(strategyEngines?.momentumRunner.useBirdeyeTrendingFeed ?? true);
 
   const loadTopAllowlist = useCallback(async () => {
     setAllowlistLoadStatus("");
@@ -958,6 +1037,101 @@ function ExecutionControls({
               These controls are sourced from env vars (MORK_AGENT_SWAP_ENABLED, MORK_AGENT_SWAP_MAX_SOL, JUP_BASE_URL, JUP_TIMEOUT_MS).
             </p>
           </div>
+          <div className="mt-1 rounded-xl border border-white/15 bg-black/30 p-2 text-white/80">
+            <div className="mb-2 font-medium text-white/90">Strategy engines</div>
+            <div className="space-y-2">
+              <div className="rounded-lg border border-white/10 bg-black/30 p-2">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px]">pool imbalance / AMM rebalancer</span>
+                  <span className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">active</span>
+                </div>
+                <label className="block text-[11px] text-white/70">min imbalance threshold (%)</label>
+                <input value={minImbalancePct} onChange={(e) => setMinImbalancePct(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
+                <div className="mt-2 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-white/75">
+                  DEX coverage: full available universe (auto-expanded)
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-[11px]">
+                  <input type="checkbox" checked={jitoBundleEnabled} onChange={(e) => setJitoBundleEnabled(e.target.checked)} disabled={arbPaused} />
+                  use Jito bundle for guaranteed landing
+                </label>
+              </div>
+
+              <div className="rounded-lg border border-white/10 bg-black/30 p-2">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px]">cross-DEX arbitrage</span>
+                  <span className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">active</span>
+                </div>
+                <label className="block text-[11px] text-white/70">min net profit (SOL)</label>
+                <input value={minNetProfitSol} onChange={(e) => setMinNetProfitSol(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
+                <label className="mt-2 block text-[11px] text-white/70">route via</label>
+                <select value={routeVia} onChange={(e) => setRouteVia(e.target.value as RouteMode)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]">
+                  <option value="jupiter">Jupiter aggregator API</option>
+                  <option value="direct">Direct pools</option>
+                </select>
+                <label className="mt-2 flex items-center gap-2 text-[11px]">
+                  <input type="checkbox" checked={triangularRoutes} onChange={(e) => setTriangularRoutes(e.target.checked)} disabled={arbPaused} />
+                  enable triangular routes (A→B→C→A)
+                </label>
+              </div>
+
+              <div className="rounded-lg border border-white/10 bg-black/30 p-2">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px]">momentum runner / exit sniper</span>
+                  <span className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">defaults loaded</span>
+                </div>
+                <label className="block text-[11px] text-white/70">entry: vol spike multiplier</label>
+                <input value={entryVolSpike} onChange={(e) => setEntryVolSpike(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
+                <label className="mt-2 block text-[11px] text-white/70">exit: trailing stop (%)</label>
+                <input value={trailingStopPct} onChange={(e) => setTrailingStopPct(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
+                <label className="mt-2 block text-[11px] text-white/70">max hold (minutes)</label>
+                <input value={maxHoldMinutes} onChange={(e) => setMaxHoldMinutes(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
+                <label className="mt-2 block text-[11px] text-white/70">hard stop loss (%)</label>
+                <input value={hardStopLossPct} onChange={(e) => setHardStopLossPct(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
+                <div className="mt-2 flex flex-wrap gap-3 text-[11px]">
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={watchPumpFun} onChange={(e) => setWatchPumpFun(e.target.checked)} disabled={arbPaused} />
+                    watch pump.fun launches
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={birdEyeTrending} onChange={(e) => setBirdEyeTrending(e.target.checked)} disabled={arbPaused} />
+                    Birdeye trending feed
+                  </label>
+                </div>
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] text-white/60">
+              These strategy settings are persisted in app control state so first-time startup has ready defaults.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              onSaveStrategyEngines({
+                poolImbalance: {
+                  minImbalancePct: Number(minImbalancePct) || 0,
+                  poolsWatched,
+                  useJitoBundle: jitoBundleEnabled,
+                },
+                crossDexArb: {
+                  minNetProfitSol: Number(minNetProfitSol) || 0,
+                  routeVia,
+                  enableTriangularRoutes: triangularRoutes,
+                },
+                momentumRunner: {
+                  entryVolSpikeMultiplier: Number(entryVolSpike) || 0,
+                  exitTrailingStopPct: Number(trailingStopPct) || 0,
+                  maxHoldMinutes: Number(maxHoldMinutes) || 30,
+                  hardStopLossPct: Number(hardStopLossPct) || 20,
+                  watchPumpFunLaunches: watchPumpFun,
+                  useBirdeyeTrendingFeed: birdEyeTrending,
+                },
+              })
+            }
+            disabled={busy || arbPaused}
+            className="mt-1 rounded-lg border border-emerald-300/30 bg-emerald-200/10 px-2 py-1 text-left"
+          >
+            Save strategy controls
+          </button>
           <button
             onClick={() =>
               onSave({

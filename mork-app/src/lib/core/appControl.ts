@@ -41,6 +41,26 @@ export type AppControlState = {
       behaviorGuidelines: string;
     };
     activePanel: "arb" | "trade";
+    strategyEngines: {
+      poolImbalance: {
+        minImbalancePct: number;
+        poolsWatched: "all_available";
+        useJitoBundle: boolean;
+      };
+      crossDexArb: {
+        minNetProfitSol: number;
+        routeVia: "jupiter" | "direct";
+        enableTriangularRoutes: boolean;
+      };
+      momentumRunner: {
+        entryVolSpikeMultiplier: number;
+        exitTrailingStopPct: number;
+        maxHoldMinutes: number;
+        hardStopLossPct: number;
+        watchPumpFunLaunches: boolean;
+        useBirdeyeTrendingFeed: boolean;
+      };
+    };
   };
   walletProvisioning: {
     status: "provisioned_existing" | "needs_setup";
@@ -95,6 +115,26 @@ const state: AppControlState = {
         "Do NOT act like the TV character from Mork & Mindy.\nNever say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\nDo not create false information.\nIf you do not know something, say so plainly.",
     },
     activePanel: "trade",
+    strategyEngines: {
+      poolImbalance: {
+        minImbalancePct: 5,
+        poolsWatched: "all_available",
+        useJitoBundle: true,
+      },
+      crossDexArb: {
+        minNetProfitSol: 0.001,
+        routeVia: "jupiter",
+        enableTriangularRoutes: true,
+      },
+      momentumRunner: {
+        entryVolSpikeMultiplier: 5,
+        exitTrailingStopPct: 15,
+        maxHoldMinutes: 30,
+        hardStopLossPct: 20,
+        watchPumpFunLaunches: false,
+        useBirdeyeTrendingFeed: true,
+      },
+    },
   },
   walletProvisioning: {
     status: "needs_setup",
@@ -289,6 +329,56 @@ function applyPersistedState(raw: unknown) {
     }
     if (controls.activePanel === "arb" || controls.activePanel === "trade") {
       state.controls.activePanel = controls.activePanel;
+    }
+    const strategyEngines = controls.strategyEngines;
+    if (isObjectRecord(strategyEngines)) {
+      const poolImbalance = strategyEngines.poolImbalance;
+      if (isObjectRecord(poolImbalance)) {
+        if (typeof poolImbalance.minImbalancePct === "number") {
+          state.controls.strategyEngines.poolImbalance.minImbalancePct = poolImbalance.minImbalancePct;
+        }
+        if (
+          poolImbalance.poolsWatched === "all_available"
+        ) {
+          state.controls.strategyEngines.poolImbalance.poolsWatched = poolImbalance.poolsWatched;
+        }
+        if (typeof poolImbalance.useJitoBundle === "boolean") {
+          state.controls.strategyEngines.poolImbalance.useJitoBundle = poolImbalance.useJitoBundle;
+        }
+      }
+      const crossDexArb = strategyEngines.crossDexArb;
+      if (isObjectRecord(crossDexArb)) {
+        if (typeof crossDexArb.minNetProfitSol === "number") {
+          state.controls.strategyEngines.crossDexArb.minNetProfitSol = crossDexArb.minNetProfitSol;
+        }
+        if (crossDexArb.routeVia === "jupiter" || crossDexArb.routeVia === "direct") {
+          state.controls.strategyEngines.crossDexArb.routeVia = crossDexArb.routeVia;
+        }
+        if (typeof crossDexArb.enableTriangularRoutes === "boolean") {
+          state.controls.strategyEngines.crossDexArb.enableTriangularRoutes = crossDexArb.enableTriangularRoutes;
+        }
+      }
+      const momentumRunner = strategyEngines.momentumRunner;
+      if (isObjectRecord(momentumRunner)) {
+        if (typeof momentumRunner.entryVolSpikeMultiplier === "number") {
+          state.controls.strategyEngines.momentumRunner.entryVolSpikeMultiplier = momentumRunner.entryVolSpikeMultiplier;
+        }
+        if (typeof momentumRunner.exitTrailingStopPct === "number") {
+          state.controls.strategyEngines.momentumRunner.exitTrailingStopPct = momentumRunner.exitTrailingStopPct;
+        }
+        if (typeof momentumRunner.maxHoldMinutes === "number") {
+          state.controls.strategyEngines.momentumRunner.maxHoldMinutes = momentumRunner.maxHoldMinutes;
+        }
+        if (typeof momentumRunner.hardStopLossPct === "number") {
+          state.controls.strategyEngines.momentumRunner.hardStopLossPct = momentumRunner.hardStopLossPct;
+        }
+        if (typeof momentumRunner.watchPumpFunLaunches === "boolean") {
+          state.controls.strategyEngines.momentumRunner.watchPumpFunLaunches = momentumRunner.watchPumpFunLaunches;
+        }
+        if (typeof momentumRunner.useBirdeyeTrendingFeed === "boolean") {
+          state.controls.strategyEngines.momentumRunner.useBirdeyeTrendingFeed = momentumRunner.useBirdeyeTrendingFeed;
+        }
+      }
     }
   }
 }
@@ -541,4 +631,30 @@ export async function setActivePanel(panel: "arb" | "trade") {
   state.controls.activePanel = panel;
   await persistState();
   return state.controls.activePanel;
+}
+
+export async function setStrategyEngines(input: AppControlState["controls"]["strategyEngines"]) {
+  await ensureStateLoaded();
+  state.controls.strategyEngines = {
+    poolImbalance: {
+      minImbalancePct: Math.max(0, input.poolImbalance.minImbalancePct),
+      poolsWatched: input.poolImbalance.poolsWatched,
+      useJitoBundle: input.poolImbalance.useJitoBundle,
+    },
+    crossDexArb: {
+      minNetProfitSol: Math.max(0, input.crossDexArb.minNetProfitSol),
+      routeVia: input.crossDexArb.routeVia,
+      enableTriangularRoutes: input.crossDexArb.enableTriangularRoutes,
+    },
+    momentumRunner: {
+      entryVolSpikeMultiplier: Math.max(0, input.momentumRunner.entryVolSpikeMultiplier),
+      exitTrailingStopPct: Math.max(0, input.momentumRunner.exitTrailingStopPct),
+      maxHoldMinutes: Math.max(1, input.momentumRunner.maxHoldMinutes),
+      hardStopLossPct: Math.max(0, input.momentumRunner.hardStopLossPct),
+      watchPumpFunLaunches: input.momentumRunner.watchPumpFunLaunches,
+      useBirdeyeTrendingFeed: input.momentumRunner.useBirdeyeTrendingFeed,
+    },
+  };
+  await persistState();
+  return structuredClone(state.controls.strategyEngines);
 }
