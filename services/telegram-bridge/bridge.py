@@ -2,6 +2,7 @@ import os
 import time
 import tempfile
 import subprocess
+import random
 import requests
 from collections import defaultdict, deque
 from dotenv import load_dotenv
@@ -35,6 +36,7 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2").strip()
 VOICE_DEFAULT_ON = os.getenv("VOICE_DEFAULT_ON", "0").strip().lower() in ("1", "true", "yes", "on")
 VOICE_MAX_CHARS = int(os.getenv("VOICE_MAX_CHARS", "700"))
+VOICE_REPLY_PROBABILITY = min(1.0, max(0.0, float(os.getenv("VOICE_REPLY_PROBABILITY", "0.2"))))
 
 if not BOT_TOKEN:
     raise SystemExit("Missing TELEGRAM_BOT_TOKEN in .env")
@@ -114,6 +116,16 @@ def within_rate_limit(user_id: int) -> bool:
     while dq and dq[0] < ten_min_ago:
         dq.popleft()
     return len(dq) <= MAX_PER_10
+
+
+def should_send_voice_reply(user_id: int) -> bool:
+    if not voice_enabled[user_id]:
+        return False
+    if not (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID):
+        return False
+    if VOICE_REPLY_PROBABILITY >= 1.0:
+        return True
+    return random.random() < VOICE_REPLY_PROBABILITY
 
 
 def is_reply_to_bot(msg: dict, bot_id: int) -> bool:
@@ -342,7 +354,8 @@ def main():
     )
     print(f"[bridge] chat endpoint candidates={build_candidate_paths()}")
     if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
-        print("[bridge] ElevenLabs: enabled (voice replies available)")
+        pct = int(VOICE_REPLY_PROBABILITY * 100)
+        print(f"[bridge] ElevenLabs: enabled (voice replies available; random chance {pct}%)")
     else:
         print("[bridge] ElevenLabs: not configured (text only)")
 
@@ -415,7 +428,7 @@ def main():
                         remember_message(user_id, "assistant", reply, msg)
 
                         # Voice OR text, not both
-                        if voice_enabled[user_id] and (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID):
+                        if should_send_voice_reply(user_id):
                             try:
                                 send_voice(chat_id, reply, reply_to=msg.get("message_id"))
                             except Exception as ve:

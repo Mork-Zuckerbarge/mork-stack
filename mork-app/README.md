@@ -75,7 +75,10 @@ Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
 - Ollama responsiveness:
   - `OLLAMA_HOST`,
   - `OLLAMA_MODEL`,
+  - `OLLAMA_CTX` (lower = faster generation, less long-context recall),
   - `OLLAMA_TIMEOUT_MS` (increase if responses time out).
+- Telegram ElevenLabs voice cadence:
+  - `VOICE_REPLY_PROBABILITY` (0.0-1.0, defaults to `0.2` so voice triggers ~1/5 replies when voice is enabled).
 
 After editing env values, restart `./start.sh` (or restart `npm run dev`) so running processes pick up changes.
 
