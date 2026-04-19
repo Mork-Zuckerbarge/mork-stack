@@ -9,6 +9,7 @@ import {
   setStartupCompleted,
   setActivePanel,
   setStrategyEngines,
+  flushConversationMemory,
   startArb,
   startSherpa,
   stopArb,
@@ -155,6 +156,11 @@ export async function setRuntimeStrategyEngines(input: {
   };
 }) {
   await setStrategyEngines(input);
+  return getOrchestratorState();
+}
+
+export async function flushRuntimeConversationMemory() {
+  await flushConversationMemory();
   return getOrchestratorState();
 }
 
