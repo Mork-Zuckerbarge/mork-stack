@@ -8,6 +8,7 @@ import {
   setSelectedOllamaModel,
   setStartupCompleted,
   setActivePanel,
+  setStrategyEngines,
   startArb,
   startSherpa,
   stopArb,
@@ -130,6 +131,30 @@ export async function setRuntimeResponsePolicy(input: {
 
 export async function setRuntimeActivePanel(panel: "arb" | "trade") {
   await setActivePanel(panel);
+  return getOrchestratorState();
+}
+
+export async function setRuntimeStrategyEngines(input: {
+  poolImbalance: {
+    minImbalancePct: number;
+    poolsWatched: "all_available";
+    useJitoBundle: boolean;
+  };
+  crossDexArb: {
+    minNetProfitSol: number;
+    routeVia: "jupiter" | "direct";
+    enableTriangularRoutes: boolean;
+  };
+  momentumRunner: {
+    entryVolSpikeMultiplier: number;
+    exitTrailingStopPct: number;
+    maxHoldMinutes: number;
+    hardStopLossPct: number;
+    watchPumpFunLaunches: boolean;
+    useBirdeyeTrendingFeed: boolean;
+  };
+}) {
+  await setStrategyEngines(input);
   return getOrchestratorState();
 }
 

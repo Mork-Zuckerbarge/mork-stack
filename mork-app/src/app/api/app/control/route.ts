@@ -10,6 +10,7 @@ import {
   setRuntimePersonaMode,
   setRuntimeStartupCompleted,
   setRuntimeActivePanel,
+  setRuntimeStrategyEngines,
   setRuntimeResponsePolicy,
   startRuntime,
   stopRuntime,
@@ -29,7 +30,8 @@ type Action =
   | "startup.completed.set"
   | "execution.authority.set"
   | "response.params.set"
-  | "runtime.panel.set";
+  | "runtime.panel.set"
+  | "strategy.engines.set";
 
 function getArbRuntimeFromEnv() {
   return {
@@ -202,6 +204,53 @@ export async function POST(req: NextRequest) {
         );
       }
       await setRuntimeActivePanel(panel);
+    } else if (action === "strategy.engines.set") {
+      const strategyEngines = body?.strategyEngines;
+      const pool = strategyEngines?.poolImbalance;
+      const cross = strategyEngines?.crossDexArb;
+      const momentum = strategyEngines?.momentumRunner;
+      if (
+        !pool ||
+        !cross ||
+        !momentum ||
+        typeof pool.minImbalancePct !== "number" ||
+        pool.poolsWatched !== "all_available" ||
+        typeof pool.useJitoBundle !== "boolean" ||
+        typeof cross.minNetProfitSol !== "number" ||
+        (cross.routeVia !== "jupiter" && cross.routeVia !== "direct") ||
+        typeof cross.enableTriangularRoutes !== "boolean" ||
+        typeof momentum.entryVolSpikeMultiplier !== "number" ||
+        typeof momentum.exitTrailingStopPct !== "number" ||
+        typeof momentum.maxHoldMinutes !== "number" ||
+        typeof momentum.hardStopLossPct !== "number" ||
+        typeof momentum.watchPumpFunLaunches !== "boolean" ||
+        typeof momentum.useBirdeyeTrendingFeed !== "boolean"
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "strategy.engines.set requires valid strategy engine fields" },
+          { status: 400 }
+        );
+      }
+      await setRuntimeStrategyEngines({
+        poolImbalance: {
+          minImbalancePct: pool.minImbalancePct,
+          poolsWatched: pool.poolsWatched,
+          useJitoBundle: pool.useJitoBundle,
+        },
+        crossDexArb: {
+          minNetProfitSol: cross.minNetProfitSol,
+          routeVia: cross.routeVia,
+          enableTriangularRoutes: cross.enableTriangularRoutes,
+        },
+        momentumRunner: {
+          entryVolSpikeMultiplier: momentum.entryVolSpikeMultiplier,
+          exitTrailingStopPct: momentum.exitTrailingStopPct,
+          maxHoldMinutes: momentum.maxHoldMinutes,
+          hardStopLossPct: momentum.hardStopLossPct,
+          watchPumpFunLaunches: momentum.watchPumpFunLaunches,
+          useBirdeyeTrendingFeed: momentum.useBirdeyeTrendingFeed,
+        },
+      });
     } else {
       return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
     }
