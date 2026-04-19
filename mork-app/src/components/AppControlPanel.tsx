@@ -46,6 +46,10 @@ type UpdateState = {
   preservedFiles?: string[];
 };
 
+type OpenAiRuntime = {
+  enabled: boolean;
+};
+
 const modelCatalog = [
   { value: "llama3.2:3b", label: "Llama 3.2 3B", description: "Fast, lightweight default for local assistant chats." },
   { value: "llama3.1:8b", label: "Llama 3.1 8B", description: "Balanced quality and speed for planning and coding." },
@@ -67,11 +71,17 @@ export default function AppControlPanel() {
   const [statusText, setStatusText] = useState("");
   const [sherpaBootstrapMessage, setSherpaBootstrapMessage] = useState("");
   const [sherpaBootstrapAction, setSherpaBootstrapAction] = useState("");
+  const [openAiRuntime, setOpenAiRuntime] = useState<OpenAiRuntime>({ enabled: false });
 
   async function load() {
     const res = await fetch("/api/app/control");
     const data = await res.json();
-    if (data?.ok) setState(data.state);
+    if (data?.ok) {
+      setState(data.state);
+      if (typeof data?.openAiRuntime?.enabled === "boolean") {
+        setOpenAiRuntime({ enabled: data.openAiRuntime.enabled });
+      }
+    }
 
     try {
       const updateRes = await fetch("/api/system/update", { cache: "no-store" });
@@ -123,6 +133,9 @@ export default function AppControlPanel() {
         setStatusText(data?.error || `Action failed (${res.status})`);
       } else {
         setState(data.state);
+        if (typeof data?.openAiRuntime?.enabled === "boolean") {
+          setOpenAiRuntime({ enabled: data.openAiRuntime.enabled });
+        }
         setStatusText("Updated");
       }
     } catch {
@@ -283,6 +296,15 @@ export default function AppControlPanel() {
             <FlagToggle label="Memory" enabled={state.controls.memoryEnabled} onToggle={(value) => act("controls.set", { key: "memoryEnabled", value })} busy={busy} />
             <FlagToggle label="Planner" enabled={state.controls.plannerEnabled} onToggle={(value) => act("controls.set", { key: "plannerEnabled", value })} busy={busy} />
             <FlagToggle label="Wallet Auto Refresh" enabled={state.controls.walletAutoRefreshEnabled} onToggle={(value) => act("controls.set", { key: "walletAutoRefreshEnabled", value })} busy={busy} />
+            <FlagToggle
+              label="OpenAI Fallback"
+              enabled={openAiRuntime.enabled}
+              onToggle={(value) => act("openai.mode.set", { enabled: value })}
+              busy={busy}
+            />
+            <p className="text-[11px] text-white/50">
+              Controls USE_OPENAI in mork-app/.env.local for Sherpa fallback routing. Restart Sherpa after changing.
+            </p>
             <button
               onClick={() => act("memory.flush")}
               disabled={busy}

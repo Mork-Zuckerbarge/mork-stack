@@ -74,13 +74,6 @@ type WalletProvisioning = {
   source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
 };
 
-type TradeRuntimeConfig = {
-  swapEnabled: boolean;
-  maxSwapSol: number;
-  jupiterBaseUrl: string;
-  jupiterTimeoutMs: number;
-};
-
 type PoolWatchMode = "all_available";
 type RouteMode = "jupiter" | "direct";
 type StrategyEngines = {
@@ -179,7 +172,6 @@ export default function JupiterPanel() {
   const [arbStatus, setArbStatus] = useState<RuntimeStatus>("stopped");
   const [panelRefreshBusy, setPanelRefreshBusy] = useState(false);
   const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
-  const [tradeRuntimeConfig, setTradeRuntimeConfig] = useState<TradeRuntimeConfig | null>(null);
   const [strategyEngines, setStrategyEngines] = useState<StrategyEngines | null>(null);
   const [activePanel, setActivePanel] = useState<ActivePanel>("trade");
 
@@ -301,27 +293,23 @@ export default function JupiterPanel() {
           };
           walletProvisioning?: WalletProvisioning;
         };
-        tradeRuntime?: TradeRuntimeConfig;
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
         setExecution(null);
         setArbStatus("stopped");
         setWalletProvisioning(null);
-        setTradeRuntimeConfig(null);
         return;
       }
       setExecution(data.state.controls.executionAuthority);
       setArbStatus(data.state.arb?.status === "running" ? "running" : "stopped");
       setActivePanel(data.state.controls.activePanel === "arb" ? "arb" : "trade");
       setWalletProvisioning(data.state.walletProvisioning ?? null);
-      setTradeRuntimeConfig(data.tradeRuntime ?? null);
       setStrategyEngines(data.state.controls.strategyEngines ?? null);
     } catch {
       setExecution(null);
       setArbStatus("stopped");
       setActivePanel("trade");
       setWalletProvisioning(null);
-      setTradeRuntimeConfig(null);
       setStrategyEngines(null);
     }
   }, []);
@@ -663,7 +651,6 @@ export default function JupiterPanel() {
           status={executionStatus}
           walletProvisioning={walletProvisioning}
           walletRefreshStatus={walletRefreshStatus}
-          tradeRuntimeConfig={tradeRuntimeConfig}
           strategyEngines={strategyEngines}
           arbPaused={arbPaused}
           onSave={saveExecution}
@@ -917,7 +904,6 @@ function ExecutionControls({
   status,
   walletProvisioning,
   walletRefreshStatus,
-  tradeRuntimeConfig,
   strategyEngines,
   arbPaused,
   onSave,
@@ -928,7 +914,6 @@ function ExecutionControls({
   status: string;
   walletProvisioning: WalletProvisioning | null;
   walletRefreshStatus: string;
-  tradeRuntimeConfig: TradeRuntimeConfig | null;
   strategyEngines: StrategyEngines | null;
   arbPaused: boolean;
   onSave: (input: ExecutionAuthority) => void;
@@ -1025,18 +1010,6 @@ function ExecutionControls({
             </div>
             {walletRefreshStatus ? <p className="mt-1 text-[11px] text-white/60">{walletRefreshStatus}</p> : null}
           </div>
-          <div className="mt-1 rounded-xl bg-black/30 p-2 text-white/70">
-            <div className="font-medium text-white/80">Trade runtime controls</div>
-            <div className="mt-1">
-              Direct swap: <span className={tradeRuntimeConfig?.swapEnabled ? "text-emerald-300" : "text-amber-200"}>{tradeRuntimeConfig?.swapEnabled ? "enabled" : "disabled"}</span>
-            </div>
-            <div className="mt-1">Max swap size: {tradeRuntimeConfig?.maxSwapSol ?? 0.25} SOL</div>
-            <div className="mt-1 break-all">Jupiter base: {tradeRuntimeConfig?.jupiterBaseUrl ?? "https://lite-api.jup.ag"}</div>
-            <div className="mt-1">Jupiter timeout: {tradeRuntimeConfig?.jupiterTimeoutMs ?? 10000} ms</div>
-            <p className="mt-1 text-[11px] text-white/60">
-              These controls are sourced from env vars (MORK_AGENT_SWAP_ENABLED, MORK_AGENT_SWAP_MAX_SOL, JUP_BASE_URL, JUP_TIMEOUT_MS).
-            </p>
-          </div>
           <div className="mt-1 rounded-xl border border-white/15 bg-black/30 p-2 text-white/80">
             <div className="mb-2 font-medium text-white/90">Strategy engines</div>
             <div className="space-y-2">
@@ -1099,9 +1072,6 @@ function ExecutionControls({
                 </div>
               </div>
             </div>
-            <p className="mt-2 text-[11px] text-white/60">
-              These strategy settings are persisted in app control state so first-time startup has ready defaults.
-            </p>
           </div>
           <button
             type="button"
