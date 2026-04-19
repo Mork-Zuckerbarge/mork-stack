@@ -74,11 +74,6 @@ type WalletProvisioning = {
   source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
 };
 
-type ArbRuntimeConfig = {
-  armed: boolean;
-  paper: boolean;
-};
-
 type TradeRuntimeConfig = {
   swapEnabled: boolean;
   maxSwapSol: number;
@@ -159,12 +154,8 @@ export default function JupiterPanel() {
   const [walletRefreshBusy, setWalletRefreshBusy] = useState(false);
   const [walletRefreshStatus, setWalletRefreshStatus] = useState("");
   const [arbStatus, setArbStatus] = useState<RuntimeStatus>("stopped");
-  const [startupCompleted, setStartupCompleted] = useState(false);
-  const [arbStartupBusy, setArbStartupBusy] = useState(false);
-  const [arbStartupStatus, setArbStartupStatus] = useState("");
   const [panelRefreshBusy, setPanelRefreshBusy] = useState(false);
   const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
-  const [arbRuntimeConfig, setArbRuntimeConfig] = useState<ArbRuntimeConfig | null>(null);
   const [tradeRuntimeConfig, setTradeRuntimeConfig] = useState<TradeRuntimeConfig | null>(null);
   const [activePanel, setActivePanel] = useState<ActivePanel>("trade");
 
@@ -204,9 +195,9 @@ export default function JupiterPanel() {
       const res = await fetch(`/api/trade/tokens?q=${encodeURIComponent(q)}`, { cache: "no-store" });
       const data = (await res.json()) as { ok?: boolean; tokens?: TokenOption[] };
       const fromApi = res.ok && data.ok ? data.tokens ?? [] : [];
-      return fromApi.length ? fromApi : [{ symbol: shortMint(q), mint: q }];
+      return fromApi;
     } catch {
-      return [{ symbol: shortMint(q), mint: q }];
+      return [];
     }
   }, []);
 
@@ -281,32 +272,25 @@ export default function JupiterPanel() {
           controls?: { executionAuthority?: ExecutionAuthority; startupCompleted?: boolean; activePanel?: ActivePanel };
           walletProvisioning?: WalletProvisioning;
         };
-        arbRuntime?: ArbRuntimeConfig;
         tradeRuntime?: TradeRuntimeConfig;
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
         setExecution(null);
         setArbStatus("stopped");
-        setStartupCompleted(false);
         setWalletProvisioning(null);
-        setArbRuntimeConfig(null);
         setTradeRuntimeConfig(null);
         return;
       }
       setExecution(data.state.controls.executionAuthority);
       setArbStatus(data.state.arb?.status === "running" ? "running" : "stopped");
-      setStartupCompleted(Boolean(data.state.controls.startupCompleted));
       setActivePanel(data.state.controls.activePanel === "arb" ? "arb" : "trade");
       setWalletProvisioning(data.state.walletProvisioning ?? null);
-      setArbRuntimeConfig(data.arbRuntime ?? null);
       setTradeRuntimeConfig(data.tradeRuntime ?? null);
     } catch {
       setExecution(null);
       setArbStatus("stopped");
-      setStartupCompleted(false);
       setActivePanel("trade");
       setWalletProvisioning(null);
-      setArbRuntimeConfig(null);
       setTradeRuntimeConfig(null);
     }
   }, []);
@@ -330,42 +314,6 @@ export default function JupiterPanel() {
       setWalletRefreshBusy(false);
     }
   }, [loadExecution, walletRefreshBusy]);
-
-  const ensureArbOnStartup = useCallback(async () => {
-    if (arbStartupBusy) return;
-    setArbStartupBusy(true);
-    setArbStartupStatus("");
-    try {
-      const startupRes = await fetch("/api/app/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "startup.completed.set", value: true }),
-      });
-      const startupData = (await startupRes.json()) as { ok?: boolean; error?: string };
-      if (!startupRes.ok || !startupData.ok) {
-        setArbStartupStatus(startupData.error || `Startup save failed (${startupRes.status})`);
-        return;
-      }
-
-      const arbRes = await fetch("/api/app/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "arb.start" }),
-      });
-      const arbData = (await arbRes.json()) as { ok?: boolean; error?: string };
-      if (!arbRes.ok || !arbData.ok) {
-        setArbStartupStatus(arbData.error || `ARB start failed (${arbRes.status})`);
-        return;
-      }
-
-      setArbStartupStatus("ARB startup armed and runtime started");
-      void loadExecution();
-    } catch {
-      setArbStartupStatus("Failed to arm ARB startup");
-    } finally {
-      setArbStartupBusy(false);
-    }
-  }, [arbStartupBusy, loadExecution]);
 
   async function saveExecution(nextExecution: ExecutionAuthority) {
     setExecutionBusy(true);
@@ -474,6 +422,27 @@ export default function JupiterPanel() {
     }
   }, [loadExecution, loadPairBalances, loadQuote, loadWallet, panelRefreshBusy, refreshWalletMemory]);
 
+  const onSetActivePanel = useCallback(async (nextPanel: ActivePanel) => {
+    try {
+      const res = await fetch("/api/app/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "runtime.panel.set", panel: nextPanel }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        state?: { controls?: { activePanel?: ActivePanel } };
+      };
+      if (res.ok && data.ok) {
+        setActivePanel(data.state?.controls?.activePanel === "arb" ? "arb" : "trade");
+        return;
+      }
+    } catch {
+      // fall through to refresh fallback
+    }
+    void loadExecution();
+  }, [loadExecution]);
+
   useEffect(() => {
     void loadWallet();
     void loadExecution();
@@ -516,7 +485,7 @@ export default function JupiterPanel() {
     if (swapBlocked) {
       setStatus({
         kind: "error",
-        text: "Swap is blocked while ARB is running or panel is not set to Trade.",
+        text: "Swap is blocked while automation is running or panel is not set to Trade.",
       });
       return;
     }
@@ -608,7 +577,24 @@ export default function JupiterPanel() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_1.3fr]">
+      <div className="mb-4 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/30 p-2 text-[11px] lg:max-w-md">
+        <button
+          type="button"
+          onClick={() => onSetActivePanel("arb")}
+          className={`rounded-md border px-2 py-1 ${activePanel === "arb" ? "border-emerald-300/40 bg-emerald-200/15" : "border-white/15 bg-black/30"}`}
+        >
+          Automation side active
+        </button>
+        <button
+          type="button"
+          onClick={() => onSetActivePanel("trade")}
+          className={`rounded-md border px-2 py-1 ${activePanel === "trade" ? "border-cyan-300/40 bg-cyan-200/15" : "border-white/15 bg-black/30"}`}
+        >
+          Trade side active
+        </button>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
         <ExecutionControls
           key={JSON.stringify(execution)}
           execution={execution}
@@ -616,42 +602,15 @@ export default function JupiterPanel() {
           status={executionStatus}
           walletProvisioning={walletProvisioning}
           walletRefreshStatus={walletRefreshStatus}
-          arbStatus={arbStatus}
-          startupCompleted={startupCompleted}
-          arbStartupBusy={arbStartupBusy}
-          arbStartupStatus={arbStartupStatus}
-          arbRuntimeConfig={arbRuntimeConfig}
           tradeRuntimeConfig={tradeRuntimeConfig}
-          onEnsureArbOnStartup={ensureArbOnStartup}
           arbPaused={arbPaused}
           onSave={saveExecution}
-          onSetActivePanel={async (nextPanel) => {
-            try {
-              const res = await fetch("/api/app/control", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "runtime.panel.set", panel: nextPanel }),
-              });
-              const data = (await res.json()) as {
-                ok?: boolean;
-                state?: { controls?: { activePanel?: ActivePanel } };
-              };
-              if (res.ok && data.ok) {
-                setActivePanel(data.state?.controls?.activePanel === "arb" ? "arb" : "trade");
-                return;
-              }
-            } catch {
-              // fall through to refresh fallback
-            }
-            void loadExecution();
-          }}
-          activePanel={activePanel}
         />
 
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
           {swapBlocked ? (
             <div className="mb-3 rounded-xl border border-amber-300/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-              Swap execution is blocked while ARB is active. You can still search pairs and inspect quotes.
+              Swap execution is blocked while automation is active. You can still search pairs and inspect quotes.
             </div>
           ) : null}
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2">
@@ -895,34 +854,18 @@ function ExecutionControls({
   status,
   walletProvisioning,
   walletRefreshStatus,
-  arbStatus,
-  startupCompleted,
-  arbStartupBusy,
-  arbStartupStatus,
-  arbRuntimeConfig,
   tradeRuntimeConfig,
-  onEnsureArbOnStartup,
   arbPaused,
   onSave,
-  onSetActivePanel,
-  activePanel,
 }: {
   execution: ExecutionAuthority | null;
   busy: boolean;
   status: string;
   walletProvisioning: WalletProvisioning | null;
   walletRefreshStatus: string;
-  arbStatus: RuntimeStatus;
-  startupCompleted: boolean;
-  arbStartupBusy: boolean;
-  arbStartupStatus: string;
-  arbRuntimeConfig: ArbRuntimeConfig | null;
   tradeRuntimeConfig: TradeRuntimeConfig | null;
-  onEnsureArbOnStartup: () => void;
   arbPaused: boolean;
   onSave: (input: ExecutionAuthority) => void;
-  onSetActivePanel: (panel: ActivePanel) => void;
-  activePanel: ActivePanel;
 }) {
   const [mode, setMode] = useState<ExecutionMode>(execution?.mode ?? "user_only");
   const [maxTradeUsd, setMaxTradeUsd] = useState(String(execution?.maxTradeUsd ?? 50));
@@ -959,23 +902,7 @@ function ExecutionControls({
   return (
     <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Arb Control</h3>
-      </div>
-      <div className="mb-2 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/30 p-2 text-[11px]">
-        <button
-          type="button"
-          onClick={() => onSetActivePanel("arb")}
-          className={`rounded-md border px-2 py-1 ${activePanel === "arb" ? "border-emerald-300/40 bg-emerald-200/15" : "border-white/15 bg-black/30"}`}
-        >
-          ARB side active
-        </button>
-        <button
-          type="button"
-          onClick={() => onSetActivePanel("trade")}
-          className={`rounded-md border px-2 py-1 ${activePanel === "trade" ? "border-cyan-300/40 bg-cyan-200/15" : "border-white/15 bg-black/30"}`}
-        >
-          Trade side active
-        </button>
+        <h3 className="text-sm font-semibold">Automation control</h3>
       </div>
       {!execution ? (
         <p className="text-sm text-white/60">Unable to load execution controls.</p>
@@ -983,29 +910,9 @@ function ExecutionControls({
         <div className="grid grid-cols-1 gap-2 text-xs">
           {arbPaused ? (
             <p className="rounded-lg border border-cyan-300/30 bg-cyan-500/10 px-2 py-1 text-cyan-100">
-              ARB controls are paused while Trade side is active.
+              Automation controls are paused while Trade side is active.
             </p>
           ) : null}
-          <div className="mb-1 rounded-xl bg-black/30 p-2 text-white/70">
-            <div>
-              ARB runtime: <span className={arbStatus === "running" ? "text-emerald-300" : "text-amber-200"}>{arbStatus}</span>
-            </div>
-            <div className="mt-1">
-              Startup ready: {startupCompleted ? "yes" : "no"}
-            </div>
-            <div className="mt-1">
-              Execution env: {arbRuntimeConfig?.armed ? "ARMED" : "SAFE"} / {arbRuntimeConfig?.paper ? "paper" : "live"}
-            </div>
-            <button
-              type="button"
-              onClick={onEnsureArbOnStartup}
-              disabled={arbStartupBusy || arbPaused}
-              className="mt-2 rounded-lg border border-emerald-300/30 bg-emerald-200/10 px-2 py-1 text-xs disabled:opacity-60"
-            >
-              {arbStartupBusy ? "Arming…" : "Arm ARB for next startup"}
-            </button>
-            {arbStartupStatus ? <p className="mt-1 text-[11px] text-white/60">{arbStartupStatus}</p> : null}
-          </div>
           <label className="text-white/70">Mode</label>
           <select value={mode} onChange={(e) => setMode(e.target.value as ExecutionMode)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1">
             <option value="user_only">User-only mode</option>
@@ -1022,7 +929,7 @@ function ExecutionControls({
             disabled={arbPaused}
             className="rounded-lg border border-cyan-300/30 bg-cyan-200/10 px-2 py-1 text-left"
           >
-            Load top-500 allowlist from arb/whitelist.json
+            Load top-500 allowlist from automation/whitelist.json
           </button>
           {allowlistLoadStatus ? <p className="text-[11px] text-white/60">{allowlistLoadStatus}</p> : null}
           <label className="text-white/70">Cooldown (minutes)</label>
