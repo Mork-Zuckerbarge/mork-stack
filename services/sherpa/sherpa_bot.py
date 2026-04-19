@@ -38,6 +38,8 @@ MAX_AGE_HOURS = 23
 MAX_BACKLOG = 20   # store at most this many tweet IDs for tomorrow
 
 MORK_CORE_URL = os.getenv("MORK_CORE_URL", "http://localhost:8787").rstrip("/")
+MEME_CORE_REFLECT_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_REFLECT_TIMEOUT_SECONDS", "20"))
+MEME_CORE_COMPOSE_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_COMPOSE_TIMEOUT_SECONDS", "12"))
 USE_OPENAI = False
 def _get_core_url():
     u = (os.getenv("MORK_CORE_URL") or "").strip().rstrip("/")
@@ -2171,13 +2173,17 @@ class TwitterBot:
             # 1) Try Mork Core compose (best)
             tweet_text = ""
             try:
-                core_reflect(timeout=20)
+                core_reflect(timeout=MEME_CORE_REFLECT_TIMEOUT_SECONDS)
                 tweet_text = core_compose_payload(
                     {"kind": "meme", "memeName": selected, "title": context, "maxChars": 260},
-                    timeout=6,
+                    timeout=MEME_CORE_COMPOSE_TIMEOUT_SECONDS,
                 ) or ""
             except Exception as e:
-                print(f"⚠ core meme compose failed: {e}")
+                print(
+                    "⚠ core meme compose failed "
+                    f"(reflect_timeout={MEME_CORE_REFLECT_TIMEOUT_SECONDS}s, "
+                    f"compose_timeout={MEME_CORE_COMPOSE_TIMEOUT_SECONDS}s): {e}"
+                )
                 tweet_text = ""
 
             if tweet_text:
