@@ -128,8 +128,13 @@ if [[ -d "$SOL_MEV_BOT_DIR" ]]; then
 
   SOL_MEV_CMD="npm run start"
   if [[ ! -f "$SOL_MEV_BOT_DIR/dist/index.js" ]]; then
-    warn "sol-mev-bot dist/index.js missing; using ts-node transpile-only fallback"
-    SOL_MEV_CMD="node -r ts-node/register/transpile-only index.ts"
+    warn "sol-mev-bot dist/index.js missing; attempting TypeScript build"
+    if npm --prefix "$SOL_MEV_BOT_DIR" run build >>"$LOG_DIR/sol-mev-bot.log" 2>&1; then
+      log "sol-mev-bot build succeeded; starting compiled dist"
+    else
+      warn "sol-mev-bot build failed; using ts-node transpile-only fallback"
+      SOL_MEV_CMD="node -r ts-node/register/transpile-only index.ts"
+    fi
   fi
 
   log "Starting sol-mev-bot service"
