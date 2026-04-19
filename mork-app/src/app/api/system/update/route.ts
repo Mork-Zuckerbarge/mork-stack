@@ -1,24 +1,9 @@
 import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, access, cp } from "node:fs/promises";
-import os from "node:os";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 export const runtime = "nodejs";
-
-const PRESERVED_FILES = [
-  ".env",
-  ".env.local",
-  "mork-app/.env",
-  "mork-app/.env.local",
-  "services/arb/.env",
-  "services/mork-core/.env",
-  "services/telegram-bridge/.env",
-  "services/sherpa/.env",
-  "services/sherpa/encrypted_credentials.bin",
-  "services/sherpa/encrypted_characters.bin",
-  "services/sherpa/encrypted_feed_config.bin",
-] as const;
 
 type ExecResult = {
   stdout: string;
@@ -56,15 +41,6 @@ function runGit(args: string[], cwd?: string): Promise<ExecResult> {
   });
 }
 
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function detectGitState({ refreshRemote = true }: { refreshRemote?: boolean } = {}) {
   const topLevel = (await runGit(["rev-parse", "--show-toplevel"])).stdout;
   const branch = (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], topLevel)).stdout;
@@ -97,27 +73,34 @@ async function detectGitState({ refreshRemote = true }: { refreshRemote?: boolea
   };
 }
 
-async function backupPreservedFiles(repoRoot: string, backupRoot: string) {
-  const copied: string[] = [];
-  for (const relativePath of PRESERVED_FILES) {
-    const source = path.join(repoRoot, relativePath);
-    if (!(await pathExists(source))) continue;
-    const destination = path.join(backupRoot, relativePath);
-    await mkdir(path.dirname(destination), { recursive: true });
-    await cp(source, destination, { force: true, recursive: true });
-    copied.push(relativePath);
-  }
-  return copied;
-}
+async function launchUpdateScript(repoRoot: string) {
+  const logsDir = path.join(repoRoot, ".logs");
+  const updateLogPath = path.join(logsDir, "update.log");
+  await mkdir(logsDir, { recursive: true });
 
-async function restorePreservedFiles(repoRoot: string, backupRoot: string, copied: string[]) {
-  for (const relativePath of copied) {
-    const source = path.join(backupRoot, relativePath);
-    if (!(await pathExists(source))) continue;
-    const destination = path.join(repoRoot, relativePath);
-    await mkdir(path.dirname(destination), { recursive: true });
-    await cp(source, destination, { force: true, recursive: true });
-  }
+  return new Promise<{ pid: number; logPath: string }>((resolve, reject) => {
+    execFile(
+      "bash",
+      ["-lc", `nohup ./update.sh >> "${updateLogPath}" 2>&1 & echo $!`],
+      {
+        cwd: repoRoot,
+        env: process.env,
+        timeout: 10000,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(`failed to launch ./update.sh: ${stderr || stdout}`));
+          return;
+        }
+        const pid = Number(stdout.trim());
+        if (!Number.isFinite(pid) || pid <= 0) {
+          reject(new Error(`failed to launch ./update.sh: invalid pid (${stdout.trim() || "none"})`));
+          return;
+        }
+        resolve({ pid, logPath: updateLogPath });
+      },
+    );
+  });
 }
 
 export async function GET() {
@@ -131,7 +114,6 @@ export async function GET() {
         ahead: state.ahead,
         behind: state.behind,
         hasUpdates: state.hasUpdates,
-        preservedFiles: PRESERVED_FILES,
       },
     });
   } catch (error) {
@@ -143,40 +125,26 @@ export async function GET() {
 }
 
 export async function POST() {
-  let repoRoot = "";
-  let backupRoot = "";
-  let copiedFiles: string[] = [];
-
   try {
     const state = await detectGitState({ refreshRemote: true });
-    repoRoot = state.topLevel;
-
-    backupRoot = await mkdtemp(path.join(os.tmpdir(), "mork-update-"));
-    copiedFiles = await backupPreservedFiles(repoRoot, backupRoot);
-
-    const pullResult = await runGit(["pull", "--rebase", "--autostash"], repoRoot);
-    await restorePreservedFiles(repoRoot, backupRoot, copiedFiles);
-
-    const after = await detectGitState({ refreshRemote: false });
+    const launched = await launchUpdateScript(state.topLevel);
     return NextResponse.json({
       ok: true,
-      message: after.behind > 0 ? "Update attempted (still behind upstream)." : "Repository updated.",
-      pullOutput: pullResult.stdout || pullResult.stderr,
+      message: "Update started via ./update.sh",
+      started: true,
+      pid: launched.pid,
+      logPath: launched.logPath,
       update: {
-        branch: after.branch,
-        upstream: after.upstream || null,
-        ahead: after.ahead,
-        behind: after.behind,
-        hasUpdates: after.hasUpdates,
+        branch: state.branch,
+        upstream: state.upstream || null,
+        ahead: state.ahead,
+        behind: state.behind,
+        hasUpdates: state.hasUpdates,
       },
-      preserved: copiedFiles,
     });
   } catch (error) {
-    if (repoRoot && backupRoot && copiedFiles.length > 0) {
-      await restorePreservedFiles(repoRoot, backupRoot, copiedFiles).catch(() => {});
-    }
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "update failed", preservedAttempted: copiedFiles },
+      { ok: false, error: error instanceof Error ? error.message : "update failed" },
       { status: 500 },
     );
   }
