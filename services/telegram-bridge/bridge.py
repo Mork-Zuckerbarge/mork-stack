@@ -161,16 +161,19 @@ def post_to_chat_endpoint(path: str, payload: dict) -> dict:
 
 def build_candidate_paths() -> list[str]:
     normalized = CHAT_ENDPOINT if CHAT_ENDPOINT.startswith("/") else f"/{CHAT_ENDPOINT}"
-    candidates: list[str] = []
-
-    if normalized:
-        candidates.append(normalized)
 
     # Next.js app surface uses /api/chat/respond (default localhost:3000 in this stack).
     if ":3000" in CORE_URL:
+        candidates: list[str] = []
+        if normalized.startswith("/api/"):
+            candidates.append(normalized)
         if "/api/chat/respond" not in candidates:
             candidates.append("/api/chat/respond")
         return candidates
+
+    candidates: list[str] = []
+    if normalized:
+        candidates.append(normalized)
 
     # mork-core compatibility fallback
     if "/chat/respond" not in candidates:
@@ -337,6 +340,7 @@ def main():
     print(
         f"[bridge] bot=@{bot_username} id={bot_id} core={CORE_URL} endpoint={CHAT_ENDPOINT} mode={REPLY_MODE}"
     )
+    print(f"[bridge] chat endpoint candidates={build_candidate_paths()}")
     if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
         print("[bridge] ElevenLabs: enabled (voice replies available)")
     else:
