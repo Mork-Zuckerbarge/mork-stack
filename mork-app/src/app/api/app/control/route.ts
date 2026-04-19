@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { access, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
   getOrchestratorState,
   startOrchestrator,
@@ -33,6 +35,7 @@ type Action =
   | "response.params.set"
   | "runtime.panel.set"
   | "strategy.engines.set"
+  | "openai.mode.set"
   | "memory.flush";
 
 function getArbRuntimeFromEnv() {
@@ -51,6 +54,41 @@ function getTradeRuntimeFromEnv() {
   };
 }
 
+function getOpenAiRuntimeFromEnv() {
+  const flag = (process.env.USE_OPENAI || "").trim().toLowerCase();
+  return {
+    enabled: flag === "1" || flag === "true" || flag === "yes" || flag === "on",
+  };
+}
+
+function envFilePath(): string {
+  return path.join(process.cwd(), ".env.local");
+}
+
+async function envFileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeEnvToggle(envKey: string, enabled: boolean): Promise<void> {
+  const filePath = envFilePath();
+  const existing = (await envFileExists(filePath)) ? await readFile(filePath, "utf8") : "";
+  const lines = existing ? existing.split(/\r?\n/) : [];
+  const output = [...lines];
+  const nextLine = `${envKey}=${JSON.stringify(enabled ? "1" : "0")}`;
+  const existingIdx = output.findIndex((line) => line.trim().startsWith(`${envKey}=`));
+
+  if (existingIdx >= 0) output[existingIdx] = nextLine;
+  else output.push(nextLine);
+
+  const finalContent = `${output.join("\n").replace(/\n+$/g, "")}\n`;
+  await writeFile(filePath, finalContent, "utf8");
+}
+
 export async function GET() {
   const orchestrator = await getOrchestratorState();
   return NextResponse.json({
@@ -58,6 +96,7 @@ export async function GET() {
     state: orchestrator.app,
     arbRuntime: getArbRuntimeFromEnv(),
     tradeRuntime: getTradeRuntimeFromEnv(),
+    openAiRuntime: getOpenAiRuntimeFromEnv(),
     orchestrator: {
       health: orchestrator.health,
       runtimeFlagOwner: orchestrator.runtimeFlagOwner,
@@ -253,6 +292,16 @@ export async function POST(req: NextRequest) {
           useBirdeyeTrendingFeed: momentum.useBirdeyeTrendingFeed,
         },
       });
+    } else if (action === "openai.mode.set") {
+      const enabled = body?.enabled;
+      if (typeof enabled !== "boolean") {
+        return NextResponse.json(
+          { ok: false, error: "openai.mode.set requires boolean enabled" },
+          { status: 400 }
+        );
+      }
+      await writeEnvToggle("USE_OPENAI", enabled);
+      process.env.USE_OPENAI = enabled ? "1" : "0";
     } else if (action === "memory.flush") {
       await flushRuntimeConversationMemory();
     } else {
@@ -265,6 +314,7 @@ export async function POST(req: NextRequest) {
       state: orchestrator.app,
       arbRuntime: getArbRuntimeFromEnv(),
       tradeRuntime: getTradeRuntimeFromEnv(),
+      openAiRuntime: getOpenAiRuntimeFromEnv(),
       orchestrator: {
         health: orchestrator.health,
         runtimeFlagOwner: orchestrator.runtimeFlagOwner,

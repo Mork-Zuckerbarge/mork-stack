@@ -40,7 +40,7 @@ MAX_BACKLOG = 20   # store at most this many tweet IDs for tomorrow
 MORK_CORE_URL = os.getenv("MORK_CORE_URL", "http://localhost:8787").rstrip("/")
 MEME_CORE_REFLECT_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_REFLECT_TIMEOUT_SECONDS", "20"))
 MEME_CORE_COMPOSE_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_COMPOSE_TIMEOUT_SECONDS", "12"))
-USE_OPENAI = False
+USE_OPENAI = str(os.getenv("USE_OPENAI", "0")).strip().lower() in ("1", "true", "yes", "on")
 def _get_core_url():
     u = (os.getenv("MORK_CORE_URL") or "").strip().rstrip("/")
     if not u:
