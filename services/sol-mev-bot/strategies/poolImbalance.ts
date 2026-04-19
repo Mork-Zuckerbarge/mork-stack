@@ -10,6 +10,7 @@ import { AgentConfig, Opportunity, StrategyType, ExecutionResult } from '../type
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const JUPITER_API = 'https://quote-api.jup.ag/v6';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 interface PoolInfo {
   address: string;
@@ -45,7 +46,10 @@ export class PoolImbalanceDetector {
 
   // Track recently processed pools to avoid duplicate signals
   private recentlyActed: Map<string, number> = new Map();
-  private cooldownMs = 5000; // 5s cooldown per pool
+  private cooldownMs = 15_000; // 15s cooldown per pool
+  private swapSeen = 0;
+  private swapPassedCooldown = 0;
+  private lastSwapSummaryTs = Date.now();
 
   constructor(
     config: AgentConfig,
@@ -84,6 +88,8 @@ export class PoolImbalanceDetector {
   }
 
   private async handleSwapEvent(event: { dex: string; signature: string; logs: string[] }): Promise<void> {
+    this.swapSeen += 1;
+
     // Parse pool address from logs
     const poolAddress = this.extractPoolAddress(event.logs);
     if (!poolAddress) return;
@@ -91,8 +97,9 @@ export class PoolImbalanceDetector {
     // Cooldown check — don't hammer the same pool
     const lastActed = this.recentlyActed.get(poolAddress);
     if (lastActed && Date.now() - lastActed < this.cooldownMs) return;
+    this.swapPassedCooldown += 1;
 
-    logger.debug('Swap detected', { dex: event.dex, sig: event.signature.slice(0, 8), pool: poolAddress.slice(0, 8) });
+    this.maybeLogSwapSummary();
 
     // Fetch current pool state and compare to Jupiter aggregate
     const imbalance = await this.detectImbalance(poolAddress, event.dex);
@@ -180,8 +187,8 @@ export class PoolImbalanceDetector {
       const imbalancePct = Math.abs((poolPrice - jupiterPrice) / jupiterPrice) * 100;
 
       // Determine direction: if pool is cheaper, buy on pool and sell via Jupiter
-      const tokenIn = poolPrice < jupiterPrice ? SOL_MINT : 'USDC_MINT_PLACEHOLDER';
-      const tokenOut = poolPrice < jupiterPrice ? 'USDC_MINT_PLACEHOLDER' : SOL_MINT;
+      const tokenIn = poolPrice < jupiterPrice ? SOL_MINT : USDC_MINT;
+      const tokenOut = poolPrice < jupiterPrice ? USDC_MINT : SOL_MINT;
 
       const tradeAmountLamports = Math.floor(
         this.config.maxPositionSol * LAMPORTS_PER_SOL * Math.min(imbalancePct / 20, 1)
@@ -246,6 +253,22 @@ export class PoolImbalanceDetector {
     for (const [key, ts] of this.recentlyActed.entries()) {
       if (now - ts > this.cooldownMs * 2) this.recentlyActed.delete(key);
     }
+  }
+
+  private maybeLogSwapSummary(): void {
+    const now = Date.now();
+    if (now - this.lastSwapSummaryTs < 30_000) return;
+
+    logger.debug('Swap flow summary', {
+      seen: this.swapSeen,
+      passedCooldown: this.swapPassedCooldown,
+      cooldownMs: this.cooldownMs,
+      windowSec: Math.round((now - this.lastSwapSummaryTs) / 1000),
+    });
+
+    this.swapSeen = 0;
+    this.swapPassedCooldown = 0;
+    this.lastSwapSummaryTs = now;
   }
 
   private async execute(opp: Opportunity): Promise<ExecutionResult> {
