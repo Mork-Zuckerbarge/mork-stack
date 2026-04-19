@@ -214,13 +214,15 @@ export async function POST(req: NextRequest) {
         !cross ||
         !momentum ||
         typeof pool.minImbalancePct !== "number" ||
-        (pool.poolsWatched !== "all_three" && pool.poolsWatched !== "raydium_orca" && pool.poolsWatched !== "single") ||
+        pool.poolsWatched !== "all_available" ||
         typeof pool.useJitoBundle !== "boolean" ||
         typeof cross.minNetProfitSol !== "number" ||
         (cross.routeVia !== "jupiter" && cross.routeVia !== "direct") ||
         typeof cross.enableTriangularRoutes !== "boolean" ||
         typeof momentum.entryVolSpikeMultiplier !== "number" ||
         typeof momentum.exitTrailingStopPct !== "number" ||
+        typeof momentum.maxHoldMinutes !== "number" ||
+        typeof momentum.hardStopLossPct !== "number" ||
         typeof momentum.watchPumpFunLaunches !== "boolean" ||
         typeof momentum.useBirdeyeTrendingFeed !== "boolean"
       ) {
@@ -243,6 +245,8 @@ export async function POST(req: NextRequest) {
         momentumRunner: {
           entryVolSpikeMultiplier: momentum.entryVolSpikeMultiplier,
           exitTrailingStopPct: momentum.exitTrailingStopPct,
+          maxHoldMinutes: momentum.maxHoldMinutes,
+          hardStopLossPct: momentum.hardStopLossPct,
           watchPumpFunLaunches: momentum.watchPumpFunLaunches,
           useBirdeyeTrendingFeed: momentum.useBirdeyeTrendingFeed,
         },

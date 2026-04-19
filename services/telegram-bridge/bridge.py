@@ -159,6 +159,27 @@ def post_to_chat_endpoint(path: str, payload: dict) -> dict:
     return response.json()
 
 
+def build_candidate_paths() -> list[str]:
+    normalized = CHAT_ENDPOINT if CHAT_ENDPOINT.startswith("/") else f"/{CHAT_ENDPOINT}"
+    candidates: list[str] = []
+
+    if normalized:
+        candidates.append(normalized)
+
+    # Next.js app surface uses /api/chat/respond (default localhost:3000 in this stack).
+    if ":3000" in CORE_URL:
+        if "/api/chat/respond" not in candidates:
+            candidates.append("/api/chat/respond")
+        return candidates
+
+    # mork-core compatibility fallback
+    if "/chat/respond" not in candidates:
+        candidates.append("/chat/respond")
+    if "/api/chat/respond" not in candidates:
+        candidates.append("/api/chat/respond")
+    return candidates
+
+
 def core_reply(handle: str, message: str, user_id: int) -> str:
     prompt = build_context(user_id, message)
     payload = {
@@ -168,24 +189,20 @@ def core_reply(handle: str, message: str, user_id: int) -> str:
         "maxChars": TELEGRAM_MAX_CHARS,
     }
 
-    candidate_paths = [CHAT_ENDPOINT]
-    if CHAT_ENDPOINT != "/api/chat/respond":
-        candidate_paths.append("/api/chat/respond")
-    if CHAT_ENDPOINT != "/chat/respond":
-        candidate_paths.append("/chat/respond")
+    candidate_paths = build_candidate_paths()
 
-    last_error = None
+    errors: list[str] = []
     j = None
     for path in candidate_paths:
         try:
             j = post_to_chat_endpoint(path, payload)
             break
         except Exception as err:
-            last_error = err
+            errors.append(f"{path}: {repr(err)}")
             continue
 
     if j is None:
-        raise RuntimeError(f"chat upstream failed after paths={candidate_paths}: {last_error!r}")
+        raise RuntimeError(f"chat upstream failed after paths={candidate_paths}: {' | '.join(errors)}")
 
     if not j.get("ok"):
         return "My thoughts failed to compile. Try again in a moment."

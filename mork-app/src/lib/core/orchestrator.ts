@@ -137,7 +137,7 @@ export async function setRuntimeActivePanel(panel: "arb" | "trade") {
 export async function setRuntimeStrategyEngines(input: {
   poolImbalance: {
     minImbalancePct: number;
-    poolsWatched: "all_three" | "raydium_orca" | "single";
+    poolsWatched: "all_available";
     useJitoBundle: boolean;
   };
   crossDexArb: {
@@ -148,6 +148,8 @@ export async function setRuntimeStrategyEngines(input: {
   momentumRunner: {
     entryVolSpikeMultiplier: number;
     exitTrailingStopPct: number;
+    maxHoldMinutes: number;
+    hardStopLossPct: number;
     watchPumpFunLaunches: boolean;
     useBirdeyeTrendingFeed: boolean;
   };

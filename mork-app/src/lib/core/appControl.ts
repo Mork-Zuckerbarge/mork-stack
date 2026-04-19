@@ -44,7 +44,7 @@ export type AppControlState = {
     strategyEngines: {
       poolImbalance: {
         minImbalancePct: number;
-        poolsWatched: "all_three" | "raydium_orca" | "single";
+        poolsWatched: "all_available";
         useJitoBundle: boolean;
       };
       crossDexArb: {
@@ -55,6 +55,8 @@ export type AppControlState = {
       momentumRunner: {
         entryVolSpikeMultiplier: number;
         exitTrailingStopPct: number;
+        maxHoldMinutes: number;
+        hardStopLossPct: number;
         watchPumpFunLaunches: boolean;
         useBirdeyeTrendingFeed: boolean;
       };
@@ -116,7 +118,7 @@ const state: AppControlState = {
     strategyEngines: {
       poolImbalance: {
         minImbalancePct: 5,
-        poolsWatched: "all_three",
+        poolsWatched: "all_available",
         useJitoBundle: true,
       },
       crossDexArb: {
@@ -127,6 +129,8 @@ const state: AppControlState = {
       momentumRunner: {
         entryVolSpikeMultiplier: 5,
         exitTrailingStopPct: 15,
+        maxHoldMinutes: 30,
+        hardStopLossPct: 20,
         watchPumpFunLaunches: false,
         useBirdeyeTrendingFeed: true,
       },
@@ -334,9 +338,7 @@ function applyPersistedState(raw: unknown) {
           state.controls.strategyEngines.poolImbalance.minImbalancePct = poolImbalance.minImbalancePct;
         }
         if (
-          poolImbalance.poolsWatched === "all_three" ||
-          poolImbalance.poolsWatched === "raydium_orca" ||
-          poolImbalance.poolsWatched === "single"
+          poolImbalance.poolsWatched === "all_available"
         ) {
           state.controls.strategyEngines.poolImbalance.poolsWatched = poolImbalance.poolsWatched;
         }
@@ -363,6 +365,12 @@ function applyPersistedState(raw: unknown) {
         }
         if (typeof momentumRunner.exitTrailingStopPct === "number") {
           state.controls.strategyEngines.momentumRunner.exitTrailingStopPct = momentumRunner.exitTrailingStopPct;
+        }
+        if (typeof momentumRunner.maxHoldMinutes === "number") {
+          state.controls.strategyEngines.momentumRunner.maxHoldMinutes = momentumRunner.maxHoldMinutes;
+        }
+        if (typeof momentumRunner.hardStopLossPct === "number") {
+          state.controls.strategyEngines.momentumRunner.hardStopLossPct = momentumRunner.hardStopLossPct;
         }
         if (typeof momentumRunner.watchPumpFunLaunches === "boolean") {
           state.controls.strategyEngines.momentumRunner.watchPumpFunLaunches = momentumRunner.watchPumpFunLaunches;
@@ -641,6 +649,8 @@ export async function setStrategyEngines(input: AppControlState["controls"]["str
     momentumRunner: {
       entryVolSpikeMultiplier: Math.max(0, input.momentumRunner.entryVolSpikeMultiplier),
       exitTrailingStopPct: Math.max(0, input.momentumRunner.exitTrailingStopPct),
+      maxHoldMinutes: Math.max(1, input.momentumRunner.maxHoldMinutes),
+      hardStopLossPct: Math.max(0, input.momentumRunner.hardStopLossPct),
       watchPumpFunLaunches: input.momentumRunner.watchPumpFunLaunches,
       useBirdeyeTrendingFeed: input.momentumRunner.useBirdeyeTrendingFeed,
     },

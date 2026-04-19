@@ -81,7 +81,7 @@ type TradeRuntimeConfig = {
   jupiterTimeoutMs: number;
 };
 
-type PoolWatchMode = "all_three" | "raydium_orca" | "single";
+type PoolWatchMode = "all_available";
 type RouteMode = "jupiter" | "direct";
 type StrategyEngines = {
   poolImbalance: {
@@ -97,6 +97,8 @@ type StrategyEngines = {
   momentumRunner: {
     entryVolSpikeMultiplier: number;
     exitTrailingStopPct: number;
+    maxHoldMinutes: number;
+    hardStopLossPct: number;
     watchPumpFunLaunches: boolean;
     useBirdeyeTrendingFeed: boolean;
   };
@@ -938,13 +940,15 @@ function ExecutionControls({
   const [allowlist, setAllowlist] = useState(execution?.mintAllowlist.join(",") ?? "");
   const [allowlistLoadStatus, setAllowlistLoadStatus] = useState("");
   const [minImbalancePct, setMinImbalancePct] = useState(String(strategyEngines?.poolImbalance.minImbalancePct ?? 5));
-  const [poolsWatched, setPoolsWatched] = useState<PoolWatchMode>(strategyEngines?.poolImbalance.poolsWatched ?? "all_three");
+  const [poolsWatched] = useState<PoolWatchMode>(strategyEngines?.poolImbalance.poolsWatched ?? "all_available");
   const [jitoBundleEnabled, setJitoBundleEnabled] = useState(strategyEngines?.poolImbalance.useJitoBundle ?? true);
   const [minNetProfitSol, setMinNetProfitSol] = useState(String(strategyEngines?.crossDexArb.minNetProfitSol ?? 0.001));
   const [routeVia, setRouteVia] = useState<RouteMode>(strategyEngines?.crossDexArb.routeVia ?? "jupiter");
   const [triangularRoutes, setTriangularRoutes] = useState(strategyEngines?.crossDexArb.enableTriangularRoutes ?? true);
   const [entryVolSpike, setEntryVolSpike] = useState(String(strategyEngines?.momentumRunner.entryVolSpikeMultiplier ?? 5));
   const [trailingStopPct, setTrailingStopPct] = useState(String(strategyEngines?.momentumRunner.exitTrailingStopPct ?? 15));
+  const [maxHoldMinutes, setMaxHoldMinutes] = useState(String(strategyEngines?.momentumRunner.maxHoldMinutes ?? 30));
+  const [hardStopLossPct, setHardStopLossPct] = useState(String(strategyEngines?.momentumRunner.hardStopLossPct ?? 20));
   const [watchPumpFun, setWatchPumpFun] = useState(strategyEngines?.momentumRunner.watchPumpFunLaunches ?? false);
   const [birdEyeTrending, setBirdEyeTrending] = useState(strategyEngines?.momentumRunner.useBirdeyeTrendingFeed ?? true);
 
@@ -1043,12 +1047,9 @@ function ExecutionControls({
                 </div>
                 <label className="block text-[11px] text-white/70">min imbalance threshold (%)</label>
                 <input value={minImbalancePct} onChange={(e) => setMinImbalancePct(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
-                <label className="mt-2 block text-[11px] text-white/70">pools watched</label>
-                <select value={poolsWatched} onChange={(e) => setPoolsWatched(e.target.value as PoolWatchMode)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]">
-                  <option value="all_three">All three</option>
-                  <option value="raydium_orca">Raydium + Orca</option>
-                  <option value="single">Single pool</option>
-                </select>
+                <div className="mt-2 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-white/75">
+                  DEX coverage: full available universe (auto-expanded)
+                </div>
                 <label className="mt-2 flex items-center gap-2 text-[11px]">
                   <input type="checkbox" checked={jitoBundleEnabled} onChange={(e) => setJitoBundleEnabled(e.target.checked)} disabled={arbPaused} />
                   use Jito bundle for guaranteed landing
@@ -1076,12 +1077,16 @@ function ExecutionControls({
               <div className="rounded-lg border border-white/10 bg-black/30 p-2">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px]">momentum runner / exit sniper</span>
-                  <span className="rounded-full border border-amber-300/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100">config needed</span>
+                  <span className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">defaults loaded</span>
                 </div>
                 <label className="block text-[11px] text-white/70">entry: vol spike multiplier</label>
                 <input value={entryVolSpike} onChange={(e) => setEntryVolSpike(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
                 <label className="mt-2 block text-[11px] text-white/70">exit: trailing stop (%)</label>
                 <input value={trailingStopPct} onChange={(e) => setTrailingStopPct(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
+                <label className="mt-2 block text-[11px] text-white/70">max hold (minutes)</label>
+                <input value={maxHoldMinutes} onChange={(e) => setMaxHoldMinutes(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
+                <label className="mt-2 block text-[11px] text-white/70">hard stop loss (%)</label>
+                <input value={hardStopLossPct} onChange={(e) => setHardStopLossPct(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
                 <div className="mt-2 flex flex-wrap gap-3 text-[11px]">
                   <label className="flex items-center gap-2">
                     <input type="checkbox" checked={watchPumpFun} onChange={(e) => setWatchPumpFun(e.target.checked)} disabled={arbPaused} />
@@ -1115,6 +1120,8 @@ function ExecutionControls({
                 momentumRunner: {
                   entryVolSpikeMultiplier: Number(entryVolSpike) || 0,
                   exitTrailingStopPct: Number(trailingStopPct) || 0,
+                  maxHoldMinutes: Number(maxHoldMinutes) || 30,
+                  hardStopLossPct: Number(hardStopLossPct) || 20,
                   watchPumpFunLaunches: watchPumpFun,
                   useBirdeyeTrendingFeed: birdEyeTrending,
                 },
