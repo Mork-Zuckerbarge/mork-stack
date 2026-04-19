@@ -283,6 +283,16 @@ export default function AppControlPanel() {
             <FlagToggle label="Memory" enabled={state.controls.memoryEnabled} onToggle={(value) => act("controls.set", { key: "memoryEnabled", value })} busy={busy} />
             <FlagToggle label="Planner" enabled={state.controls.plannerEnabled} onToggle={(value) => act("controls.set", { key: "plannerEnabled", value })} busy={busy} />
             <FlagToggle label="Wallet Auto Refresh" enabled={state.controls.walletAutoRefreshEnabled} onToggle={(value) => act("controls.set", { key: "walletAutoRefreshEnabled", value })} busy={busy} />
+            <button
+              onClick={() => act("memory.flush")}
+              disabled={busy}
+              className="mt-2 rounded-lg border border-red-300/30 bg-red-500/10 px-3 py-2 text-xs text-red-100 hover:bg-red-500/15 disabled:opacity-60"
+            >
+              Flush Conversation Memory (Prisma)
+            </button>
+            <p className="text-[11px] text-white/50">
+              Clears Memory + MemorySummary tables to remove stale narrative drift. Persona modes/guidelines are kept.
+            </p>
           </div>
 
           <div className="rounded-2xl bg-black/35 p-3">

@@ -658,3 +658,15 @@ export async function setStrategyEngines(input: AppControlState["controls"]["str
   await persistState();
   return structuredClone(state.controls.strategyEngines);
 }
+
+export async function flushConversationMemory() {
+  await ensureStateLoaded();
+  const [memoryResult, summaryResult] = await Promise.all([
+    prisma.memory.deleteMany({}),
+    prisma.memorySummary.deleteMany({}),
+  ]);
+  return {
+    memoryDeleted: memoryResult.count,
+    summariesDeleted: summaryResult.count,
+  };
+}

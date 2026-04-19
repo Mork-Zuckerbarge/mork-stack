@@ -12,6 +12,7 @@ import {
   setRuntimeActivePanel,
   setRuntimeStrategyEngines,
   setRuntimeResponsePolicy,
+  flushRuntimeConversationMemory,
   startRuntime,
   stopRuntime,
 } from "@/lib/core/orchestrator";
@@ -31,7 +32,8 @@ type Action =
   | "execution.authority.set"
   | "response.params.set"
   | "runtime.panel.set"
-  | "strategy.engines.set";
+  | "strategy.engines.set"
+  | "memory.flush";
 
 function getArbRuntimeFromEnv() {
   return {
@@ -251,6 +253,8 @@ export async function POST(req: NextRequest) {
           useBirdeyeTrendingFeed: momentum.useBirdeyeTrendingFeed,
         },
       });
+    } else if (action === "memory.flush") {
+      await flushRuntimeConversationMemory();
     } else {
       return NextResponse.json({ ok: false, error: "unknown action" }, { status: 400 });
     }
