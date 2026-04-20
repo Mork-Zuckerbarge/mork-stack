@@ -16,9 +16,9 @@ type RoutedCommand =
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 const JUP_BASE = process.env.JUP_BASE_URL ?? "https://lite-api.jup.ag";
 const LAST_TRADE_FACT_KEY = "__agent_last_trade_iso_v1__";
+const BASE58_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 function resolveChannel(value: unknown): ChatChannel {
   if (value === "telegram" || value === "x") return value;
@@ -107,6 +107,40 @@ async function estimateSolForUsd(usd: number): Promise<number> {
   return outLamports / 1_000_000_000;
 }
 
+type JupiterTokenResult = { address?: string; symbol?: string };
+
+async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; symbol: string }> {
+  const normalized = symbolOrMint.trim().toUpperCase();
+  if (!normalized) {
+    throw new Error("Buy command token symbol is required.");
+  }
+
+  if (BASE58_MINT_RE.test(symbolOrMint.trim())) {
+    return { mint: symbolOrMint.trim(), symbol: normalized };
+  }
+
+  const searchUrl = new URL(`${JUP_BASE}/tokens/v1/search`);
+  searchUrl.searchParams.set("query", normalized);
+  searchUrl.searchParams.set("limit", "20");
+
+  const res = await fetch(searchUrl.toString(), {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error(`Token lookup failed (${res.status})`);
+  }
+
+  const results = (await res.json()) as JupiterTokenResult[];
+  const exact = results.find((item) => (item.symbol || "").toUpperCase() === normalized && typeof item.address === "string");
+  if (!exact?.address) {
+    throw new Error(`Token symbol $${normalized} not found on Jupiter. Use the token mint address instead.`);
+  }
+
+  return { mint: exact.address, symbol: normalized };
+}
+
 function formatMinutesFromNow(lastTradeIso: string) {
   const millis = Date.now() - new Date(lastTradeIso).getTime();
   if (!Number.isFinite(millis) || millis <= 0) return 0;
@@ -155,18 +189,6 @@ async function enforceTradeAuthority(usd: number) {
           error: `Trade cooldown active: wait ${cooldownMinutes - minutesSince} more minute(s).`,
         };
       }
-    }
-  }
-
-  const allowlist = authority.mintAllowlist.map((item) => item.trim()).filter(Boolean);
-  if (allowlist.length > 0) {
-    const allowSet = new Set(allowlist);
-    if (!allowSet.has(BBQ_MINT) && !allowSet.has("BBQ")) {
-      return {
-        ok: false,
-        status: 403,
-        error: "Trade denied by execution authority mintAllowlist (BBQ mint not allowed). Add BBQ mint/symbol to allowlist or clear allowlist.",
-      };
     }
   }
 
@@ -289,25 +311,27 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     };
   }
 
-  if (command.symbol !== "SPX" && command.symbol !== "BBQ") {
-    return {
-      ok: false,
-      status: 400,
-      error:
-        `ARB quick-buy currently supports $SPX (mapped to BBQ route) or $BBQ only. Received: $${command.symbol}.`,
-    };
-  }
-
   const tradeAuthority = await enforceTradeAuthority(command.usd);
   if (!tradeAuthority.ok) {
     return tradeAuthority;
+  }
+
+  let outputToken: { mint: string; symbol: string };
+  try {
+    outputToken = await resolveOutputMint(command.symbol);
+  } catch (error) {
+    return {
+      ok: false,
+      status: 400,
+      error: error instanceof Error ? error.message : "Token symbol resolution failed.",
+    };
   }
 
   const amountSol = await estimateSolForUsd(command.usd);
   const swapRes = await fetch(new URL("/api/trade/swap", req.url), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ amountSol, slippageBps: 50 }),
+    body: JSON.stringify({ amountSol, slippageBps: 50, outputMint: outputToken.mint }),
   });
 
   const swapJson = (await swapRes.json().catch(() => ({}))) as {
@@ -331,7 +355,9 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     ok: true,
     routed: "arb",
     command: "buy",
-    response: `Executed buy for ~$${command.usd.toFixed(2)} (${(swapJson.amountSol ?? amountSol).toFixed(6)} SOL route). Signature: ${swapJson.signature}`,
+    response:
+      `Executed buy for ~$${command.usd.toFixed(2)} of $${outputToken.symbol} ` +
+      `(${(swapJson.amountSol ?? amountSol).toFixed(6)} SOL route). Signature: ${swapJson.signature}`,
     status: 200,
   };
 }
