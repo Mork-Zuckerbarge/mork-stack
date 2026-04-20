@@ -42,6 +42,12 @@ function looksLikePoisonedOutput(text: string) {
   );
 }
 
+function clipInstructionBlock(input: string, maxChars: number) {
+  const trimmed = input.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, maxChars)}\n[truncated for latency/control]`;
+}
+
 export async function respondToChat(input: unknown) {
   const parsed = RespondSchema.safeParse(input);
 
@@ -97,10 +103,14 @@ export async function respondToChat(input: unknown) {
   const controlState = await getAppControlState();
   const responsePolicy = controlState.controls.responsePolicy;
   const finalMaxChars = Math.min(maxChars, responsePolicy.maxResponseChars);
+  const appGuidelines = clipInstructionBlock(controlState.controls.appPersonaGuidelines, 1200);
+  const telegramGuidelines = clipInstructionBlock(controlState.controls.telegramPersonaGuidelines, 1200);
+  const xGuidelines = clipInstructionBlock(controlState.controls.xPersonaGuidelines, 1200);
+  const behaviorGuidelines = clipInstructionBlock(responsePolicy.behaviorGuidelines, 1600);
   let modeInstruction = "";
 
   if (handle === "app-user" || (channel === "system" && !handle)) {
-    const customGuidelines = controlState.controls.appPersonaGuidelines.trim();
+    const customGuidelines = appGuidelines;
     modeInstruction =
       `You are speaking to a live app user in the main Mork UI.\n` +
       `Stay tightly focused on the user's request and current runtime state.\n` +
@@ -111,7 +121,7 @@ export async function respondToChat(input: unknown) {
       modeInstruction += `Custom guidelines:\n${customGuidelines}\n`;
     }
   } else if (handle === "frontend-coding") {
-    const customGuidelines = controlState.controls.appPersonaGuidelines.trim();
+    const customGuidelines = appGuidelines;
     modeInstruction =
       `You are Mork inside a coding workbench.\n` +
       `Do NOT roleplay, simulate games, or pretend to be in a fictional environment unless explicitly requested by the user.\n` +
@@ -126,7 +136,7 @@ export async function respondToChat(input: unknown) {
       modeInstruction += `Custom guidelines:\n${customGuidelines}\n`;
     }
   } else if (channel === "telegram") {
-    const customGuidelines = controlState.controls.telegramPersonaGuidelines.trim();
+    const customGuidelines = telegramGuidelines;
     modeInstruction =
       `You are replying on Telegram.\n` +
       `Be polished, professional, concise, and competent.\n` +
@@ -135,7 +145,7 @@ export async function respondToChat(input: unknown) {
       modeInstruction += `Custom guidelines:\n${customGuidelines}\n`;
     }
   } else if (channel === "x") {
-    const customGuidelines = controlState.controls.xPersonaGuidelines.trim();
+    const customGuidelines = xGuidelines;
     modeInstruction =
       `You are composing for X.\n` +
       `Be reflective, literary, artistic, and thoughtful.\n` +
@@ -169,7 +179,7 @@ export async function respondToChat(input: unknown) {
     `Max ${finalMaxChars} characters.\n` +
     `${responsePolicy.allowUrls ? "URLs are allowed.\n" : "Do NOT include URLs.\n"}` +
     `${responsePolicy.allowUserMessageQuotes ? "You may quote the user's message when useful.\n" : "Do NOT quote the user's message.\n"}` +
-    `${responsePolicy.behaviorGuidelines.trim()}\n` +
+    `${behaviorGuidelines}\n` +
     `Return ONLY the reply text.\n`;
 
   let responseText = "";

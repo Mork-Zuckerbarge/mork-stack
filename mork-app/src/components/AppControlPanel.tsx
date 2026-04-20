@@ -458,7 +458,7 @@ function ResponsePolicyEditor({
         <button
           onClick={() =>
             onSave({
-              maxResponseChars: Number(maxResponseChars) || 12000,
+              maxResponseChars: Number(maxResponseChars) || 4000,
               allowUrls,
               allowUserMessageQuotes,
               behaviorGuidelines,

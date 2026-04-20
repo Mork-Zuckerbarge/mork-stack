@@ -165,7 +165,7 @@ async function enforceTradeAuthority(usd: number) {
       return {
         ok: false,
         status: 403,
-        error: "Trade denied by execution authority mintAllowlist (BBQ mint not allowed).",
+        error: "Trade denied by execution authority mintAllowlist (BBQ mint not allowed). Add BBQ mint/symbol to allowlist or clear allowlist.",
       };
     }
   }

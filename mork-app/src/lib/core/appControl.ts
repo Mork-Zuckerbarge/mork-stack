@@ -108,7 +108,7 @@ const state: AppControlState = {
       cooldownMinutes: 15,
     },
     responsePolicy: {
-      maxResponseChars: 12000,
+      maxResponseChars: 4000,
       allowUrls: false,
       allowUserMessageQuotes: false,
       behaviorGuidelines:
@@ -617,7 +617,7 @@ export async function setResponsePolicy(input: {
 }) {
   await ensureStateLoaded();
   state.controls.responsePolicy = {
-    maxResponseChars: Math.min(20000, Math.max(120, Math.round(input.maxResponseChars))),
+    maxResponseChars: Math.min(8000, Math.max(120, Math.round(input.maxResponseChars))),
     allowUrls: input.allowUrls,
     allowUserMessageQuotes: input.allowUserMessageQuotes,
     behaviorGuidelines: input.behaviorGuidelines,
