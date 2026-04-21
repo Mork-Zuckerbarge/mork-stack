@@ -22,7 +22,9 @@ def normalize_bot_token(raw_token: str) -> str:
 BOT_TOKEN = normalize_bot_token(os.getenv("TELEGRAM_BOT_TOKEN", ""))
 CORE_URL = os.getenv("MORK_CORE_URL", "http://127.0.0.1:8790").strip().rstrip("/")
 CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/api/chat/respond").strip() or "/api/chat/respond"
-REPLY_MODE = os.getenv("REPLY_MODE", "all").strip().lower()  # mentions | all | dm
+REPLY_MODE = os.getenv("REPLY_MODE", "mentions").strip().lower()  # mentions | all | dm
+if REPLY_MODE not in ("mentions", "all", "dm"):
+    REPLY_MODE = "mentions"
 COOLDOWN = int(os.getenv("COOLDOWN_SECONDS", "20"))
 MAX_PER_10 = int(os.getenv("MAX_PER_10_MIN", "12"))
 CHAT_TIMEOUT_SECONDS = int(os.getenv("CHAT_TIMEOUT_SECONDS", "120"))
