@@ -119,7 +119,6 @@ export default function SherpaPanel() {
   return (
     <div className="rounded-3xl border border-fuchsia-300/20 bg-gradient-to-b from-fuchsia-500/10 to-transparent p-5">
       <h2 className="mb-1 text-lg font-semibold">Sherpa Gradio Control Deck</h2>
-      <p className="mb-3 text-xs text-white/60">Embed the full Sherpa control surface so scheduler and posting knobs stay in one panel.</p>
 
       <div className="mb-3 grid grid-cols-1 gap-2 rounded-2xl bg-black/35 p-3 text-xs md:grid-cols-[1fr_auto_auto]">
         <input

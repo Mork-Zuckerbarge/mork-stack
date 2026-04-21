@@ -112,6 +112,19 @@ async function estimateSolForUsd(usd: number): Promise<number> {
 
 type JupiterTokenResult = { address?: string; symbol?: string };
 
+type JupiterAllToken = { address?: string; symbol?: string; name?: string };
+
+function matchTokenSymbol(normalized: string, tokens: Array<JupiterTokenResult & { address: string }>) {
+  const exact = tokens.find((item) => (item.symbol || "").toUpperCase() === normalized);
+  if (exact) return exact;
+
+  const normalizedNoPunct = normalized.replace(/[^A-Z0-9]/g, "");
+  const tolerant = tokens.find((item) => (item.symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === normalizedNoPunct);
+  if (tolerant) return tolerant;
+
+  return tokens.find((item) => (item.symbol || "").toUpperCase().startsWith(normalized)) || null;
+}
+
 async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; symbol: string }> {
   const normalized = symbolOrMint.trim().toUpperCase();
   if (!normalized) {
@@ -131,30 +144,31 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
     cache: "no-store",
   });
 
-  if (!res.ok) {
-    throw new Error(`Token lookup failed (${res.status})`);
+  if (res.ok) {
+    const results = (await res.json()) as JupiterTokenResult[];
+    const withAddress = results.filter((item): item is JupiterTokenResult & { address: string } => typeof item.address === "string");
+    const selected = matchTokenSymbol(normalized, withAddress);
+    if (selected?.address) {
+      return { mint: selected.address, symbol: (selected.symbol || normalized).toUpperCase() };
+    }
   }
 
-  const results = (await res.json()) as JupiterTokenResult[];
-  const withAddress = results.filter((item): item is JupiterTokenResult & { address: string } => typeof item.address === "string");
-  const exact = withAddress.find((item) => (item.symbol || "").toUpperCase() === normalized);
-
-  if (exact?.address) {
-    return { mint: exact.address, symbol: normalized };
+  const allRes = await fetch("https://token.jup.ag/all", {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!allRes.ok) {
+    throw new Error(`Token lookup failed (${res.status}). Try a token mint address instead.`);
   }
 
-  const normalizedNoPunct = normalized.replace(/[^A-Z0-9]/g, "");
-  const tolerant = withAddress.find((item) => (item.symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === normalizedNoPunct);
-  if (tolerant?.address) {
-    return { mint: tolerant.address, symbol: (tolerant.symbol || normalized).toUpperCase() };
-  }
-
-  const startsWith = withAddress.find((item) => (item.symbol || "").toUpperCase().startsWith(normalized));
-  if (!startsWith?.address) {
+  const allTokens = (await allRes.json()) as JupiterAllToken[];
+  const withAddress = allTokens.filter((item): item is JupiterAllToken & { address: string } => typeof item.address === "string");
+  const selected = matchTokenSymbol(normalized, withAddress);
+  if (!selected?.address) {
     throw new Error(`Token symbol $${normalized} not found on Jupiter. Use the token mint address instead.`);
   }
 
-  return { mint: startsWith.address, symbol: (startsWith.symbol || normalized).toUpperCase() };
+  return { mint: selected.address, symbol: (selected.symbol || normalized).toUpperCase() };
 }
 
 async function enforceTradeAuthority(usd: number) {
