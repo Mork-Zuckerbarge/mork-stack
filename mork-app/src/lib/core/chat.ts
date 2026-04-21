@@ -42,6 +42,17 @@ function looksLikePoisonedOutput(text: string) {
   );
 }
 
+function looksLikeOffDomainMisread(text: string) {
+  const lower = text.toLowerCase();
+
+  return (
+    (lower.includes("discord bot command") && lower.includes("command")) ||
+    lower.includes("minecraft server") ||
+    lower.includes("custom spawn point") ||
+    lower.includes("cooldown period")
+  );
+}
+
 function clipInstructionBlock(input: string, maxChars: number) {
   const trimmed = input.trim();
   if (trimmed.length <= maxChars) return trimmed;
@@ -115,6 +126,7 @@ export async function respondToChat(input: unknown) {
       `You are speaking to a live app user in the main Mork UI.\n` +
       `Stay tightly focused on the user's request and current runtime state.\n` +
       `Avoid poetic detours, roleplay scenes, or unrelated philosophy.\n` +
+      `Do not reinterpret the user's message as a Discord or game-server command unless they explicitly asked about those systems.\n` +
       `If you do not know something, say what is unknown and give the next concrete check.\n` +
       `Persona mode: ${controlState.controls.appPersonaMode}.\n`;
     if (customGuidelines) {
@@ -157,16 +169,8 @@ export async function respondToChat(input: unknown) {
     modeInstruction = `Be useful, clear, and grounded.\n`;
   }
 
-  if (controlState.controls.executionAuthority.mode === "emergency_stop") {
-    modeInstruction +=
-      "Execution authority is in EMERGENCY STOP. Decline any request to execute or suggest immediate wallet transactions.\n";
-  } else if (controlState.controls.executionAuthority.mode === "agent_assisted") {
-    modeInstruction +=
-      `Execution authority is AGENT-ASSISTED. Any trade plan must stay under $${controlState.controls.executionAuthority.maxTradeUsd} per action, respect mint allowlist (${controlState.controls.executionAuthority.mintAllowlist.join(", ") || "none configured"}), and cooldown ${controlState.controls.executionAuthority.cooldownMinutes} minutes.\n`;
-  } else {
-    modeInstruction +=
-      "Execution authority is USER-ONLY. Offer analysis and ask the user to explicitly confirm before any execution steps.\n";
-  }
+  modeInstruction +=
+    "Execution is enabled for agent-run trading actions when the user requests them.\n";
 
   if (handle === "frontend-coding" && isCasualMessage(trimmedMessage)) {
     modeInstruction +=
@@ -229,6 +233,9 @@ export async function respondToChat(input: unknown) {
       responseText =
         "My context got tangled for a moment. Ask again and I’ll answer cleanly.";
     }
+  } else if (looksLikeOffDomainMisread(responseText)) {
+    responseText =
+      "I misread that. I’m operating inside the Mork app runtime (wallet, services, and connected channels), not Discord/Minecraft command parsing. Ask again and I’ll answer directly in that context.";
   }
 
   if (responseText.length > finalMaxChars) {
