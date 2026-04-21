@@ -19,6 +19,7 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 const JUP_BASE = process.env.JUP_BASE_URL ?? "https://lite-api.jup.ag";
 const LAST_TRADE_FACT_KEY = "__agent_last_trade_iso_v1__";
 const BASE58_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const JUP_TOKEN_SEARCH_LIMIT = "100";
 
 function resolveChannel(value: unknown): ChatChannel {
   if (value === "telegram" || value === "x") return value;
@@ -56,7 +57,10 @@ function parseCommand(message: string): RoutedCommand | null {
     return { type: "telegram", text: telegramMatch[1].trim() };
   }
 
-  const buyMatch = trimmed.match(/^go\s+buy\s+\$?(\d+(?:\.\d+)?)\s+of\s+\$?([a-z0-9._-]+)\s*$/i);
+  const buyMatch =
+    trimmed.match(/^go\s+buy\s+\$?(\d+(?:\.\d+)?)\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    trimmed.match(/^buy\s+\$?(\d+(?:\.\d+)?)\s+(?:of\s+)?\$?([a-z0-9._-]+)(?:\s+now)?\s*$/i) ||
+    trimmed.match(/^ape\s+\$?(\d+(?:\.\d+)?)\s+into\s+\$?([a-z0-9._-]+)\s*$/i);
   if (buyMatch) {
     return {
       type: "buy",
@@ -121,7 +125,7 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
 
   const searchUrl = new URL(`${JUP_BASE}/tokens/v1/search`);
   searchUrl.searchParams.set("query", normalized);
-  searchUrl.searchParams.set("limit", "20");
+  searchUrl.searchParams.set("limit", JUP_TOKEN_SEARCH_LIMIT);
 
   const res = await fetch(searchUrl.toString(), {
     headers: { Accept: "application/json" },
@@ -133,12 +137,25 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
   }
 
   const results = (await res.json()) as JupiterTokenResult[];
-  const exact = results.find((item) => (item.symbol || "").toUpperCase() === normalized && typeof item.address === "string");
-  if (!exact?.address) {
+  const withAddress = results.filter((item): item is JupiterTokenResult & { address: string } => typeof item.address === "string");
+  const exact = withAddress.find((item) => (item.symbol || "").toUpperCase() === normalized);
+
+  if (exact?.address) {
+    return { mint: exact.address, symbol: normalized };
+  }
+
+  const normalizedNoPunct = normalized.replace(/[^A-Z0-9]/g, "");
+  const tolerant = withAddress.find((item) => (item.symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === normalizedNoPunct);
+  if (tolerant?.address) {
+    return { mint: tolerant.address, symbol: (tolerant.symbol || normalized).toUpperCase() };
+  }
+
+  const startsWith = withAddress.find((item) => (item.symbol || "").toUpperCase().startsWith(normalized));
+  if (!startsWith?.address) {
     throw new Error(`Token symbol $${normalized} not found on Jupiter. Use the token mint address instead.`);
   }
 
-  return { mint: exact.address, symbol: normalized };
+  return { mint: startsWith.address, symbol: (startsWith.symbol || normalized).toUpperCase() };
 }
 
 function formatMinutesFromNow(lastTradeIso: string) {
