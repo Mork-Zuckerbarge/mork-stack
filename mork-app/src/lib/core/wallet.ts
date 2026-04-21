@@ -18,8 +18,8 @@ type WalletState = {
 let walletCache: WalletState | null = null;
 let walletCacheAt = 0;
 let walletFetchInFlight: Promise<WalletState> | null = null;
-const WALLET_CACHE_MS = 15000;
-const RPC_RETRY_DELAYS_MS = [250, 600, 1200];
+const WALLET_CACHE_MS = 60000;
+const RPC_RETRY_DELAYS_MS = [500, 1000, 2000, 4000];
 
 function isRpcRateLimitError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -125,10 +125,8 @@ async function fetchWalletState(): Promise<WalletState> {
   const solLamports = await withRpcRetry("getBalance", () => connection.getBalance(owner));
   const sol = solLamports / 1e9;
 
-  const [bbq, usdc] = await Promise.all([
-    getSplBalance(connection, owner, BBQ_MINT),
-    getSplBalance(connection, owner, USDC_MINT),
-  ]);
+  const bbq = await getSplBalance(connection, owner, BBQ_MINT);
+  const usdc = await getSplBalance(connection, owner, USDC_MINT);
 
   return {
     address: WALLET,
@@ -155,6 +153,12 @@ export async function getWalletState(force = false) {
       walletCache = wallet;
       walletCacheAt = Date.now();
       return wallet;
+    })
+    .catch((error: unknown) => {
+      if (walletCache && isRpcRateLimitError(error)) {
+        return walletCache;
+      }
+      throw error;
     })
     .finally(() => {
       if (walletFetchInFlight === fetchPromise) {

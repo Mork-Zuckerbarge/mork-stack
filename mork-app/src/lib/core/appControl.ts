@@ -102,7 +102,7 @@ const state: AppControlState = {
     selectedOllamaModel: process.env.OLLAMA_MODEL || "llama3.2:3b",
     startupCompleted: false,
     executionAuthority: {
-      mode: "user_only",
+      mode: "agent_assisted",
       maxTradeUsd: 50,
       mintAllowlist: [],
       cooldownMinutes: 15,
@@ -114,7 +114,7 @@ const state: AppControlState = {
       behaviorGuidelines:
         "Do NOT act like the TV character from Mork & Mindy.\nNever say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\nDo not create false information.\nIf you do not know something, say so plainly.",
     },
-    activePanel: "trade",
+    activePanel: "arb",
     strategyEngines: {
       poolImbalance: {
         minImbalancePct: 5,
@@ -413,6 +413,14 @@ async function ensureStateLoaded() {
     }
     if (!state.controls.startupCompleted) {
       state.controls.startupCompleted = true;
+      shouldPersist = true;
+    }
+    if (state.controls.executionAuthority.mode === "user_only") {
+      state.controls.executionAuthority.mode = "agent_assisted";
+      shouldPersist = true;
+    }
+    if (state.controls.activePanel !== "arb") {
+      state.controls.activePanel = "arb";
       shouldPersist = true;
     }
 

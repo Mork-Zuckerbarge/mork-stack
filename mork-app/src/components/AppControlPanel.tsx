@@ -206,7 +206,6 @@ export default function AppControlPanel() {
           {busy ? "Updating…" : checkingUpdates ? "Checking…" : updateState?.hasUpdates ? `Update (${updateState.behind})` : "Check updates"}
         </button>
       </div>
-      <p className="mb-3 text-xs text-white/60">One surface for models, personas, channels, and orchestration controls.</p>
 
       {!state ? (
         <p className="text-sm text-white/60">Unable to load app controls.</p>
@@ -273,13 +272,6 @@ export default function AppControlPanel() {
             status={state.arb.status}
             onStart={() => act("arb.start")}
             onStop={() => act("arb.stop")}
-            busy={busy}
-          />
-          <StatusRow
-            label="Sherpa (X bot)"
-            status={state.sherpa.status}
-            onStart={() => act("sherpa.start")}
-            onStop={() => act("sherpa.stop")}
             busy={busy}
           />
           {sherpaBootstrapMessage ? (

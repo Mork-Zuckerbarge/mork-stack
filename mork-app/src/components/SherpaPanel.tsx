@@ -118,25 +118,25 @@ export default function SherpaPanel() {
 
   return (
     <div className="rounded-3xl border border-fuchsia-300/20 bg-gradient-to-b from-fuchsia-500/10 to-transparent p-5">
-      <h2 className="mb-1 text-lg font-semibold">Sherpa Gradio Control Deck</h2>
-      <p className="mb-3 text-xs text-white/60">Embed the full Sherpa control surface so scheduler and posting knobs stay in one panel.</p>
-
-      <div className="mb-3 grid grid-cols-1 gap-2 rounded-2xl bg-black/35 p-3 text-xs md:grid-cols-[1fr_auto_auto]">
-        <input
-          value={rawUrl}
-          onChange={(event) => {
-            setIframeError("");
-            setRawUrl(event.target.value);
-          }}
-          placeholder="http://127.0.0.1:7860"
-          className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-sm"
-        />
-        <button onClick={saveUrl} className="rounded-lg border border-white/10 px-3 py-1.5">
-          {saved ? "Saved" : "Save"}
-        </button>
-        <a href={src || DEFAULT_GRADIO_URL} target="_blank" rel="noreferrer" className="rounded-lg border border-white/10 px-3 py-1.5 text-center">
-          Open tab
-        </a>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-semibold">Sherpa Gradio Control Deck</h2>
+        <div className="grid flex-1 grid-cols-[minmax(220px,1fr)_auto_auto] gap-2 rounded-2xl bg-black/35 p-2 text-xs">
+          <input
+            value={rawUrl}
+            onChange={(event) => {
+              setIframeError("");
+              setRawUrl(event.target.value);
+            }}
+            placeholder="http://127.0.0.1:7860"
+            className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-sm"
+          />
+          <button onClick={saveUrl} className="rounded-lg border border-white/10 px-3 py-1.5">
+            {saved ? "Saved" : "Save"}
+          </button>
+          <a href={src || DEFAULT_GRADIO_URL} target="_blank" rel="noreferrer" className="rounded-lg border border-white/10 px-3 py-1.5 text-center">
+            Open tab
+          </a>
+        </div>
       </div>
       {iframeError ? (
         <div className="mb-3 rounded-xl border border-fuchsia-300/30 bg-fuchsia-500/10 px-3 py-2 text-xs text-fuchsia-100">
