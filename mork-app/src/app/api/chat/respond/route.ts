@@ -20,6 +20,16 @@ const LAST_TRADE_FACT_KEY = "__agent_last_trade_iso_v1__";
 const BASE58_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const JUP_TOKEN_SEARCH_LIMIT = "100";
 
+function toUserFacingFetchError(error: unknown, context: string): Error {
+  if (error instanceof Error) {
+    if (error.message.toLowerCase().includes("fetch failed")) {
+      return new Error(`${context} (network request failed). Check JUP_BASE_URL / outbound network access.`);
+    }
+    return new Error(`${context} (${error.message})`);
+  }
+  return new Error(`${context} (unknown error)`);
+}
+
 function resolveChannel(value: unknown): ChatChannel {
   if (value === "telegram" || value === "x") return value;
   return "system";
@@ -93,10 +103,15 @@ async function estimateSolForUsd(usd: number): Promise<number> {
   quoteUrl.searchParams.set("amount", String(amountUsdcBase));
   quoteUrl.searchParams.set("slippageBps", "50");
 
-  const res = await fetch(quoteUrl.toString(), {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(quoteUrl.toString(), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+  } catch (error) {
+    throw toUserFacingFetchError(error, "USD→SOL quote failed");
+  }
   if (!res.ok) {
     throw new Error(`SOL conversion quote failed (${res.status})`);
   }
@@ -139,12 +154,17 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
   searchUrl.searchParams.set("query", normalized);
   searchUrl.searchParams.set("limit", JUP_TOKEN_SEARCH_LIMIT);
 
-  const res = await fetch(searchUrl.toString(), {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
+  let res: Response | null = null;
+  try {
+    res = await fetch(searchUrl.toString(), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+  } catch {
+    res = null;
+  }
 
-  if (res.ok) {
+  if (res?.ok) {
     const results = (await res.json()) as JupiterTokenResult[];
     const withAddress = results.filter((item): item is JupiterTokenResult & { address: string } => typeof item.address === "string");
     const selected = matchTokenSymbol(normalized, withAddress);
@@ -153,12 +173,17 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
     }
   }
 
-  const allRes = await fetch("https://token.jup.ag/all", {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
+  let allRes: Response;
+  try {
+    allRes = await fetch("https://token.jup.ag/all", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+  } catch (error) {
+    throw toUserFacingFetchError(error, "Token lookup failed");
+  }
   if (!allRes.ok) {
-    throw new Error(`Token lookup failed (${res.status}). Try a token mint address instead.`);
+    throw new Error(`Token lookup failed (${allRes.status}). Try a token mint address instead.`);
   }
 
   const allTokens = (await allRes.json()) as JupiterAllToken[];
@@ -308,12 +333,31 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     };
   }
 
-  const amountSol = await estimateSolForUsd(command.usd);
-  const swapRes = await fetch(new URL("/api/trade/swap", req.url), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ amountSol, slippageBps: 50, outputMint: outputToken.mint }),
-  });
+  let amountSol = 0;
+  try {
+    amountSol = await estimateSolForUsd(command.usd);
+  } catch (error) {
+    return {
+      ok: false,
+      status: 502,
+      error: error instanceof Error ? error.message : "USD→SOL quote failed.",
+    };
+  }
+
+  let swapRes: Response;
+  try {
+    swapRes = await fetch(new URL("/api/trade/swap", req.url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amountSol, slippageBps: 50, outputMint: outputToken.mint }),
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      status: 502,
+      error: toUserFacingFetchError(error, "Trade execution request failed").message,
+    };
+  }
 
   const swapJson = (await swapRes.json().catch(() => ({}))) as {
     ok?: boolean;
