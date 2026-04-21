@@ -36,17 +36,60 @@ type ChannelActivity = {
 export default function AgentStatusCard() {
   const [state, setState] = useState<AgentState | null>(null);
   const [activity, setActivity] = useState<ChannelActivity | null>(null);
+  const [plannerStatus, setPlannerStatus] = useState("idle");
 
   useEffect(() => {
-    fetch("/api/agent/state")
-      .then((r) => r.json())
-      .then(setState)
-      .catch(() => setState(null));
+    let cancelled = false;
 
-    fetch("/api/channel/activity", { cache: "no-store" })
-      .then((r) => r.json())
-      .then(setActivity)
-      .catch(() => setActivity(null));
+    async function refreshState() {
+      try {
+        const [agentRes, activityRes] = await Promise.all([
+          fetch("/api/agent/state", { cache: "no-store" }),
+          fetch("/api/channel/activity", { cache: "no-store" }),
+        ]);
+        if (cancelled) return;
+        setState(await agentRes.json());
+        setActivity(await activityRes.json());
+      } catch {
+        if (!cancelled) {
+          setState(null);
+          setActivity(null);
+        }
+      }
+    }
+
+    async function runPlannerTick() {
+      try {
+        const res = await fetch("/planner/tick", { method: "POST" });
+        const data = (await res.json().catch(() => ({}))) as {
+          status?: string;
+          reason?: string;
+          signature?: string | null;
+        };
+        if (cancelled) return;
+        if (data.status === "executed") {
+          setPlannerStatus(`executed${data.signature ? ` (${data.signature.slice(0, 8)}…)` : ""}`);
+        } else if (data.reason) {
+          setPlannerStatus(`${data.status || "skipped"}: ${data.reason}`);
+        } else {
+          setPlannerStatus(data.status || "unknown");
+        }
+      } catch {
+        if (!cancelled) setPlannerStatus("planner tick failed");
+      }
+    }
+
+    void refreshState();
+    void runPlannerTick();
+    const interval = window.setInterval(() => {
+      void runPlannerTick();
+      void refreshState();
+    }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, []);
 
   return (
@@ -66,6 +109,7 @@ export default function AgentStatusCard() {
             <span className="text-white/50">Arb execution: </span>
             {activity?.arbRuntime?.armed ? "ARMED" : "SAFE (not armed)"} / {activity?.arbRuntime?.paper ? "paper" : "live"}
           </div>
+          <div><span className="text-white/50">Planner tick: </span>{plannerStatus}</div>
           <div><span className="text-white/50">Telegram memory events: </span>{activity?.telegram?.count ?? 0}</div>
           <div><span className="text-white/50">Arb learning events: </span>{activity?.arbLearning?.routeResearchCount ?? 0}</div>
 
