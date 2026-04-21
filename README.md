@@ -38,7 +38,7 @@ If local changes exist, `./update.sh` auto-stashes them before pulling and then 
 
 ## Agent behavior control map (all current tuning locations)
 
-If Mork feels slow or “dumber,” tune behavior in these places (ordered from highest impact to lowest friction):
+If The Agent feels slow or “dumber,” tune behavior in these places (ordered from highest impact to lowest friction):
 
 ### 1) Runtime model + policy controls (main UI)
 
