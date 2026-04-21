@@ -580,18 +580,34 @@ export default function JupiterPanel() {
 
   return (
     <div className="rounded-3xl border border-amber-300/20 bg-gradient-to-b from-amber-500/10 to-transparent p-5">
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3">
         <h2 className="text-lg font-semibold">wallet control</h2>
-        <div className="flex items-center gap-2 text-xs">
-        <button
-          type="button"
-          onClick={refreshWalletControlPanel}
-          disabled={panelRefreshBusy}
-          className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 disabled:opacity-50"
-        >
-          {panelRefreshBusy ? "Refreshing…" : "Refresh wallet control"}
-        </button>
-        {panelRefreshStatus ? <span className="text-white/60">{panelRefreshStatus}</span> : null}
+        <div className="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/30 p-2 text-[11px] lg:max-w-md">
+          <button
+            type="button"
+            onClick={() => onSetActivePanel("arb")}
+            className={`rounded-md border px-2 py-1 ${activePanel === "arb" ? "border-emerald-300/40 bg-emerald-200/15" : "border-white/15 bg-black/30"}`}
+          >
+            Automation side active
+          </button>
+          <button
+            type="button"
+            onClick={() => onSetActivePanel("trade")}
+            className={`rounded-md border px-2 py-1 ${activePanel === "trade" ? "border-cyan-300/40 bg-cyan-200/15" : "border-white/15 bg-black/30"}`}
+          >
+            Trade side active
+          </button>
+        </div>
+        <div className="mt-2 flex items-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={refreshWalletControlPanel}
+            disabled={panelRefreshBusy}
+            className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 disabled:opacity-50"
+          >
+            {panelRefreshBusy ? "Refreshing…" : "Refresh wallet control"}
+          </button>
+          {panelRefreshStatus ? <span className="text-white/60">{panelRefreshStatus}</span> : null}
         </div>
       </div>
 
@@ -608,23 +624,6 @@ export default function JupiterPanel() {
           <div className="text-[11px] text-white/55">USDC balance</div>
           <div className="text-lg font-semibold">{wallet ? wallet.usdc.toFixed(4) : "—"}</div>
         </div>
-      </div>
-
-      <div className="mb-4 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/30 p-2 text-[11px] lg:max-w-md">
-        <button
-          type="button"
-          onClick={() => onSetActivePanel("arb")}
-          className={`rounded-md border px-2 py-1 ${activePanel === "arb" ? "border-emerald-300/40 bg-emerald-200/15" : "border-white/15 bg-black/30"}`}
-        >
-          Automation side active
-        </button>
-        <button
-          type="button"
-          onClick={() => onSetActivePanel("trade")}
-          className={`rounded-md border px-2 py-1 ${activePanel === "trade" ? "border-cyan-300/40 bg-cyan-200/15" : "border-white/15 bg-black/30"}`}
-        >
-          Trade side active
-        </button>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
