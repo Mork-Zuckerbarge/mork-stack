@@ -113,14 +113,30 @@ def _core_base_url() -> str:
     return raw
 
 def core_reflect(timeout=20) -> bool:
+    base = _core_base_url()
     try:
-        r = requests.post(f"{MORK_CORE_URL}/brain/reflect", json={}, timeout=timeout)
+        r = requests.post(f"{base}/brain/reflect", json={}, timeout=timeout)
         if r.ok:
             return True
         print(f"⚠ core_reflect bad status {r.status_code}: {r.text[:200]}")
+        if base != "http://localhost:8787" and r.status_code == 404 and "<!DOCTYPE html>" in (r.text or ""):
+            print("⚠ core_reflect received HTML 404; retrying against local mork-core at http://localhost:8787")
+            r2 = requests.post("http://localhost:8787/brain/reflect", json={}, timeout=timeout)
+            if r2.ok:
+                return True
+            print(f"⚠ core_reflect local retry bad status {r2.status_code}: {r2.text[:200]}")
         return False
     except Exception as e:
         print(f"⚠ core_reflect failed: {e}")
+        if base != "http://localhost:8787":
+            try:
+                print("⚠ core_reflect retrying local mork-core after exception")
+                r2 = requests.post("http://localhost:8787/brain/reflect", json={}, timeout=timeout)
+                if r2.ok:
+                    return True
+                print(f"⚠ core_reflect local retry bad status {r2.status_code}: {r2.text[:200]}")
+            except Exception as e2:
+                print(f"⚠ core_reflect local retry failed: {e2}")
         return False
 
 def core_compose_payload(payload: dict, timeout=10) -> str:
@@ -190,20 +206,60 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
     # keep Core "noUrls" true and let Sherpa append (your current behavior).
     # If you ever want Core to append URLs, set constraints.noUrls=False per kind=feed.
 
-    # 1) Try POST (new style)
-    try:
-        r = requests.post(f"{base}/x/compose", json=payload, timeout=timeout)
+    compose_bases = [base]
+    if base != "http://localhost:8787":
+        compose_bases.append("http://localhost:8787")
 
-        if r.ok:
-            # Expect JSON { ok:true, tweet:"..." } but stay defensive
+    # 1) Try POST (new style)
+    for i, compose_base in enumerate(compose_bases):
+        try:
+            r = requests.post(f"{compose_base}/x/compose", json=payload, timeout=timeout)
+
+            if r.ok:
+                # Expect JSON { ok:true, tweet:"..." } but stay defensive
+                if "application/json" in (r.headers.get("content-type") or ""):
+                    j = r.json() or {}
+                    out = (j.get("tweet") or j.get("text") or "").strip()
+                else:
+                    out = (r.text or "").strip()
+
+                # final cleanups (safe)
+                out = out.strip().strip("\u200b")
+
+                # unwrap quotes
+                if (out.startswith('"') and out.endswith('"')) or (out.startswith("'") and out.endswith("'")):
+                    out = out[1:-1].strip()
+
+                return out[: int(payload.get("maxChars", 260))]
+
+            print(f"⚠ core_compose bad status {r.status_code}: {r.text[:200]}")
+            if i + 1 < len(compose_bases):
+                print("⚠ core_compose retrying against local mork-core at http://localhost:8787")
+        except Exception as e:
+            print(f"⚠ core_compose POST failed: {e}")
+            if i + 1 < len(compose_bases):
+                print("⚠ core_compose retrying local mork-core after exception")
+
+    # 2) Fallback to GET (old style)
+    for i, compose_base in enumerate(compose_bases):
+        try:
+            mode = (payload.get("mode") or payload.get("kind") or "observation")
+            r = requests.get(
+                f"{compose_base}/x/compose",
+                params={"mode": mode},
+                timeout=min(5, timeout),
+            )
+            if not r.ok:
+                print(f"⚠ core_compose GET bad status {r.status_code}: {r.text[:200]}")
+                if i + 1 < len(compose_bases):
+                    print("⚠ core_compose GET retrying against local mork-core at http://localhost:8787")
+                continue
+
             if "application/json" in (r.headers.get("content-type") or ""):
                 j = r.json() or {}
                 out = (j.get("tweet") or j.get("text") or "").strip()
             else:
                 out = (r.text or "").strip()
-
-            # final cleanups (safe)
-            out = out.strip().strip("\u200b")
 
             # unwrap quotes
             if (out.startswith('"') and out.endswith('"')) or (out.startswith("'") and out.endswith("'")):
@@ -211,38 +267,11 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
 
             return out[: int(payload.get("maxChars", 260))]
 
-        print(f"⚠ core_compose bad status {r.status_code}: {r.text[:200]}")
-
-    except Exception as e:
-        print(f"⚠ core_compose POST failed: {e}")
-
-    # 2) Fallback to GET (old style)
-    try:
-        mode = (payload.get("mode") or payload.get("kind") or "observation")
-        r = requests.get(
-            f"{base}/x/compose",
-            params={"mode": mode},
-            timeout=min(5, timeout),
-        )
-        if not r.ok:
-            print(f"⚠ core_compose GET bad status {r.status_code}: {r.text[:200]}")
-            return ""
-
-        if "application/json" in (r.headers.get("content-type") or ""):
-            j = r.json() or {}
-            out = (j.get("tweet") or j.get("text") or "").strip()
-        else:
-            out = (r.text or "").strip()
-
-        # unwrap quotes
-        if (out.startswith('"') and out.endswith('"')) or (out.startswith("'") and out.endswith("'")):
-            out = out[1:-1].strip()
-
-        return out[: int(payload.get("maxChars", 260))]
-
-    except Exception as e:
-        print(f"⚠ core_compose GET failed: {e}")
-        return ""
+        except Exception as e:
+            print(f"⚠ core_compose GET failed: {e}")
+            if i + 1 < len(compose_bases):
+                print("⚠ core_compose GET retrying local mork-core after exception")
+    return ""
 
 def _wrap_280(s: str, max_len: int = 260) -> str:
     # Preserve newlines for tweet formatting, but collapse repeated spaces
@@ -2189,22 +2218,9 @@ class TwitterBot:
             if tweet_text:
                 return _wrap_280(tweet_text, 260), meme_path
 
-            # 2) Local fallback if Core is unreachable
-            openers = [
-                "I found this and it found me back.",
-                "This meme has the emotional texture of smoked regret.",
-                "A small, sincere ache, captioned:",
-                "I don’t know why this is true, but it is:",
-                "The universe sent me this file:",
-            ]
-            closers = [
-                "Anyway. Pass the sauce.",
-                "Anyway. Onward, reluctantly.",
-                "I’ll be in the condiment aisle if you need me.",
-                "This is not advice. This is seasoning.",
-                "Tell me what you see.",
-            ]
-            fallback = f"{random.choice(openers)}\n{context}\n{random.choice(closers)}"
+            # 2) Local fallback if Core is unreachable.
+            # Avoid fixed canned meme captions; use context directly as last-resort.
+            fallback = context or base
             return _wrap_280(fallback, 260), meme_path
 
         except Exception as e:
