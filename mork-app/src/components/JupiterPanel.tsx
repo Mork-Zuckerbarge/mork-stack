@@ -580,9 +580,10 @@ export default function JupiterPanel() {
 
   return (
     <div className="rounded-3xl border border-amber-300/20 bg-gradient-to-b from-amber-500/10 to-transparent p-5">
-      <div className="mb-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold">wallet control</h2>
-        <div className="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/30 p-2 text-[11px] lg:max-w-md">
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+          <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/30 p-2 text-[11px] lg:max-w-md">
           <button
             type="button"
             onClick={() => onSetActivePanel("arb")}
@@ -597,13 +598,12 @@ export default function JupiterPanel() {
           >
             Trade side active
           </button>
-        </div>
-        <div className="mt-2 flex items-center gap-2 text-xs">
+          </div>
           <button
             type="button"
             onClick={refreshWalletControlPanel}
             disabled={panelRefreshBusy}
-            className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 disabled:opacity-50"
+            className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-xs disabled:opacity-50"
           >
             {panelRefreshBusy ? "Refreshing…" : "Refresh wallet control"}
           </button>
