@@ -106,7 +106,6 @@ export default function ChatPanel() {
           "show services",
           "start arb",
           "stop sherpa",
-          "hey tweet this: gm from the bunker",
           "post this in telegram: gm chat",
           "go buy $2 of $spx",
         ].map((preset) => (
@@ -125,7 +124,7 @@ export default function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder="Try: show services | start arb | hey tweet this: ... | go buy $2 of $spx"
+          placeholder="Try: show services | start arb | post this in telegram: ... | go buy $2 of <mint>"
           className="flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 outline-none"
         />
         <button

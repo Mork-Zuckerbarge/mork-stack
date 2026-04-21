@@ -68,12 +68,6 @@ type ExecutionAuthority = {
 type RuntimeStatus = "running" | "stopped";
 type ActivePanel = "arb" | "trade";
 
-type WalletProvisioning = {
-  status: "provisioned_existing" | "needs_setup";
-  address: string | null;
-  source: "MORK_WALLET" | "MORK_WALLET_SECRET_KEY" | "unconfigured";
-};
-
 type PoolWatchMode = "all_available";
 type RouteMode = "jupiter" | "direct";
 type StrategyEngines = {
@@ -166,9 +160,7 @@ export default function JupiterPanel() {
   const [execution, setExecution] = useState<ExecutionAuthority | null>(null);
   const [executionBusy, setExecutionBusy] = useState(false);
   const [executionStatus, setExecutionStatus] = useState("");
-  const [walletProvisioning, setWalletProvisioning] = useState<WalletProvisioning | null>(null);
   const [walletRefreshBusy, setWalletRefreshBusy] = useState(false);
-  const [walletRefreshStatus, setWalletRefreshStatus] = useState("");
   const [arbStatus, setArbStatus] = useState<RuntimeStatus>("stopped");
   const [panelRefreshBusy, setPanelRefreshBusy] = useState(false);
   const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
@@ -291,25 +283,21 @@ export default function JupiterPanel() {
             activePanel?: ActivePanel;
             strategyEngines?: StrategyEngines;
           };
-          walletProvisioning?: WalletProvisioning;
         };
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
         setExecution(null);
         setArbStatus("stopped");
-        setWalletProvisioning(null);
         return;
       }
       setExecution(data.state.controls.executionAuthority);
       setArbStatus(data.state.arb?.status === "running" ? "running" : "stopped");
       setActivePanel(data.state.controls.activePanel === "arb" ? "arb" : "trade");
-      setWalletProvisioning(data.state.walletProvisioning ?? null);
       setStrategyEngines(data.state.controls.strategyEngines ?? null);
     } catch {
       setExecution(null);
       setArbStatus("stopped");
       setActivePanel("trade");
-      setWalletProvisioning(null);
       setStrategyEngines(null);
     }
   }, []);
@@ -317,18 +305,14 @@ export default function JupiterPanel() {
   const refreshWalletMemory = useCallback(async () => {
     if (walletRefreshBusy) return;
     setWalletRefreshBusy(true);
-    setWalletRefreshStatus("");
     try {
       const res = await fetch("/api/wallet/refresh", { method: "POST" });
       const data = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) {
-        setWalletRefreshStatus(data.error || `Wallet refresh failed (${res.status})`);
       } else {
-        setWalletRefreshStatus("Wallet memory refreshed");
         void loadExecution();
       }
     } catch {
-      setWalletRefreshStatus("Wallet refresh failed");
     } finally {
       setWalletRefreshBusy(false);
     }
@@ -649,8 +633,6 @@ export default function JupiterPanel() {
           execution={execution}
           busy={executionBusy}
           status={executionStatus}
-          walletProvisioning={walletProvisioning}
-          walletRefreshStatus={walletRefreshStatus}
           strategyEngines={strategyEngines}
           arbPaused={arbPaused}
           onSave={saveExecution}
@@ -902,8 +884,6 @@ function ExecutionControls({
   execution,
   busy,
   status,
-  walletProvisioning,
-  walletRefreshStatus,
   strategyEngines,
   arbPaused,
   onSave,
@@ -912,8 +892,6 @@ function ExecutionControls({
   execution: ExecutionAuthority | null;
   busy: boolean;
   status: string;
-  walletProvisioning: WalletProvisioning | null;
-  walletRefreshStatus: string;
   strategyEngines: StrategyEngines | null;
   arbPaused: boolean;
   onSave: (input: ExecutionAuthority) => void;
@@ -998,18 +976,6 @@ function ExecutionControls({
           {allowlistLoadStatus ? <p className="text-[11px] text-white/60">{allowlistLoadStatus}</p> : null}
           <label className="text-white/70">Cooldown (minutes)</label>
           <input value={cooldownMinutes} onChange={(e) => setCooldownMinutes(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
-          <div className="mt-1 rounded-xl bg-black/30 p-2 text-white/70">
-            <div>
-              Wallet Provisioning: {" "}
-              {walletProvisioning?.status === "provisioned_existing"
-                ? "existing wallet configured"
-                : "needs setup"}
-            </div>
-            <div className="mt-1 break-all">
-              {walletProvisioning?.address || "No wallet configured yet (set MORK_WALLET or MORK_WALLET_SECRET_KEY)."}
-            </div>
-            {walletRefreshStatus ? <p className="mt-1 text-[11px] text-white/60">{walletRefreshStatus}</p> : null}
-          </div>
           <div className="mt-1 rounded-xl border border-white/15 bg-black/30 p-2 text-white/80">
             <div className="mb-2 font-medium text-white/90">Strategy engines</div>
             <div className="space-y-2">
