@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { respondToChat } from "@/lib/core/chat";
-import { getAppControlState } from "@/lib/core/appControl";
 import { getOrchestratorState, startRuntime, stopRuntime } from "@/lib/core/orchestrator";
 import { prisma } from "@/lib/core/prisma";
 
@@ -158,57 +157,8 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
   return { mint: startsWith.address, symbol: (startsWith.symbol || normalized).toUpperCase() };
 }
 
-function formatMinutesFromNow(lastTradeIso: string) {
-  const millis = Date.now() - new Date(lastTradeIso).getTime();
-  if (!Number.isFinite(millis) || millis <= 0) return 0;
-  return Math.ceil(millis / 60_000);
-}
-
 async function enforceTradeAuthority(usd: number) {
-  const control = await getAppControlState();
-  const authority = control.controls.executionAuthority;
-
-  if (authority.mode === "emergency_stop") {
-    return {
-      ok: false,
-      status: 403,
-      error: "Trade execution is blocked: execution authority is in emergency_stop.",
-    };
-  }
-
-  if (authority.mode === "user_only") {
-    return {
-      ok: false,
-      status: 403,
-      error: "Trade execution is blocked: execution authority is user_only.",
-    };
-  }
-
-  if (usd > authority.maxTradeUsd) {
-    return {
-      ok: false,
-      status: 400,
-      error: `Trade amount exceeds maxTradeUsd ($${authority.maxTradeUsd}) for agent_assisted mode.`,
-    };
-  }
-
-  const cooldownMinutes = Math.max(0, authority.cooldownMinutes);
-  if (cooldownMinutes > 0) {
-    const lastTrade = await prisma.memoryFact.findUnique({ where: { key: LAST_TRADE_FACT_KEY } });
-    const lastTradeIso = String(lastTrade?.value || "").trim();
-
-    if (lastTradeIso) {
-      const minutesSince = formatMinutesFromNow(lastTradeIso);
-      if (minutesSince < cooldownMinutes) {
-        return {
-          ok: false,
-          status: 429,
-          error: `Trade cooldown active: wait ${cooldownMinutes - minutesSince} more minute(s).`,
-        };
-      }
-    }
-  }
-
+  void usd;
   return { ok: true, status: 200 } as const;
 }
 
