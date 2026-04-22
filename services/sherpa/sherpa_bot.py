@@ -1021,57 +1021,40 @@ class TwitterBot:
     def scheduler_worker(self):
         print("\n🛠️ Starting scheduler worker (jittered)...")
 
-        # -------------------------
-        # Config knobs (override-friendly)
-        # -------------------------
         ACTIVE_START_HOUR = int(getattr(self, "ACTIVE_START_HOUR", 8))
-        ACTIVE_END_HOUR   = int(getattr(self, "ACTIVE_END_HOUR", 23))   # end is exclusive
-        MIN_GAP_MIN       = int(getattr(self, "MIN_GAP_MIN", 35))       # never schedule sooner than this
+        ACTIVE_END_HOUR = int(getattr(self, "ACTIVE_END_HOUR", 23))
+        min_gap_min = int(getattr(self, "MIN_GAP_MIN", 35))
+        main_base_min = int(getattr(self, "MAIN_BASE_MIN", 240))
+        main_jitter_min = int(getattr(self, "MAIN_JITTER_MIN", 70))
+        obs_base_min = int(getattr(self, "OBS_BASE_MIN", 180))
+        obs_jitter_min = int(getattr(self, "OBS_JITTER_MIN", 60))
+        mention_base_min = int(getattr(self, "MENTION_BASE_MIN", 12))
+        mention_jitter_min = int(getattr(self, "MENTION_JITTER_MIN", 4))
+        mention_sweep_mode = str(getattr(self, "MENTION_SWEEP_MODE", "jitter")).strip().lower()
+        mention_sweep_hour = int(getattr(self, "MENTION_SWEEP_HOUR", 10))
+        mention_sweep_minute = int(getattr(self, "MENTION_SWEEP_MINUTE", 0))
+        daily_mention_cap = int(getattr(self, "DAILY_MENTION_CAP", 2))
 
-        MAIN_BASE_MIN     = int(getattr(self, "MAIN_BASE_MIN", 240))    # ~4h
-        MAIN_JITTER_MIN   = int(getattr(self, "MAIN_JITTER_MIN", 70))   # +/- 70m
-
-        OBS_BASE_MIN      = int(getattr(self, "OBS_BASE_MIN", 180))     # ~3h
-        OBS_JITTER_MIN    = int(getattr(self, "OBS_JITTER_MIN", 60))    # +/- 60m
-
-        MENTION_BASE_MIN  = int(getattr(self, "MENTION_BASE_MIN", 12))  # ~12m
-        MENTION_JITTER_MIN= int(getattr(self, "MENTION_JITTER_MIN", 4)) # +/- 4m
-
-        DAILY_MENTION_CAP = int(getattr(self, "DAILY_MENTION_CAP", 2))
-
-        # Persist character/subject for auto-refill later
         self.scheduler_character = getattr(self, "scheduler_character", None)
-        self.scheduler_subject   = getattr(self, "scheduler_subject", "crypto")
-
-        # State
+        self.scheduler_subject = getattr(self, "scheduler_subject", "crypto")
         self.reply_bank = getattr(self, "reply_bank", [])
         self.last_daily_reply_date = getattr(self, "last_daily_reply_date", None)
+        self.last_mention_sweep_date = getattr(self, "last_mention_sweep_date", None)
         self.daily_replies_sent = getattr(self, "daily_replies_sent", 0)
         self.last_observation_time = getattr(self, "last_observation_time", None)
 
-        # If never tweeted successfully, don't wait forever on first run
         if not getattr(self, "last_successful_tweet", None):
             print("🚀 No previous tweet timestamp found. Setting last_successful_tweet to now.")
             self.last_successful_tweet = datetime.now()
-
         if self.last_observation_time is None:
             self.last_observation_time = datetime.now()
 
-        # -------------------------
-        # Helpers (LOCAL => no NameError)
-        # -------------------------
         def within_active_hours(dt: datetime) -> bool:
-            return (dt.hour >= ACTIVE_START_HOUR) and (dt.hour < ACTIVE_END_HOUR)
+            return ACTIVE_START_HOUR <= dt.hour < ACTIVE_END_HOUR
 
         def push_into_active_window(dt: datetime) -> datetime:
-            """
-            If dt falls outside the active window, push it into the next valid window
-            with a small random offset so it doesn't always hit exactly :00.
-            """
             if within_active_hours(dt):
                 return dt
-
-            # too early -> today at ACTIVE_START_HOUR
             if dt.hour < ACTIVE_START_HOUR:
                 return dt.replace(
                     hour=ACTIVE_START_HOUR,
@@ -1079,8 +1062,6 @@ class TwitterBot:
                     second=random.randint(0, 20),
                     microsecond=0,
                 )
-
-            # too late -> tomorrow morning
             nxt = dt + timedelta(days=1)
             return nxt.replace(
                 hour=ACTIVE_START_HOUR,
@@ -1089,36 +1070,51 @@ class TwitterBot:
                 microsecond=0,
             )
 
-    def schedule_next(base_min: int, jitter_min: int, min_gap_min: int = MIN_GAP_MIN) -> datetime:
-        """
-        Schedule next runtime with jitter, clamped so it never becomes negative/silly,
-        then pushed into active window.
-        """
-        now = datetime.now()
-        jitter = random.randint(-jitter_min, jitter_min)
-        raw = base_min + jitter
+        def schedule_next(base_min: int, jitter_min: int, min_gap: int) -> datetime:
+            now = datetime.now()
+            jitter = random.randint(-jitter_min, jitter_min)
+            delta = max(min_gap, min(base_min + jitter, base_min + jitter_min))
+            return push_into_active_window(now + timedelta(minutes=delta))
 
-        # clamp: at least min_gap_min; at most base_min + jitter_min
-        mins = max(min_gap_min, min(raw, base_min + jitter_min))
-        dt = now + timedelta(minutes=mins)
-        return push_into_active_window(dt)
+        def next_daily_mention_sweep(after_dt: datetime) -> datetime:
+            candidate = after_dt.replace(
+                hour=mention_sweep_hour,
+                minute=mention_sweep_minute,
+                second=0,
+                microsecond=0,
+            )
+            if candidate <= after_dt:
+                candidate = candidate + timedelta(days=1)
+            return candidate
 
-        # -------------------------
-        # Initial schedules (avoid instant posting on boot)
-        # -------------------------
-        next_main_at     = schedule_next(base_min=45, jitter_min=20, min_gap_min=MIN_GAP_MIN)
-        next_obs_at      = schedule_next(base_min=60, jitter_min=25, min_gap_min=MIN_GAP_MIN)
-        next_mentions_at = schedule_next(base_min=MENTION_BASE_MIN, jitter_min=MENTION_JITTER_MIN, min_gap_min=3)
+        next_main_at = schedule_next(base_min=45, jitter_min=20, min_gap=min_gap_min)
+        next_obs_at = schedule_next(base_min=60, jitter_min=25, min_gap=min_gap_min)
+        now_boot = datetime.now()
+        if mention_sweep_mode == "daily":
+            already_ran_today = (
+                isinstance(self.last_mention_sweep_date, str)
+                and self.last_mention_sweep_date == now_boot.date().isoformat()
+            )
+            if (not already_ran_today) and (
+                (now_boot.hour > mention_sweep_hour)
+                or (now_boot.hour == mention_sweep_hour and now_boot.minute >= mention_sweep_minute)
+            ):
+                next_mentions_at = now_boot
+            else:
+                next_mentions_at = next_daily_mention_sweep(now_boot)
+        else:
+            next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=3)
 
         print(f"⏱ Next MAIN tweet    : {next_main_at}")
         print(f"⏱ Next OBS tweet     : {next_obs_at}")
         print(f"⏱ Next mention sweep : {next_mentions_at}")
+        if mention_sweep_mode == "daily":
+            print(f"📬 Mention sweep mode: daily @ {mention_sweep_hour:02d}:{mention_sweep_minute:02d}")
+        else:
+            print(f"📬 Mention sweep mode: jittered every ~{mention_base_min}m (±{mention_jitter_min}m)")
         print(f"🕒 Active hours      : {ACTIVE_START_HOUR:02d}:00–{ACTIVE_END_HOUR:02d}:00")
-        print(f"🧾 Daily mention cap  : {DAILY_MENTION_CAP}")
+        print(f"🧾 Daily mention cap  : {daily_mention_cap}")
 
-        # -------------------------
-        # Loop
-        # -------------------------
         while self.scheduler_running:
             try:
                 now = datetime.now()
@@ -1139,12 +1135,16 @@ class TwitterBot:
                 # (A) Mentions sweep (reply only to mentions; bank overflow)
                 # -------------------------
                 if now >= next_mentions_at:
-                    next_mentions_at = schedule_next(MENTION_BASE_MIN, MENTION_JITTER_MIN, min_gap_min=3)
-
-                    if self.daily_replies_sent >= DAILY_MENTION_CAP:
-                        print(f"🧾 Mention sweep: daily cap reached ({self.daily_replies_sent}/{DAILY_MENTION_CAP}). Banking only.")
+                    if mention_sweep_mode == "daily":
+                        self.last_mention_sweep_date = now.date().isoformat()
+                        next_mentions_at = next_daily_mention_sweep(now)
                     else:
-                        print(f"\n📬 Mention sweep @ {now.strftime('%H:%M:%S')} (daily {self.daily_replies_sent}/{DAILY_MENTION_CAP})")
+                        next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=3)
+
+                    if self.daily_replies_sent >= daily_mention_cap:
+                        print(f"🧾 Mention sweep: daily cap reached ({self.daily_replies_sent}/{daily_mention_cap}). Banking only.")
+                    else:
+                        print(f"\n📬 Mention sweep @ {now.strftime('%H:%M:%S')} (daily {self.daily_replies_sent}/{daily_mention_cap})")
 
                     pending = []
 
@@ -1174,7 +1174,7 @@ class TwitterBot:
 
                     handled = 0
                     for m in pending:
-                        if self.daily_replies_sent >= DAILY_MENTION_CAP:
+                        if self.daily_replies_sent >= daily_mention_cap:
                             self.reply_bank.append(m)
                             continue
 
@@ -1195,14 +1195,14 @@ class TwitterBot:
                             print(f"❌ Failed replying to a mention: {e}")
                             self.reply_bank.append(m)
 
-                    print(f"✅ Mention sweep done. Sent {handled}. Banked {len(self.reply_bank)}. Daily {self.daily_replies_sent}/{DAILY_MENTION_CAP}.")
+                    print(f"✅ Mention sweep done. Sent {handled}. Banked {len(self.reply_bank)}. Daily {self.daily_replies_sent}/{daily_mention_cap}.")
 
                 # -------------------------
                 # (B) Observation tweet (Mork Core) (jittered)
                 # -------------------------
                 now = datetime.now()
                 if now >= next_obs_at:
-                    next_obs_at = schedule_next(OBS_BASE_MIN, OBS_JITTER_MIN, min_gap_min=MIN_GAP_MIN)
+                    next_obs_at = schedule_next(obs_base_min, obs_jitter_min, min_gap=min_gap_min)
 
                     if not within_active_hours(now):
                         print("🌙 Observation skipped (outside active hours).")
@@ -1244,7 +1244,7 @@ class TwitterBot:
                 # -------------------------
                 now = datetime.now()
                 if now >= next_main_at:
-                    next_main_at = schedule_next(MAIN_BASE_MIN, MAIN_JITTER_MIN, min_gap_min=MIN_GAP_MIN)
+                    next_main_at = schedule_next(main_base_min, main_jitter_min, min_gap=min_gap_min)
 
                     if not within_active_hours(now):
                         print("🌙 Main tweet skipped (outside active hours).")
@@ -1850,14 +1850,28 @@ class TwitterBot:
                 },
             ]
 
-            response = self.client.chat.completions.create(
-                model=character["model"],
-                messages=messages,
-                max_tokens=200,
-                temperature=1.0,
-                presence_penalty=0.6,
-                frequency_penalty=0.6,
-            )
+            try:
+                response = self.client.chat.completions.create(
+                    model=character["model"],
+                    messages=messages,
+                    max_tokens=200,
+                    temperature=1.0,
+                    presence_penalty=0.6,
+                    frequency_penalty=0.6,
+                )
+            except Exception as e:
+                print(f"⚠ OpenAI compose failed ({type(e).__name__}); falling back to Mork Core/local.")
+                payload = {
+                    "kind": "observation",
+                    "text": (topic or "").strip(),
+                    "maxChars": max_chars_for_core,
+                }
+                fallback = core_compose_payload(payload, timeout=8) or _wrap_280((topic or "…").strip() or "…", max_chars_for_core)
+                if article_url and article_url not in fallback:
+                    fallback = _wrap_280(f"{fallback} {article_url}", 280)
+                self.tweet_count += 1
+                self.last_tweet_time = datetime.now()
+                return fallback
 
             tweet_text = (response.choices[0].message.content or "").strip()
 
@@ -2219,8 +2233,14 @@ class TwitterBot:
                 return _wrap_280(tweet_text, 260), meme_path
 
             # 2) Local fallback if Core is unreachable.
-            # Avoid fixed canned meme captions; use context directly as last-resort.
-            fallback = context or base
+            # Keep this human-readable so we never tweet just a raw filename.
+            options = [
+                f"Filed under bunker cinema: {context}.",
+                f"Tonight's transmission: {context}.",
+                f"Archive pull: {context}.",
+                f"Unscheduled meme dispatch: {context}.",
+            ]
+            fallback = random.choice(options) if context else "Unscheduled meme dispatch."
             return _wrap_280(fallback, 260), meme_path
 
         except Exception as e:
@@ -2420,35 +2440,59 @@ class TwitterBot:
             me_id = str(me.id)
 
             def _local_reply(text: str) -> str:
-
                 tw = (text or "").strip()
                 tw = re.sub(r"\s+", " ", tw)
-                tw = tw[:220]  # keep context short
+                tw = tw[:220]
 
-                edge = morkcore_edge_line()
-                opener = random.choice([
-                    "I heard you.",
-                    "I see you.",
-                    "That landed like a spoon in an empty bowl.",
-                    "You just tapped the glass of my little aquarium mind.",
-                    "Yes. That’s the kind of human noise I can work with.",
-                ])
-                closer = random.choice([
-                    "Tell me one detail you left out.",
-                    "What’s the part you’re not saying?",
-                    "What do you actually want here?",
-                    "Give me one more clue and I’ll sharpen it.",
-                    "Anyway. I’m listening.",
-                ])
+                prompt = (
+                    "Compose a direct reply tweet in character.\n"
+                    "Rules: do not quote, copy, or restate the user's words.\n"
+                    "No hashtags, no emojis, no URLs, no canned opener/closer.\n"
+                    "Write 1-3 natural sentences that move the conversation forward.\n"
+                    "Reference ideas at a high level only.\n\n"
+                    f"Context (do not quote): {tw}"
+                )
 
-                parts = [opener]
-                if tw:
-                    parts.append(f"“{tw}”")
-                if edge and random.random() < 0.35:
-                    parts.append(edge)
-                parts.append(closer)
+                out = core_compose_payload(
+                    {
+                        "kind": "reply",
+                        "text": prompt,
+                        "maxChars": 260,
+                        "constraints": {
+                            "noQuoteUserText": True,
+                            "noHashtags": True,
+                            "noEmojis": True,
+                            "noUrls": True,
+                        },
+                    },
+                    timeout=9,
+                ) or ""
+                return _wrap_280(out, 260) if out else ""
 
-                return _wrap_280(" ".join(parts), 260)
+            def _strip_source_echo(reply_text: str, source_text: str) -> str:
+                out = (reply_text or "").strip()
+                src = (source_text or "").strip()
+                if not out or not src:
+                    return out
+
+                # remove quoted snippets outright
+                out = re.sub(r"[\"“”']([^\"“”']{4,})[\"“”']", "", out).strip()
+
+                src_words = set(re.findall(r"[a-z0-9']{4,}", src.lower()))
+                if not src_words:
+                    return _wrap_280(out, 260)
+
+                kept_sentences = []
+                for s in re.split(r"(?<=[.!?])\s+", out):
+                    s_words = set(re.findall(r"[a-z0-9']{4,}", s.lower()))
+                    if not s_words:
+                        continue
+                    overlap = len(src_words.intersection(s_words)) / max(1, len(s_words))
+                    if overlap < 0.55:
+                        kept_sentences.append(s.strip())
+
+                cleaned = " ".join([s for s in kept_sentences if s]).strip() or out
+                return _wrap_280(cleaned, 260)
 
             def _ai_reply(text: str) -> str:
                 """OpenAI reply generator (ONLY used if enabled + client exists)."""
@@ -2481,17 +2525,26 @@ class TwitterBot:
                 """
                 # Always start from the safe local reply
                 base = _local_reply(text)
+                if base:
+                    base = _strip_source_echo(base, text)
 
                 # Only use OpenAI if explicitly enabled AND initialized
                 if USE_OPENAI and getattr(self, "client", None):
                     try:
                         out = _ai_reply(text)
                         if out:
-                            return _wrap_280(out, 260)
+                            return _strip_source_echo(_wrap_280(out, 260), text)
                     except Exception as e:
                         print(f"⚠️ OpenAI reply failed, using local reply: {e}")
 
-                return base
+                if base:
+                    return base
+
+                # Last-resort non-echo fallback (no source text)
+                return _wrap_280(
+                    "Good point. I see the direction you're pushing this—what outcome are you optimizing for right now?",
+                    260,
+                )
 
 
             # 1) Try backlog first (tweet_ids we saved yesterday), keeping only <23h
