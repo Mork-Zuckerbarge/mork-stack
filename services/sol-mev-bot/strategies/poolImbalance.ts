@@ -11,6 +11,7 @@ const LAMPORTS_PER_SOL = 1_000_000_000;
 const JUPITER_API = 'https://quote-api.jup.ag/v6';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const USDC_DECIMALS = 1_000_000;
 
 interface PoolInfo {
   address: string;
@@ -46,7 +47,7 @@ export class PoolImbalanceDetector {
 
   // Track recently processed pools to avoid duplicate signals
   private recentlyActed: Map<string, number> = new Map();
-  private cooldownMs = 15_000; // 15s cooldown per pool
+  private cooldownMs = Math.max(parseInt(process.env.AMM_POOL_COOLDOWN_MS ?? '5000', 10), 500);
   private swapSeen = 0;
   private swapPassedCooldown = 0;
   private lastSwapSummaryTs = Date.now();
@@ -89,6 +90,7 @@ export class PoolImbalanceDetector {
 
   private async handleSwapEvent(event: { dex: string; signature: string; logs: string[] }): Promise<void> {
     this.swapSeen += 1;
+    this.maybeLogSwapSummary();
 
     // Parse pool address from logs
     const poolAddress = this.extractPoolAddress(event.logs);
@@ -98,8 +100,6 @@ export class PoolImbalanceDetector {
     const lastActed = this.recentlyActed.get(poolAddress);
     if (lastActed && Date.now() - lastActed < this.cooldownMs) return;
     this.swapPassedCooldown += 1;
-
-    this.maybeLogSwapSummary();
 
     // Fetch current pool state and compare to Jupiter aggregate
     const imbalance = await this.detectImbalance(poolAddress, event.dex);
@@ -201,11 +201,37 @@ export class PoolImbalanceDetector {
   }
 
   private async fetchPoolSpotPrice(poolAddress: string, dex: string): Promise<number | null> {
-    // This is a placeholder — replace with actual SDK calls per DEX
-    // Example for Raydium:
-    //   const info = await Liquidity.fetchInfo({ connection, poolKeys })
-    //   return info.baseReserve / info.quoteReserve * (10 ** quoteDecimals) / (10 ** baseDecimals)
-    return null;
+    // Uses Jupiter's venue-restricted quoting as a pragmatic fallback when
+    // direct pool reserve decoding is not wired yet.
+    // This keeps price discovery live/informed instead of always returning null.
+    const dexAlias = this.toJupiterDexAlias(dex);
+    if (!dexAlias) {
+      logger.debug('Unsupported DEX for pool spot quote', { dex, pool: poolAddress.slice(0, 8) });
+      return null;
+    }
+
+    try {
+      const res = await axios.get(`${JUPITER_API}/quote`, {
+        params: {
+          inputMint: SOL_MINT,
+          outputMint: USDC_MINT,
+          amount: LAMPORTS_PER_SOL,
+          slippageBps: 10,
+          dexes: dexAlias,
+          onlyDirectRoutes: true,
+        },
+        timeout: 2500,
+      });
+      const outAmountRaw = res.data?.outAmount;
+      if (typeof outAmountRaw !== 'string') return null;
+
+      const outAmount = Number(outAmountRaw);
+      if (!Number.isFinite(outAmount) || outAmount <= 0) return null;
+
+      return outAmount / USDC_DECIMALS;
+    } catch {
+      return null;
+    }
   }
 
   private async fetchJupiterPrice(): Promise<number | null> {
@@ -236,6 +262,14 @@ export class PoolImbalanceDetector {
     } catch {
       return null;
     }
+  }
+
+  private toJupiterDexAlias(dex: string): string | null {
+    const normalized = dex.trim().toLowerCase();
+    if (normalized.includes('raydium')) return 'Raydium';
+    if (normalized.includes('orca')) return 'Orca V2';
+    if (normalized.includes('meteora')) return 'Meteora DLMM';
+    return null;
   }
 
   private extractPoolAddress(logs: string[]): string | null {
