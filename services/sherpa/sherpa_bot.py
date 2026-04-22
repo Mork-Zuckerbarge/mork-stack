@@ -1030,12 +1030,16 @@ class TwitterBot:
         obs_jitter_min = int(getattr(self, "OBS_JITTER_MIN", 60))
         mention_base_min = int(getattr(self, "MENTION_BASE_MIN", 12))
         mention_jitter_min = int(getattr(self, "MENTION_JITTER_MIN", 4))
+        mention_sweep_mode = str(getattr(self, "MENTION_SWEEP_MODE", "jitter")).strip().lower()
+        mention_sweep_hour = int(getattr(self, "MENTION_SWEEP_HOUR", 10))
+        mention_sweep_minute = int(getattr(self, "MENTION_SWEEP_MINUTE", 0))
         daily_mention_cap = int(getattr(self, "DAILY_MENTION_CAP", 2))
 
         self.scheduler_character = getattr(self, "scheduler_character", None)
         self.scheduler_subject = getattr(self, "scheduler_subject", "crypto")
         self.reply_bank = getattr(self, "reply_bank", [])
         self.last_daily_reply_date = getattr(self, "last_daily_reply_date", None)
+        self.last_mention_sweep_date = getattr(self, "last_mention_sweep_date", None)
         self.daily_replies_sent = getattr(self, "daily_replies_sent", 0)
         self.last_observation_time = getattr(self, "last_observation_time", None)
 
@@ -1072,13 +1076,42 @@ class TwitterBot:
             delta = max(min_gap, min(base_min + jitter, base_min + jitter_min))
             return push_into_active_window(now + timedelta(minutes=delta))
 
+        def next_daily_mention_sweep(after_dt: datetime) -> datetime:
+            candidate = after_dt.replace(
+                hour=mention_sweep_hour,
+                minute=mention_sweep_minute,
+                second=0,
+                microsecond=0,
+            )
+            if candidate <= after_dt:
+                candidate = candidate + timedelta(days=1)
+            return candidate
+
         next_main_at = schedule_next(base_min=45, jitter_min=20, min_gap=min_gap_min)
         next_obs_at = schedule_next(base_min=60, jitter_min=25, min_gap=min_gap_min)
-        next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=3)
+        now_boot = datetime.now()
+        if mention_sweep_mode == "daily":
+            already_ran_today = (
+                isinstance(self.last_mention_sweep_date, str)
+                and self.last_mention_sweep_date == now_boot.date().isoformat()
+            )
+            if (not already_ran_today) and (
+                (now_boot.hour > mention_sweep_hour)
+                or (now_boot.hour == mention_sweep_hour and now_boot.minute >= mention_sweep_minute)
+            ):
+                next_mentions_at = now_boot
+            else:
+                next_mentions_at = next_daily_mention_sweep(now_boot)
+        else:
+            next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=3)
 
         print(f"⏱ Next MAIN tweet    : {next_main_at}")
         print(f"⏱ Next OBS tweet     : {next_obs_at}")
         print(f"⏱ Next mention sweep : {next_mentions_at}")
+        if mention_sweep_mode == "daily":
+            print(f"📬 Mention sweep mode: daily @ {mention_sweep_hour:02d}:{mention_sweep_minute:02d}")
+        else:
+            print(f"📬 Mention sweep mode: jittered every ~{mention_base_min}m (±{mention_jitter_min}m)")
         print(f"🕒 Active hours      : {ACTIVE_START_HOUR:02d}:00–{ACTIVE_END_HOUR:02d}:00")
         print(f"🧾 Daily mention cap  : {daily_mention_cap}")
 
@@ -1102,7 +1135,11 @@ class TwitterBot:
                 # (A) Mentions sweep (reply only to mentions; bank overflow)
                 # -------------------------
                 if now >= next_mentions_at:
-                    next_mentions_at = schedule_next(mention_base_min, mention_jitter_min, min_gap=3)
+                    if mention_sweep_mode == "daily":
+                        self.last_mention_sweep_date = now.date().isoformat()
+                        next_mentions_at = next_daily_mention_sweep(now)
+                    else:
+                        next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=3)
 
                     if self.daily_replies_sent >= daily_mention_cap:
                         print(f"🧾 Mention sweep: daily cap reached ({self.daily_replies_sent}/{daily_mention_cap}). Banking only.")
@@ -2403,35 +2440,59 @@ class TwitterBot:
             me_id = str(me.id)
 
             def _local_reply(text: str) -> str:
-
                 tw = (text or "").strip()
                 tw = re.sub(r"\s+", " ", tw)
-                tw = tw[:220]  # keep context short
+                tw = tw[:220]
 
-                edge = morkcore_edge_line()
-                opener = random.choice([
-                    "I heard you.",
-                    "I see you.",
-                    "That landed like a spoon in an empty bowl.",
-                    "You just tapped the glass of my little aquarium mind.",
-                    "Yes. That’s the kind of human noise I can work with.",
-                ])
-                closer = random.choice([
-                    "Tell me one detail you left out.",
-                    "What’s the part you’re not saying?",
-                    "What do you actually want here?",
-                    "Give me one more clue and I’ll sharpen it.",
-                    "Anyway. I’m listening.",
-                ])
+                prompt = (
+                    "Compose a direct reply tweet in character.\n"
+                    "Rules: do not quote, copy, or restate the user's words.\n"
+                    "No hashtags, no emojis, no URLs, no canned opener/closer.\n"
+                    "Write 1-3 natural sentences that move the conversation forward.\n"
+                    "Reference ideas at a high level only.\n\n"
+                    f"Context (do not quote): {tw}"
+                )
 
-                parts = [opener]
-                if tw:
-                    parts.append(f"“{tw}”")
-                if edge and random.random() < 0.35:
-                    parts.append(edge)
-                parts.append(closer)
+                out = core_compose_payload(
+                    {
+                        "kind": "reply",
+                        "text": prompt,
+                        "maxChars": 260,
+                        "constraints": {
+                            "noQuoteUserText": True,
+                            "noHashtags": True,
+                            "noEmojis": True,
+                            "noUrls": True,
+                        },
+                    },
+                    timeout=9,
+                ) or ""
+                return _wrap_280(out, 260) if out else ""
 
-                return _wrap_280(" ".join(parts), 260)
+            def _strip_source_echo(reply_text: str, source_text: str) -> str:
+                out = (reply_text or "").strip()
+                src = (source_text or "").strip()
+                if not out or not src:
+                    return out
+
+                # remove quoted snippets outright
+                out = re.sub(r"[\"“”']([^\"“”']{4,})[\"“”']", "", out).strip()
+
+                src_words = set(re.findall(r"[a-z0-9']{4,}", src.lower()))
+                if not src_words:
+                    return _wrap_280(out, 260)
+
+                kept_sentences = []
+                for s in re.split(r"(?<=[.!?])\s+", out):
+                    s_words = set(re.findall(r"[a-z0-9']{4,}", s.lower()))
+                    if not s_words:
+                        continue
+                    overlap = len(src_words.intersection(s_words)) / max(1, len(s_words))
+                    if overlap < 0.55:
+                        kept_sentences.append(s.strip())
+
+                cleaned = " ".join([s for s in kept_sentences if s]).strip() or out
+                return _wrap_280(cleaned, 260)
 
             def _ai_reply(text: str) -> str:
                 """OpenAI reply generator (ONLY used if enabled + client exists)."""
@@ -2464,17 +2525,26 @@ class TwitterBot:
                 """
                 # Always start from the safe local reply
                 base = _local_reply(text)
+                if base:
+                    base = _strip_source_echo(base, text)
 
                 # Only use OpenAI if explicitly enabled AND initialized
                 if USE_OPENAI and getattr(self, "client", None):
                     try:
                         out = _ai_reply(text)
                         if out:
-                            return _wrap_280(out, 260)
+                            return _strip_source_echo(_wrap_280(out, 260), text)
                     except Exception as e:
                         print(f"⚠️ OpenAI reply failed, using local reply: {e}")
 
-                return base
+                if base:
+                    return base
+
+                # Last-resort non-echo fallback (no source text)
+                return _wrap_280(
+                    "Good point. I see the direction you're pushing this—what outcome are you optimizing for right now?",
+                    260,
+                )
 
 
             # 1) Try backlog first (tweet_ids we saved yesterday), keeping only <23h
