@@ -37,17 +37,19 @@ MAX_FETCH = 50
 MAX_AGE_HOURS = 23
 MAX_BACKLOG = 20   # store at most this many tweet IDs for tomorrow
 
-MORK_CORE_URL = os.getenv("MORK_CORE_URL", "http://localhost:8787").rstrip("/")
+MORK_CORE_SERVICE_FALLBACK_URL = os.getenv("MORK_CORE_SERVICE_FALLBACK_URL", "http://mork-core:8790").rstrip("/")
+LOCAL_MORK_CORE_FALLBACK_URL = os.getenv("LOCAL_MORK_CORE_FALLBACK_URL", "http://localhost:8790").rstrip("/")
+MORK_CORE_URL = os.getenv("MORK_CORE_URL", MORK_CORE_SERVICE_FALLBACK_URL).rstrip("/")
 MEME_CORE_REFLECT_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_REFLECT_TIMEOUT_SECONDS", "20"))
 MEME_CORE_COMPOSE_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_COMPOSE_TIMEOUT_SECONDS", "12"))
 USE_OPENAI = str(os.getenv("USE_OPENAI", "0")).strip().lower() in ("1", "true", "yes", "on")
 def _get_core_url():
     u = (os.getenv("MORK_CORE_URL") or "").strip().rstrip("/")
     if not u:
-        return "http://localhost:8787"
+        return MORK_CORE_SERVICE_FALLBACK_URL
     if "<" in u or "IP-OF" in u.upper():
         print(f"⚠ MORK_CORE_URL is a placeholder: '{u}'. Please set a real URL.")
-        return "http://localhost:8787"
+        return MORK_CORE_SERVICE_FALLBACK_URL
     return u
 def _clamp(n, lo, hi):
     return max(lo, min(hi, n))
@@ -96,15 +98,15 @@ def _core_base_url() -> str:
     raw = (MORK_CORE_URL or "").strip().strip('"').strip("'")
     raw = raw.rstrip("/")
 
-    # Common placeholder mistake: "http://<ip-of-mork-core>:8787"
+    # Common placeholder mistake: "http://<ip-of-mork-core>:8790"
     if "<" in raw or ">" in raw:
-        print(f"⚠ MORK_CORE_URL looks like a placeholder: {raw!r}. Falling back to http://localhost:8787")
-        return "http://localhost:8787"
+        print(f"⚠ MORK_CORE_URL looks like a placeholder: {raw!r}. Falling back to {LOCAL_MORK_CORE_FALLBACK_URL}")
+        return LOCAL_MORK_CORE_FALLBACK_URL
 
     # If user accidentally pasted a URL-encoded placeholder (%3c ... %3e)
     if "%3c" in raw.lower() or "%3e" in raw.lower():
-        print(f"⚠ MORK_CORE_URL looks URL-encoded/invalid: {raw!r}. Falling back to http://localhost:8787")
-        return "http://localhost:8787"
+        print(f"⚠ MORK_CORE_URL looks URL-encoded/invalid: {raw!r}. Falling back to {LOCAL_MORK_CORE_FALLBACK_URL}")
+        return LOCAL_MORK_CORE_FALLBACK_URL
 
     if not re.match(r"^https?://", raw):
         print(f"⚠ MORK_CORE_URL missing scheme: {raw!r}. Prepending http://")
@@ -112,32 +114,30 @@ def _core_base_url() -> str:
 
     return raw
 
+def _core_retry_bases(base: str) -> list[str]:
+    out: list[str] = []
+    for candidate in (base, MORK_CORE_SERVICE_FALLBACK_URL, LOCAL_MORK_CORE_FALLBACK_URL):
+        c = (candidate or "").strip().rstrip("/")
+        if c and c not in out:
+            out.append(c)
+    return out
+
 def core_reflect(timeout=20) -> bool:
     base = _core_base_url()
-    try:
-        r = requests.post(f"{base}/brain/reflect", json={}, timeout=timeout)
-        if r.ok:
-            return True
-        print(f"⚠ core_reflect bad status {r.status_code}: {r.text[:200]}")
-        if base != "http://localhost:8787" and r.status_code == 404 and "<!DOCTYPE html>" in (r.text or ""):
-            print("⚠ core_reflect received HTML 404; retrying against local mork-core at http://localhost:8787")
-            r2 = requests.post("http://localhost:8787/brain/reflect", json={}, timeout=timeout)
-            if r2.ok:
+    reflect_bases = _core_retry_bases(base)
+    for i, reflect_base in enumerate(reflect_bases):
+        try:
+            r = requests.post(f"{reflect_base}/brain/reflect", json={}, timeout=timeout)
+            if r.ok:
                 return True
-            print(f"⚠ core_reflect local retry bad status {r2.status_code}: {r2.text[:200]}")
-        return False
-    except Exception as e:
-        print(f"⚠ core_reflect failed: {e}")
-        if base != "http://localhost:8787":
-            try:
-                print("⚠ core_reflect retrying local mork-core after exception")
-                r2 = requests.post("http://localhost:8787/brain/reflect", json={}, timeout=timeout)
-                if r2.ok:
-                    return True
-                print(f"⚠ core_reflect local retry bad status {r2.status_code}: {r2.text[:200]}")
-            except Exception as e2:
-                print(f"⚠ core_reflect local retry failed: {e2}")
-        return False
+            print(f"⚠ core_reflect bad status {r.status_code} from {reflect_base}: {r.text[:200]}")
+            if i + 1 < len(reflect_bases):
+                print(f"⚠ core_reflect retrying mork-core at {reflect_bases[i + 1]}")
+        except Exception as e:
+            print(f"⚠ core_reflect failed against {reflect_base}: {e}")
+            if i + 1 < len(reflect_bases):
+                print(f"⚠ core_reflect retrying mork-core at {reflect_bases[i + 1]}")
+    return False
 
 def core_compose_payload(payload: dict, timeout=10) -> str:
     """
@@ -206,9 +206,7 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
     # keep Core "noUrls" true and let Sherpa append (your current behavior).
     # If you ever want Core to append URLs, set constraints.noUrls=False per kind=feed.
 
-    compose_bases = [base]
-    if base != "http://localhost:8787":
-        compose_bases.append("http://localhost:8787")
+    compose_bases = _core_retry_bases(base)
 
     # 1) Try POST (new style)
     for i, compose_base in enumerate(compose_bases):
@@ -234,7 +232,7 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
 
             print(f"⚠ core_compose bad status {r.status_code}: {r.text[:200]}")
             if i + 1 < len(compose_bases):
-                print("⚠ core_compose retrying against local mork-core at http://localhost:8787")
+                print(f"⚠ core_compose retrying against local mork-core at {LOCAL_MORK_CORE_FALLBACK_URL}")
         except Exception as e:
             print(f"⚠ core_compose POST failed: {e}")
             if i + 1 < len(compose_bases):
@@ -252,7 +250,7 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
             if not r.ok:
                 print(f"⚠ core_compose GET bad status {r.status_code}: {r.text[:200]}")
                 if i + 1 < len(compose_bases):
-                    print("⚠ core_compose GET retrying against local mork-core at http://localhost:8787")
+                    print(f"⚠ core_compose GET retrying against local mork-core at {LOCAL_MORK_CORE_FALLBACK_URL}")
                 continue
 
             if "application/json" in (r.headers.get("content-type") or ""):

@@ -21,7 +21,7 @@ def normalize_bot_token(raw_token: str) -> str:
 
 BOT_TOKEN = normalize_bot_token(os.getenv("TELEGRAM_BOT_TOKEN", ""))
 CORE_URL = os.getenv("MORK_CORE_URL", "http://127.0.0.1:8790").strip().rstrip("/")
-CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/api/chat/respond").strip() or "/api/chat/respond"
+CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/chat/respond").strip() or "/chat/respond"
 REPLY_MODE = os.getenv("REPLY_MODE", "mentions").strip().lower()  # mentions | all | dm
 if REPLY_MODE not in ("mentions", "all", "dm"):
     REPLY_MODE = "mentions"
@@ -176,7 +176,7 @@ def post_to_chat_endpoint(path: str, payload: dict) -> dict:
 def build_candidate_paths() -> list[str]:
     normalized = CHAT_ENDPOINT if CHAT_ENDPOINT.startswith("/") else f"/{CHAT_ENDPOINT}"
 
-    # Next.js app surface uses /api/chat/respond (default localhost:3000 in this stack).
+    # Next.js app surface uses /api/chat/respond on :3000.
     if ":3000" in CORE_URL:
         candidates: list[str] = []
         if normalized.startswith("/api/"):
@@ -185,11 +185,10 @@ def build_candidate_paths() -> list[str]:
             candidates.append("/api/chat/respond")
         return candidates
 
+    # mork-core first
     candidates: list[str] = []
     if normalized:
         candidates.append(normalized)
-
-    # mork-core compatibility fallback
     if "/chat/respond" not in candidates:
         candidates.append("/chat/respond")
     if "/api/chat/respond" not in candidates:
