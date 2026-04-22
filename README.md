@@ -1,4 +1,23 @@
 # mork-stack
+The all-in-one free app that enalbes you to launch and control agents.
+
+Deploy and manage your own agent.
+The LLM is in the app, no subscription required.
+Manage / post / reply on
+@X  
+@facebook
+@instagram
+@Reddit
+@telegram
+  
+Create or import a wallet to be managed by the agent, while retaining full backend control. Deploy multiple trade strategies as well as use direct agent commands.
+All free on your machine, optional enrichment with 
+@OpenAI and @ElevenLabs.
+Backend language control lets you tune the agent's "Response Logic Flow", and a window in the app lets the user engage the agent directly in the terminal.
+
+Flush modules, check updates, simple launch, local storage only, easy to install, update, and run.
+More massive updates coming.
+Must hold 1000 $BBQ to enable wallet control.
 
 ## Fresh Ubuntu quickstart (one command)
 
