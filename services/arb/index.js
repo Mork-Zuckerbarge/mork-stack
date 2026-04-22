@@ -456,6 +456,7 @@ async function withRetry(label, fn, { attempts = 4, baseDelayMs = 500 } = {}) {
 }
 
 const WALLET_PATH = process.env.WALLET_PATH;
+const DEFAULT_PAPER_MAX_TRADE_USDC = Number(process.env.DEFAULT_PAPER_MAX_TRADE_USDC || 5);
 const MAX_TRADE_USDC = Number(process.env.MAX_TRADE_USDC || 0);
 const WALLET_SECRET_KEY = process.env.MORK_WALLET_SECRET_KEY;
 
@@ -602,6 +603,10 @@ async function printBalances(connection, walletPubkey) {
 
 const SLIPPAGE_BPS = Number(process.env.SLIPPAGE_BPS || 50);
 const EXECUTION_BUFFER_USD = Number(process.env.EXECUTION_BUFFER_USD || 0.03);
+function getEffectiveMaxTradeUsdc() {
+  const configuredMaxTrade = Number(process.env.MAX_TRADE_USDC || 0);
+  return configuredMaxTrade > 0 ? configuredMaxTrade : (PAPER ? DEFAULT_PAPER_MAX_TRADE_USDC : 0);
+}
 
 function filterTokens(tokens) {
   const filtered = (tokens || []).filter((t) => {
@@ -616,7 +621,7 @@ function filterTokens(tokens) {
 }
 
 async function scanMarketA(m) {
-  const maxTrade = Number(process.env.MAX_TRADE_USDC || 0);
+  const maxTrade = getEffectiveMaxTradeUsdc();
   if (!maxTrade || maxTrade <= 0) return null;
 
   const TX_COST_USD = Number(process.env.TX_COST_USD || 0.01);
@@ -829,7 +834,7 @@ async function executeRouteA(m, scan) {
   let edgePct = NaN;
 
   try {
-    if (!ARMED) return { ok: false, dryRun: true, reason: "ARMED=false (dry run)" };
+    if (!PAPER && !ARMED) return { ok: false, dryRun: true, reason: "ARMED=false (live disabled)" };
 
     const sol = (await connection.getBalance(wallet.publicKey)) / 1e9;
     if (sol < 0.005) {
@@ -839,7 +844,7 @@ async function executeRouteA(m, scan) {
     const usdcBal = await getUsdcBalance(connection, wallet.publicKey);
     if (usdcBal <= 0) return { ok: false, reason: "No USDC balance" };
 
-    const maxTrade = Number(process.env.MAX_TRADE_USDC || 0);
+    const maxTrade = getEffectiveMaxTradeUsdc();
     if (!maxTrade || maxTrade <= 0) {
       return { ok: false, reason: `MAX_TRADE_USDC is 0 or invalid (${process.env.MAX_TRADE_USDC})` };
     }
@@ -920,8 +925,13 @@ async function executeRouteA(m, scan) {
       )
     );
 
+    if (PAPER) {
+      const sig = `paper-${Date.now()}`;
+      return { ok: true, sig, spendUsd, net, edgePct, dryRun: true };
+    }
+
     const sig = await sendV0Tx(connection, wallet, finalIxs, altKeys);
-    return { ok: true, sig, spendUsd, net, edgePct };
+    return { ok: true, sig, spendUsd, net, edgePct, dryRun: false };
   } catch (e) {
     const msg = String(e?.message || e);
 
@@ -1158,7 +1168,10 @@ async function main() {
 
   console.log("ENV ARMED =", process.env.ARMED);
   console.log("ARMED (parsed) =", ARMED);
+  console.log("PAPER =", PAPER);
   console.log("MAX_TRADE_USDC =", MAX_TRADE_USDC);
+  console.log("DEFAULT_PAPER_MAX_TRADE_USDC =", DEFAULT_PAPER_MAX_TRADE_USDC);
+  console.log("EFFECTIVE_MAX_TRADE_USDC =", getEffectiveMaxTradeUsdc());
   console.log("────────────────────────────────\n");
 
   let lastFeeCheck = 0;
