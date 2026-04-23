@@ -68,6 +68,8 @@ export async function buildContext({
   const technical = isTechnicalMessage(message);
   const plannerEnabled = await isPlannerEnabled();
 
+  const normalizedHandle = (handle || "").trim();
+
   const [recentChat, walletMemory, tradeMemory, reflection, relationshipMemory, appControl, orchestratorState, preflight] =
     await Promise.all([
       prisma.memory.findMany({
@@ -105,12 +107,17 @@ export async function buildContext({
           })
         : Promise.resolve(null),
 
-      handle
+      normalizedHandle
         ? prisma.memory.findFirst({
             where: {
               OR: [
-                { source: "relationship" },
-                { content: { contains: handle } },
+                {
+                  AND: [
+                    { source: "relationship" },
+                    { entities: { path: "$", string_contains: `handle:${normalizedHandle}` } },
+                  ],
+                },
+                { content: { contains: normalizedHandle } },
               ],
             },
             orderBy: { createdAt: "desc" },
@@ -177,6 +184,7 @@ export async function buildContext({
   ].join("\n");
 
   return [
+    normalizedHandle ? `CURRENT SPEAKER:\n- handle: ${normalizedHandle}` : "",
     recentChatBlock,
     technical ? walletBlock : "",
     technical ? tradeBlock : "",

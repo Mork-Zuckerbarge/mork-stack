@@ -2784,15 +2784,6 @@ class TwitterBot:
             gr.Markdown("# 💻 AI Twitter Bot Control Center")
             
             with gr.Accordion("🔑 Getting Started", open=True):
-                gr.Markdown("""
-                1. OpenAI API Key: Get your key from [OpenAI's API Keys page](https://platform.openai.com/api-keys)
-                2. X (Twitter) API Credentials:
-                    * Go to [X Developer Portal](https://developer.twitter.com/en/portal/dashboard)
-                    * Create a new project/app
-                    * Enable OAuth 1.0a in app settings
-                    * Generate API Key, API Key Secret, Access Token, and Access Token Secret
-                """)
-                
                 print("\nInitializing credential textboxes...")
                 
                 def load_initial_values():

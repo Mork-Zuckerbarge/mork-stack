@@ -22,6 +22,8 @@ export async function GET() {
         OR: [
           { content: { contains: '"kind":"route_research"' } },
           { content: { contains: '"kind":"trade_result"' } },
+          { content: { startsWith: "direct_swap " } },
+          { entities: { path: "$", string_contains: "arb:manual_swap" } },
         ],
       },
       orderBy: { createdAt: "desc" },

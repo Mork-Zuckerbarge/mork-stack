@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
-const JUP_BASE = process.env.JUP_BASE_URL ?? "https://lite-api.jup.ag";
+const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
 const JUP_TIMEOUT_MS = Math.max(2500, Number(process.env.JUP_TIMEOUT_MS ?? 10000));
 const RPC = process.env.SOLANA_RPC_URL ?? process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
 
