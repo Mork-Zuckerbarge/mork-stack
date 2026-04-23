@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 const LAST_PLANNER_TRADE_KEY = "__planner_last_trade_iso_v1__";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const JUP_BASE = process.env.JUP_BASE_URL ?? "https://lite-api.jup.ag";
+const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
 
 function minutesSince(iso: string | null): number {
   if (!iso) return Number.POSITIVE_INFINITY;

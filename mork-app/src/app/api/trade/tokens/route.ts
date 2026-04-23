@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const JUP_BASE = process.env.JUP_BASE_URL ?? "https://lite-api.jup.ag";
+const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const JUP_TIMEOUT_MS = Math.max(2500, Number(process.env.JUP_TIMEOUT_MS ?? 10000));
 
