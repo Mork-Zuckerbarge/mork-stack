@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getAppControlState } from "@/lib/core/appControl";
+import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
 
 export const runtime = "nodejs";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
-const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
-const JUP_TIMEOUT_MS = Math.max(2500, Number(process.env.JUP_TIMEOUT_MS ?? 10000));
+const JUP_TIMEOUT_MS = getJupiterTimeoutMs();
 
 type QuoteBody = {
   amountSol?: number;
@@ -38,18 +38,17 @@ type JupiterToken = {
 
 async function getTokenDecimals(mint: string): Promise<number> {
   if (mint === SOL_MINT) return 9;
-  try {
-    const tokenRes = await fetch(`${JUP_BASE}/tokens/v1/token/${mint}`, {
+  for (const base of getJupiterBaseCandidates()) {
+    const tokenRes = await fetch(`${base}/tokens/v1/token/${mint}`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
       signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
-    });
-    if (!tokenRes.ok) return 0;
+    }).catch(() => null);
+    if (!tokenRes?.ok) continue;
     const token = (await tokenRes.json()) as JupiterToken;
     return Number.isFinite(token.decimals) ? Number(token.decimals) : 0;
-  } catch {
-    return 0;
   }
+  return 0;
 }
 
 function fromRawAmount(rawAmount: string | number | undefined, decimals: number): number {
@@ -83,20 +82,35 @@ export async function POST(req: Request) {
       getTokenDecimals(outputMint),
     ]);
     const baseAmount = Math.floor(amountSol * 10 ** inputDecimals);
-    const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
-    quoteUrl.searchParams.set("inputMint", inputMint);
-    quoteUrl.searchParams.set("outputMint", outputMint);
-    quoteUrl.searchParams.set("amount", String(baseAmount));
-    quoteUrl.searchParams.set("slippageBps", String(slippageBps));
+    let quoteRes: Response | null = null;
+    let quoteError = "Quote failed across all configured Jupiter endpoints.";
+    for (const base of getJupiterBaseCandidates()) {
+      const quoteUrl = new URL(`${base}/swap/v1/quote`);
+      quoteUrl.searchParams.set("inputMint", inputMint);
+      quoteUrl.searchParams.set("outputMint", outputMint);
+      quoteUrl.searchParams.set("amount", String(baseAmount));
+      quoteUrl.searchParams.set("slippageBps", String(slippageBps));
 
-    const quoteRes = await fetch(quoteUrl.toString(), {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+      const res = await fetch(quoteUrl.toString(), {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
+      }).catch(() => null);
 
-    if (!quoteRes.ok) {
-      const text = await quoteRes.text().catch(() => "");
-      return NextResponse.json({ ok: false, error: `Quote failed (${quoteRes.status}): ${text}` }, { status: 502 });
+      if (!res) {
+        continue;
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        quoteError = `Quote failed (${res.status}): ${text}`;
+        continue;
+      }
+      quoteRes = res;
+      break;
+    }
+
+    if (!quoteRes) {
+      return NextResponse.json({ ok: false, error: quoteError }, { status: 502 });
     }
 
     const quote = (await quoteRes.json()) as JupiterQuote;
