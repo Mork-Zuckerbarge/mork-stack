@@ -166,9 +166,9 @@ export default function ChatPanel() {
           "show services",
           "start arb",
           "stop sherpa",
-          "post this in telegram: gm chat",
+          "post to telegram: gm chat",
           "generate image: neon cyberpunk frog DJ in a rainstorm",
-          "generate video: cinematic drone shot over neon city at sunset",
+          "generate video cinematic drone shot over neon city at sunset",
           "go buy $2 of $spx",
         ].map((preset) => (
           <button
@@ -186,7 +186,7 @@ export default function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder="Try: generate image: ... | generate video: ... | send <file> to telegram with caption: ..."
+          placeholder="Try: post to telegram: ... | generate image: ... | generate video ... | send <file> to telegram with caption: ..."
           className="flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 outline-none"
         />
         <button

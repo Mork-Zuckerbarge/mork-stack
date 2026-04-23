@@ -63,6 +63,8 @@ const personaModes = {
   x: ["cynical-banter", "poetic", "market-snark"],
 };
 
+const STYLE_SETUP_IMAGE_TARGET = 7;
+
 export default function AppControlPanel() {
   const [state, setState] = useState<AppControlState | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
@@ -72,6 +74,7 @@ export default function AppControlPanel() {
   const [sherpaBootstrapMessage, setSherpaBootstrapMessage] = useState("");
   const [sherpaBootstrapAction, setSherpaBootstrapAction] = useState("");
   const [openAiRuntime, setOpenAiRuntime] = useState<OpenAiRuntime>({ enabled: false });
+  const [styleSetupImages, setStyleSetupImages] = useState<File[]>([]);
 
   async function load() {
     const res = await fetch("/api/app/control");
@@ -191,6 +194,14 @@ export default function AppControlPanel() {
     }
   }
 
+  async function completeFirstTimeSetup() {
+    if (styleSetupImages.length < STYLE_SETUP_IMAGE_TARGET) {
+      setStatusText(`Upload ${STYLE_SETUP_IMAGE_TARGET} style images before completing first-time setup.`);
+      return;
+    }
+    await act("startup.completed.set", { value: true });
+  }
+
   return (
     <div className="rounded-3xl border border-cyan-300/20 bg-gradient-to-b from-cyan-400/10 to-transparent p-5">
       <div className="mb-2 flex items-start justify-between gap-3">
@@ -213,7 +224,7 @@ export default function AppControlPanel() {
         <div className="space-y-4 text-sm">
           {!state.controls.startupCompleted ? (
             <div className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-              First startup setup is incomplete. Select a model and persona defaults, then click <strong>Complete First-Time Setup</strong>.
+              First startup setup is incomplete. Select a model and upload a <strong>{STYLE_SETUP_IMAGE_TARGET}-image</strong> style starter pack, then click <strong>Complete First-Time Setup</strong>.
             </div>
           ) : null}
 
@@ -258,9 +269,25 @@ export default function AppControlPanel() {
                 </div>
               ))}
             </div>
+            <div className="mt-3 rounded-xl border border-white/10 bg-black/25 p-3">
+              <label className="mb-2 block text-xs text-white/70">
+                Style starter pack ({STYLE_SETUP_IMAGE_TARGET} images required)
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => setStyleSetupImages(Array.from(e.target.files || []))}
+                disabled={busy}
+                className="w-full text-xs text-white/75 file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-white"
+              />
+              <p className="mt-2 text-xs text-white/60">
+                Selected: {styleSetupImages.length}/{STYLE_SETUP_IMAGE_TARGET}
+              </p>
+            </div>
             <button
-              onClick={() => act("startup.completed.set", { value: true })}
-              disabled={busy}
+              onClick={completeFirstTimeSetup}
+              disabled={busy || styleSetupImages.length < STYLE_SETUP_IMAGE_TARGET}
               className="mt-3 w-full rounded-xl border border-white/10 px-3 py-2"
             >
               Complete First-Time Setup
