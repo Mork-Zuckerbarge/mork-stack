@@ -20,10 +20,43 @@ type RoutedCommand =
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const JUP_BASE = process.env.JUP_BASE_URL ?? "https://lite-api.jup.ag";
 const LAST_TRADE_FACT_KEY = "__agent_last_trade_iso_v1__";
 const BASE58_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const JUP_TOKEN_SEARCH_LIMIT = "100";
+
+function buildJupiterBaseCandidates() {
+  const candidates = [
+    (process.env.JUP_BASE_URL || "").trim(),
+    "https://api.jup.ag",
+    "https://lite-api.jup.ag",
+  ].filter(Boolean);
+  return [...new Set(candidates)];
+}
+
+async function fetchJsonWithJupiterFallback(path: string, query: Record<string, string>) {
+  const candidates = buildJupiterBaseCandidates();
+  let lastError: unknown = null;
+
+  for (const base of candidates) {
+    try {
+      const url = new URL(`${base}${path}`);
+      Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
+      const res = await fetch(url.toString(), {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        lastError = new Error(`${path} failed on ${base} (${res.status})`);
+        continue;
+      }
+      return await res.json();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`Jupiter request failed for ${path}`);
+}
 
 function toUserFacingFetchError(error: unknown, context: string): Error {
   if (error instanceof Error) {
@@ -128,26 +161,18 @@ function parseCommand(message: string): RoutedCommand | null {
 
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
-  const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
-  quoteUrl.searchParams.set("inputMint", USDC_MINT);
-  quoteUrl.searchParams.set("outputMint", SOL_MINT);
-  quoteUrl.searchParams.set("amount", String(amountUsdcBase));
-  quoteUrl.searchParams.set("slippageBps", "50");
 
-  let res: Response;
+  let data: { outAmount?: string };
   try {
-    res = await fetch(quoteUrl.toString(), {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+    data = (await fetchJsonWithJupiterFallback("/swap/v1/quote", {
+      inputMint: USDC_MINT,
+      outputMint: SOL_MINT,
+      amount: String(amountUsdcBase),
+      slippageBps: "50",
+    })) as { outAmount?: string };
   } catch (error) {
     throw toUserFacingFetchError(error, "USD→SOL quote failed");
   }
-  if (!res.ok) {
-    throw new Error(`SOL conversion quote failed (${res.status})`);
-  }
-
-  const data = (await res.json()) as { outAmount?: string };
   const outLamports = Number(data.outAmount ?? 0);
   if (!Number.isFinite(outLamports) || outLamports <= 0) {
     throw new Error("SOL conversion quote returned no output");
@@ -181,27 +206,18 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
     return { mint: symbolOrMint.trim(), symbol: normalized };
   }
 
-  const searchUrl = new URL(`${JUP_BASE}/tokens/v1/search`);
-  searchUrl.searchParams.set("query", normalized);
-  searchUrl.searchParams.set("limit", JUP_TOKEN_SEARCH_LIMIT);
-
-  let res: Response | null = null;
   try {
-    res = await fetch(searchUrl.toString(), {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
-  } catch {
-    res = null;
-  }
-
-  if (res?.ok) {
-    const results = (await res.json()) as JupiterTokenResult[];
+    const results = (await fetchJsonWithJupiterFallback("/tokens/v1/search", {
+      query: normalized,
+      limit: JUP_TOKEN_SEARCH_LIMIT,
+    })) as JupiterTokenResult[];
     const withAddress = results.filter((item): item is JupiterTokenResult & { address: string } => typeof item.address === "string");
     const selected = matchTokenSymbol(normalized, withAddress);
     if (selected?.address) {
       return { mint: selected.address, symbol: (selected.symbol || normalized).toUpperCase() };
     }
+  } catch {
+    // fall through to full list lookup
   }
 
   let allRes: Response;

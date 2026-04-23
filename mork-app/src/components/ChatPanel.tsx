@@ -163,20 +163,20 @@ export default function ChatPanel() {
 
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
         {[
-          "show services",
-          "start arb",
-          "stop sherpa",
-          "post to telegram: gm chat",
-          "generate image: neon cyberpunk frog DJ in a rainstorm",
-          "generate video cinematic drone shot over neon city at sunset",
-          "go buy $2 of $spx",
+          { label: "show services", value: "show services" },
+          { label: "start arb", value: "start arb" },
+          { label: "stop sherpa", value: "stop sherpa" },
+          { label: "telegram:", value: "post to telegram: gm chat" },
+          { label: "generate image:", value: "generate image: neon cyberpunk frog DJ in a rainstorm" },
+          { label: "generate video:", value: "generate video cinematic drone shot over neon city at sunset" },
+          { label: "buy:", value: "go buy $2 of $spx" },
         ].map((preset) => (
           <button
-            key={preset}
-            onClick={() => setInput(preset)}
+            key={preset.label}
+            onClick={() => setInput(preset.value)}
             className="rounded-full border border-white/15 bg-white/5 px-3 py-1"
           >
-            {preset}
+            {preset.label}
           </button>
         ))}
       </div>

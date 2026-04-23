@@ -49,7 +49,7 @@ function getTradeRuntimeFromEnv() {
   return {
     swapEnabled: process.env.MORK_AGENT_SWAP_ENABLED === "1",
     maxSwapSol: Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25),
-    jupiterBaseUrl: process.env.JUP_BASE_URL ?? "https://lite-api.jup.ag",
+    jupiterBaseUrl: process.env.JUP_BASE_URL ?? "https://api.jup.ag",
     jupiterTimeoutMs: Math.max(2500, Number(process.env.JUP_TIMEOUT_MS ?? 10000)),
   };
 }
