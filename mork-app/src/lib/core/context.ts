@@ -114,7 +114,7 @@ export async function buildContext({
                 {
                   AND: [
                     { source: "relationship" },
-                    { entities: { has: `handle:${normalizedHandle}` } },
+                    { entities: { path: "$", string_contains: `handle:${normalizedHandle}` } },
                   ],
                 },
                 { content: { contains: normalizedHandle } },
