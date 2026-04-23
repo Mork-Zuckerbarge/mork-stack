@@ -2,12 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { respondToChat } from "@/lib/core/chat";
 import { getOrchestratorState, startRuntime, stopRuntime } from "@/lib/core/orchestrator";
 import { prisma } from "@/lib/core/prisma";
+import { generateImage, generateVideo } from "@/lib/core/media";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 type ChatChannel = "system" | "telegram" | "x";
 
 type RoutedCommand =
   | { type: "tweet"; text: string }
   | { type: "telegram"; text: string }
+  | { type: "media.generate"; mediaKind: "image" | "video"; prompt: string }
+  | { type: "media.share"; platform: "telegram" | "x"; filename: string; caption: string }
   | { type: "buy"; usd: number; symbol: string }
   | { type: "services.status" }
   | { type: "service.start"; service: "arb" | "sherpa" }
@@ -64,6 +69,32 @@ function parseCommand(message: string): RoutedCommand | null {
     trimmed.match(/^hey\s+telegram\s+this\s*:\s*(.+)$/i);
   if (telegramMatch?.[1]?.trim()) {
     return { type: "telegram", text: telegramMatch[1].trim() };
+  }
+
+  const imageMatch =
+    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?image\s*:\s*(.+)$/i) ||
+    trimmed.match(/^image\s*:\s*(.+)$/i);
+  if (imageMatch?.[1]?.trim()) {
+    return { type: "media.generate", mediaKind: "image", prompt: imageMatch[1].trim() };
+  }
+
+  const videoMatch =
+    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?video\s*:\s*(.+)$/i) ||
+    trimmed.match(/^video\s*:\s*(.+)$/i);
+  if (videoMatch?.[1]?.trim()) {
+    return { type: "media.generate", mediaKind: "video", prompt: videoMatch[1].trim() };
+  }
+
+  const sendMediaMatch = trimmed.match(
+    /^send\s+([a-z0-9._-]+)\s+to\s+(telegram|x)(?:\s+with\s+caption\s*:\s*(.+))?\s*$/i
+  );
+  if (sendMediaMatch?.[1]?.trim()) {
+    return {
+      type: "media.share",
+      filename: sendMediaMatch[1].trim(),
+      platform: sendMediaMatch[2].toLowerCase() as "telegram" | "x",
+      caption: sendMediaMatch[3]?.trim() || "",
+    };
   }
 
   const buyMatch =
@@ -210,6 +241,104 @@ async function noteTradeExecution() {
 }
 
 async function executeCommand(req: NextRequest, command: RoutedCommand) {
+  if (command.type === "media.generate") {
+    const prompt = command.prompt.trim();
+    if (!prompt) {
+      return { ok: false, status: 400, error: "Media prompt is required." };
+    }
+
+    try {
+      const generated = command.mediaKind === "image" ? await generateImage(prompt) : await generateVideo(prompt);
+      const downloadUrl = new URL(generated.url, req.url).toString();
+      return {
+        ok: true,
+        routed: "media",
+        command: "media.generate",
+        response: `Generated ${generated.kind} from prompt: "${prompt}"`,
+        status: 200,
+        media: {
+          kind: generated.kind,
+          url: generated.url,
+          filename: generated.filename,
+          prompt: generated.prompt,
+          provider: generated.provider,
+          mimeType: generated.mimeType,
+          downloadUrl,
+        },
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: 502,
+        error: error instanceof Error ? error.message : "Media generation failed.",
+      };
+    }
+  }
+
+  if (command.type === "media.share") {
+    const cleanFilename = path.basename(command.filename || "").trim();
+    if (!cleanFilename) {
+      return { ok: false, status: 400, error: "Filename is required. Example: send 2026...png to telegram" };
+    }
+    const mediaPath = path.join(process.cwd(), "public", "generated", cleanFilename);
+
+    if (command.platform === "x") {
+      return {
+        ok: true,
+        status: 200,
+        routed: "sherpa/x",
+        command: "media.share",
+        response: `Prepared X media draft for ${cleanFilename}. Caption: ${command.caption || "(none)"} (Direct X media posting is still external).`,
+      };
+    }
+
+    const botToken = normalizeBotToken(process.env.TELEGRAM_BOT_TOKEN || "");
+    const chatId = (process.env.TELEGRAM_CHAT_ID || "").trim();
+    if (!botToken || !chatId) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Telegram send needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in mork-app/.env.local (restart after saving).",
+      };
+    }
+
+    let file: Buffer;
+    try {
+      file = await readFile(mediaPath);
+    } catch {
+      return { ok: false, status: 404, error: `Generated media not found: ${cleanFilename}` };
+    }
+
+    const lower = cleanFilename.toLowerCase();
+    const isVideo = lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mov");
+    const endpoint = isVideo ? "sendVideo" : "sendPhoto";
+    const form = new FormData();
+    form.set("chat_id", chatId);
+    if (command.caption) form.set("caption", command.caption);
+    form.set(isVideo ? "video" : "photo", new Blob([file]), cleanFilename);
+
+    const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/${endpoint}`, {
+      method: "POST",
+      body: form,
+    });
+    const json = (await sendRes.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+    if (!sendRes.ok || !json.ok) {
+      return {
+        ok: false,
+        status: 502,
+        error: `Telegram media send failed${json.description ? `: ${json.description}` : ""}`,
+      };
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      routed: "telegram",
+      command: "media.share",
+      response: `Sent ${cleanFilename} to Telegram${command.caption ? ` with caption: ${command.caption}` : ""}.`,
+    };
+  }
+
   if (command.type === "services.status") {
     const orchestrator = await getOrchestratorState();
     const authority = orchestrator.app.controls.executionAuthority;
