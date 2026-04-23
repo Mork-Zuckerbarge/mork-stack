@@ -5,6 +5,13 @@ import { useEffect, useState } from "react";
 type ChatMessage = {
   role: "user" | "agent";
   content: string;
+  media?: {
+    kind: "image" | "video";
+    url: string;
+    filename: string;
+    provider?: string;
+    prompt?: string;
+  };
 };
 
 export default function ChatPanel() {
@@ -55,7 +62,23 @@ export default function ChatPanel() {
         (typeof data.error === "string" ? data.error : "") ||
         `Chat failed (${res.status})`;
 
-      setMessages([...next, { role: "agent", content }]);
+      setMessages([
+        ...next,
+        {
+          role: "agent",
+          content,
+          media:
+            data?.media && typeof data.media?.url === "string" && typeof data.media?.filename === "string"
+              ? {
+                  kind: data.media.kind === "video" ? "video" : "image",
+                  url: data.media.url,
+                  filename: data.media.filename,
+                  provider: data.media.provider,
+                  prompt: data.media.prompt,
+                }
+              : undefined,
+        },
+      ]);
     } catch (e: unknown) {
       const message =
         e instanceof DOMException && e.name === "AbortError"
@@ -96,7 +119,44 @@ export default function ChatPanel() {
                 : "border border-white/10 bg-zinc-900 text-white"
             }`}
           >
-            {m.content}
+            <div>{m.content}</div>
+            {m.media ? (
+              <div className="mt-3 space-y-2">
+                {m.media.kind === "image" ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={m.media.url} alt={m.media.prompt || m.media.filename} className="max-h-80 rounded-xl border border-white/10" />
+                ) : (
+                  <video src={m.media.url} controls className="max-h-80 rounded-xl border border-white/10" />
+                )}
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <a
+                    className="rounded-full border border-white/20 bg-white/5 px-3 py-1"
+                    href={m.media.url}
+                    download={m.media.filename}
+                  >
+                    Download
+                  </a>
+                  <button
+                    onClick={() =>
+                      setInput(
+                        `send ${m.media?.filename} to telegram with caption: ${m.media?.prompt || "Generated in Mork"}`
+                      )
+                    }
+                    className="rounded-full border border-white/20 bg-white/5 px-3 py-1"
+                  >
+                    Send to Telegram
+                  </button>
+                  <button
+                    onClick={() =>
+                      setInput(`send ${m.media?.filename} to x with caption: ${m.media?.prompt || "Generated in Mork"}`)
+                    }
+                    className="rounded-full border border-white/20 bg-white/5 px-3 py-1"
+                  >
+                    Send to X
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -107,6 +167,8 @@ export default function ChatPanel() {
           "start arb",
           "stop sherpa",
           "post this in telegram: gm chat",
+          "generate image: neon cyberpunk frog DJ in a rainstorm",
+          "generate video: cinematic drone shot over neon city at sunset",
           "go buy $2 of $spx",
         ].map((preset) => (
           <button
@@ -124,7 +186,7 @@ export default function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder="Try: show services | start arb | post this in telegram: ... | go buy $2 of <mint>"
+          placeholder="Try: generate image: ... | generate video: ... | send <file> to telegram with caption: ..."
           className="flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 outline-none"
         />
         <button
