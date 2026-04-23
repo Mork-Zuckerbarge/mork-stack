@@ -65,7 +65,7 @@ function parseCommand(message: string): RoutedCommand | null {
   }
 
   const telegramMatch =
-    trimmed.match(/^(?:post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
+    trimmed.match(/^(?:post\s+to\s+telegram|post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
     trimmed.match(/^hey\s+telegram\s+this\s*:\s*(.+)$/i);
   if (telegramMatch?.[1]?.trim()) {
     return { type: "telegram", text: telegramMatch[1].trim() };
@@ -79,7 +79,7 @@ function parseCommand(message: string): RoutedCommand | null {
   }
 
   const videoMatch =
-    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?video\s*:\s*(.+)$/i) ||
+    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?video(?:\s*:)?\s+(.+)$/i) ||
     trimmed.match(/^video\s*:\s*(.+)$/i);
   if (videoMatch?.[1]?.trim()) {
     return { type: "media.generate", mediaKind: "video", prompt: videoMatch[1].trim() };
