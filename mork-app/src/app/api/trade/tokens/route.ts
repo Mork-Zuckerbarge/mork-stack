@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
+import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
 
 export const runtime = "nodejs";
 
-const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const JUP_TIMEOUT_MS = Math.max(2500, Number(process.env.JUP_TIMEOUT_MS ?? 10000));
+const JUP_TIMEOUT_MS = getJupiterTimeoutMs();
 
 type JupiterToken = {
   address?: string;
@@ -38,8 +38,6 @@ export async function GET(req: Request) {
       });
     }
 
-    const url = new URL(`${JUP_BASE}/tokens/v1/search`);
-    url.searchParams.set("query", q);
     if (q.length < 2) {
       return NextResponse.json({
         ok: true,
@@ -47,20 +45,28 @@ export async function GET(req: Request) {
       });
     }
 
-    const res = await fetch(url.toString(), {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
-    });
+    const bases = getJupiterBaseCandidates();
+    let searchedTokens: Array<ReturnType<typeof normalizeToken>> = [];
+    for (const base of bases) {
+      const url = new URL(`${base}/tokens/v1/search`);
+      url.searchParams.set("query", q);
+      const res = await fetch(url.toString(), {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
+      }).catch(() => null);
 
-    if (!res.ok) {
-      return NextResponse.json({ ok: true, tokens: [] });
+      if (!res?.ok) {
+        continue;
+      }
+      searchedTokens = ((await res.json()) as JupiterToken[])
+        .map((token) => normalizeToken(token))
+        .filter((token): token is NonNullable<typeof token> => Boolean(token))
+        .slice(0, 25);
+      if (searchedTokens.length > 0) {
+        break;
+      }
     }
-
-    const searchedTokens = ((await res.json()) as JupiterToken[])
-      .map((token) => normalizeToken(token))
-      .filter((token): token is NonNullable<typeof token> => Boolean(token))
-      .slice(0, 25);
 
     if (searchedTokens.length > 0) {
       return NextResponse.json({ ok: true, tokens: searchedTokens });
@@ -70,21 +76,26 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, tokens: [] });
     }
 
-    const tokenByMintRes = await fetch(`${JUP_BASE}/tokens/v1/token/${q}`, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+    for (const base of bases) {
+      const tokenByMintRes = await fetch(`${base}/tokens/v1/token/${q}`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
+      }).catch(() => null);
 
-    if (!tokenByMintRes.ok) {
-      return NextResponse.json({ ok: true, tokens: [] });
+      if (!tokenByMintRes?.ok) {
+        continue;
+      }
+
+      const tokenByMint = normalizeToken((await tokenByMintRes.json()) as JupiterToken);
+      if (!tokenByMint) {
+        continue;
+      }
+
+      return NextResponse.json({ ok: true, tokens: [tokenByMint] });
     }
 
-    const tokenByMint = normalizeToken((await tokenByMintRes.json()) as JupiterToken);
-    if (!tokenByMint) {
-      return NextResponse.json({ ok: true, tokens: [] });
-    }
-
-    return NextResponse.json({ ok: true, tokens: [tokenByMint] });
+    return NextResponse.json({ ok: true, tokens: [] });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "token search failed";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

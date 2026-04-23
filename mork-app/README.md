@@ -66,6 +66,10 @@ Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
   - `SOLANA_RPC_URL` (primary),
   - `SOLANA_RPC` and/or `RPC_URL` (fallback compatibility for older paths/services),
   - `SOLANA_RPC_URLS` (optional comma-separated pool used by arb failover rotation).
+- Jupiter routing/token APIs (free):
+  - `JUP_BASE_URL` (single preferred endpoint),
+  - `JUP_BASE_URLS` (optional comma-separated fallback list; recommended: `https://api.jup.ag,https://lite-api.jup.ag`),
+  - `JUP_TIMEOUT_MS` (request timeout for token lookup + quote/swap API calls).
 - Wallet credentials:
   - `MORK_WALLET` (public address only), and/or
   - `MORK_WALLET_SECRET_KEY` (JSON byte array, required for server-side signing features like direct swaps).
@@ -79,6 +83,12 @@ Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
   - `OLLAMA_TIMEOUT_MS` (increase if responses time out).
 - Telegram ElevenLabs voice cadence:
   - `VOICE_REPLY_PROBABILITY` (0.0-1.0, defaults to `0.2` so voice triggers ~1/5 replies when voice is enabled).
+- Chat media generation:
+  - Images default to Pollinations (no extra setup in this repo).
+  - Videos now default to Pollinations `gen.pollinations.ai/video/{prompt}` when `MEDIA_VIDEO_ENDPOINT` is empty.
+  - `MEDIA_VIDEO_TOKEN` can be set to a Pollinations key if your account/rate limits require auth.
+  - Optional overrides: `MEDIA_VIDEO_MODEL`, `MEDIA_VIDEO_SEED`.
+  - Use `MEDIA_VIDEO_ENDPOINT` only when you intentionally want a custom provider.
 
 After editing env values, restart `./start.sh` (or restart `npm run dev`) so running processes pick up changes.
 
