@@ -331,7 +331,9 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     const form = new FormData();
     form.set("chat_id", chatId);
     if (command.caption) form.set("caption", command.caption);
-    form.set(isVideo ? "video" : "photo", new Blob([file]), cleanFilename);
+    const fileArrayBuffer = new ArrayBuffer(file.byteLength);
+    new Uint8Array(fileArrayBuffer).set(file);
+    form.set(isVideo ? "video" : "photo", new Blob([fileArrayBuffer]), cleanFilename);
 
     const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/${endpoint}`, {
       method: "POST",

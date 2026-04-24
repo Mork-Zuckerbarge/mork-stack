@@ -117,7 +117,6 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     const detail = await res.text().catch(() => "");
     throw new Error(
       !usePollinationsDefault
-      customEndpoint
         ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}`
         : `Video generation failed (${res.status}). Set MEDIA_VIDEO_TOKEN for Pollinations, or set MEDIA_VIDEO_ENDPOINT to a custom provider.`
     );
