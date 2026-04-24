@@ -78,31 +78,44 @@ export async function generateImage(prompt: string): Promise<GeneratedMedia> {
 }
 
 export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
-  const endpoint = (process.env.MEDIA_VIDEO_ENDPOINT || "").trim();
-  if (!endpoint) {
-    throw new Error(
-      "Video generation is disabled. Set MEDIA_VIDEO_ENDPOINT to a free-tier text-to-video HTTP endpoint and restart."
-    );
+  const customEndpoint = (process.env.MEDIA_VIDEO_ENDPOINT || "").trim();
+  const method = customEndpoint ? (process.env.MEDIA_VIDEO_METHOD || "POST").toUpperCase() : "GET";
+  const model = (process.env.MEDIA_VIDEO_MODEL || "").trim();
+  const seed = Number(process.env.MEDIA_VIDEO_SEED || "");
+
+  const endpoint = customEndpoint || `https://gen.pollinations.ai/video/${encodeURIComponent(prompt)}`;
+  const url = new URL(endpoint);
+  if (!customEndpoint) {
+    if (model) {
+      url.searchParams.set("model", model);
+    }
+    if (Number.isFinite(seed) && seed > 0) {
+      url.searchParams.set("seed", String(Math.floor(seed)));
+    }
   }
 
-  const method = (process.env.MEDIA_VIDEO_METHOD || "POST").toUpperCase();
-  const body = JSON.stringify({ prompt });
+  const body = customEndpoint && method !== "GET" ? JSON.stringify({ prompt }) : undefined;
   const headers: HeadersInit = {
-    "Content-Type": "application/json",
+    ...(customEndpoint ? { "Content-Type": "application/json" } : {}),
   };
   const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(endpoint, {
+  const res = await fetch(url.toString(), {
     method,
     headers,
-    body: method === "GET" ? undefined : body,
+    body,
     cache: "no-store",
   });
   if (!res.ok) {
-    throw new Error(`Video generation failed (${res.status})`);
+    const detail = await res.text().catch(() => "");
+    throw new Error(
+      customEndpoint
+        ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}`
+        : `Video generation failed (${res.status}). Set MEDIA_VIDEO_TOKEN for Pollinations, or set MEDIA_VIDEO_ENDPOINT to a custom provider.`
+    );
   }
 
   const mimeType = res.headers.get("content-type") || "video/mp4";
@@ -114,7 +127,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   return {
     kind: "video",
     prompt,
-    provider: "custom-free-tier",
+    provider: customEndpoint ? "custom-free-tier" : "pollinations",
     mimeType,
     ...persisted,
   };

@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
 import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
+import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
 
 export const runtime = "nodejs";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
-const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
-const JUP_TIMEOUT_MS = Math.max(2500, Number(process.env.JUP_TIMEOUT_MS ?? 10000));
+const JUP_TIMEOUT_MS = getJupiterTimeoutMs();
 const RPC = process.env.SOLANA_RPC_URL ?? process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
 
 type SwapBody = {
@@ -47,18 +47,17 @@ function getSigner(): Keypair {
 
 async function getTokenDecimals(mint: string): Promise<number> {
   if (mint === SOL_MINT) return 9;
-  try {
-    const res = await fetch(`${JUP_BASE}/tokens/v1/token/${mint}`, {
+  for (const base of getJupiterBaseCandidates()) {
+    const res = await fetch(`${base}/tokens/v1/token/${mint}`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
       signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
-    });
-    if (!res.ok) return 0;
+    }).catch(() => null);
+    if (!res?.ok) continue;
     const token = (await res.json()) as JupiterTokenMeta;
     return Number.isFinite(token.decimals) ? Number(token.decimals) : 0;
-  } catch {
-    return 0;
   }
+  return 0;
 }
 
 export async function POST(req: Request) {
@@ -107,29 +106,45 @@ export async function POST(req: Request) {
     }
     const inUnits = Math.floor(amountIn * 10 ** inDecimals);
 
-    const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
-    quoteUrl.searchParams.set("inputMint", inputMint);
-    quoteUrl.searchParams.set("outputMint", outputMint);
-    quoteUrl.searchParams.set("amount", String(inUnits));
-    quoteUrl.searchParams.set("slippageBps", String(slippageBps));
+    let quoteResponse: Record<string, unknown> | null = null;
+    let jupiterBaseForSwap: string | null = null;
+    let quoteError = "Quote failed across all configured Jupiter endpoints.";
+    for (const base of getJupiterBaseCandidates()) {
+      const quoteUrl = new URL(`${base}/swap/v1/quote`);
+      quoteUrl.searchParams.set("inputMint", inputMint);
+      quoteUrl.searchParams.set("outputMint", outputMint);
+      quoteUrl.searchParams.set("amount", String(inUnits));
+      quoteUrl.searchParams.set("slippageBps", String(slippageBps));
 
-    const quoteRes = await fetch(quoteUrl.toString(), {
-      headers: { Accept: "application/json" },
-    });
+      const quoteRes = await fetch(quoteUrl.toString(), {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
+      }).catch(() => null);
 
-    if (!quoteRes.ok) {
-      const text = await quoteRes.text().catch(() => "");
-      return NextResponse.json({ ok: false, error: `Quote failed (${quoteRes.status}): ${text}` }, { status: 502 });
+      if (!quoteRes) {
+        continue;
+      }
+      if (!quoteRes.ok) {
+        const text = await quoteRes.text().catch(() => "");
+        quoteError = `Quote failed (${quoteRes.status}): ${text}`;
+        continue;
+      }
+      quoteResponse = (await quoteRes.json()) as Record<string, unknown>;
+      jupiterBaseForSwap = base;
+      break;
     }
 
-    const quoteResponse = (await quoteRes.json()) as Record<string, unknown>;
+    if (!quoteResponse || !jupiterBaseForSwap) {
+      return NextResponse.json({ ok: false, error: quoteError }, { status: 502 });
+    }
 
-    const swapRes = await fetch(`${JUP_BASE}/swap/v1/swap`, {
+    const swapRes = await fetch(`${jupiterBaseForSwap}/swap/v1/swap`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
       body: JSON.stringify({
         quoteResponse,
         userPublicKey: signer.publicKey.toBase58(),
