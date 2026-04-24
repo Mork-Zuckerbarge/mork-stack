@@ -401,7 +401,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
       channel: "x",
       handle: "app-user",
       message: `Draft an X post using this user-provided text. Keep intent and key wording intact unless it violates policy: ${command.text}`,
-      maxChars: 280,
+      maxChars: 560,
     });
 
     return {

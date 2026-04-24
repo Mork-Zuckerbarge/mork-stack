@@ -36,6 +36,8 @@ MAX_DAILY_REPLIES = 3
 MAX_FETCH = 50
 MAX_AGE_HOURS = 23
 MAX_BACKLOG = 20   # store at most this many tweet IDs for tomorrow
+X_POST_MAX_CHARS = 560
+X_INTERNAL_DRAFT_MAX_CHARS = 520
 
 MORK_CORE_SERVICE_FALLBACK_URL = os.getenv("MORK_CORE_SERVICE_FALLBACK_URL", "http://mork-core:8790").rstrip("/")
 LOCAL_MORK_CORE_FALLBACK_URL = os.getenv("LOCAL_MORK_CORE_FALLBACK_URL", "http://localhost:8790").rstrip("/")
@@ -271,7 +273,7 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
                 print("⚠ core_compose GET retrying local mork-core after exception")
     return ""
 
-def _wrap_280(s: str, max_len: int = 260) -> str:
+def _wrap_280(s: str, max_len: int = X_INTERNAL_DRAFT_MAX_CHARS) -> str:
     # Preserve newlines for tweet formatting, but collapse repeated spaces
     s = (s or "").strip()
     s = re.sub(r"[ \t]+", " ", s)
@@ -302,7 +304,7 @@ def morkcore_edge_line() -> str:
         pass
     return ""
 
-def compose_observation_from_core(max_len: int = 260) -> str:
+def compose_observation_from_core(max_len: int = X_INTERNAL_DRAFT_MAX_CHARS) -> str:
     """
     Ask Mork Core to compose an observation tweet.
     All voice/tone comes from Core (and its prime directive).
@@ -1768,8 +1770,8 @@ class TwitterBot:
 
             # Calculate content limit (if URL gets appended)
             TWITTER_SHORT_URL_LENGTH = 24
-            max_content_length = 280 - TWITTER_SHORT_URL_LENGTH if article_url else 280
-            max_chars_for_core = min(260, max_content_length)  # keep your usual 260 internal target
+            max_content_length = X_POST_MAX_CHARS - TWITTER_SHORT_URL_LENGTH if article_url else X_POST_MAX_CHARS
+            max_chars_for_core = min(X_INTERNAL_DRAFT_MAX_CHARS, max_content_length)
 
             # ----------------------------
             # NO-OPENAI MODE: use Mork Core
@@ -1802,7 +1804,7 @@ class TwitterBot:
 
                 # Append article URL at end if needed (and not already included)
                 if article_url and article_url not in tweet_text:
-                    tweet_text = _wrap_280(f"{tweet_text} {article_url}", 280)
+                    tweet_text = _wrap_280(f"{tweet_text} {article_url}", X_POST_MAX_CHARS)
 
                 self.tweet_count += 1
                 self.last_tweet_time = datetime.now()
@@ -1866,7 +1868,7 @@ class TwitterBot:
                 }
                 fallback = core_compose_payload(payload, timeout=8) or _wrap_280((topic or "…").strip() or "…", max_chars_for_core)
                 if article_url and article_url not in fallback:
-                    fallback = _wrap_280(f"{fallback} {article_url}", 280)
+                    fallback = _wrap_280(f"{fallback} {article_url}", X_POST_MAX_CHARS)
                 self.tweet_count += 1
                 self.last_tweet_time = datetime.now()
                 return fallback
@@ -1893,7 +1895,7 @@ class TwitterBot:
                 tweet_text = out.strip() or tweet_text[:max_content_length].rstrip() + "…"
 
             if article_url:
-                tweet_text = _wrap_280(f"{tweet_text} {article_url}", 280)
+                tweet_text = _wrap_280(f"{tweet_text} {article_url}", X_POST_MAX_CHARS)
 
             self.tweet_count += 1
             self.last_tweet_time = datetime.now()
