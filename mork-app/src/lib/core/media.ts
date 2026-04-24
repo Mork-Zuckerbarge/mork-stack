@@ -78,14 +78,18 @@ export async function generateImage(prompt: string): Promise<GeneratedMedia> {
 }
 
 export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
-  const customEndpoint = (process.env.MEDIA_VIDEO_ENDPOINT || "").trim();
-  const method = customEndpoint ? (process.env.MEDIA_VIDEO_METHOD || "POST").toUpperCase() : "GET";
+  const configuredEndpoint = (process.env.MEDIA_VIDEO_ENDPOINT || "").trim();
+  const pollinationsBaseRx = /^https?:\/\/gen\.pollinations\.ai\/video\/?$/i;
+  const usePollinationsDefault = !configuredEndpoint || pollinationsBaseRx.test(configuredEndpoint);
+  const method = usePollinationsDefault ? "GET" : (process.env.MEDIA_VIDEO_METHOD || "POST").toUpperCase();
   const model = (process.env.MEDIA_VIDEO_MODEL || "").trim();
   const seed = Number(process.env.MEDIA_VIDEO_SEED || "");
 
-  const endpoint = customEndpoint || `https://gen.pollinations.ai/video/${encodeURIComponent(prompt)}`;
+  const endpoint = usePollinationsDefault
+    ? `https://gen.pollinations.ai/video/${encodeURIComponent(prompt)}`
+    : configuredEndpoint;
   const url = new URL(endpoint);
-  if (!customEndpoint) {
+  if (usePollinationsDefault) {
     if (model) {
       url.searchParams.set("model", model);
     }
@@ -94,9 +98,9 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     }
   }
 
-  const body = customEndpoint && method !== "GET" ? JSON.stringify({ prompt }) : undefined;
+  const body = !usePollinationsDefault && method !== "GET" ? JSON.stringify({ prompt }) : undefined;
   const headers: HeadersInit = {
-    ...(customEndpoint ? { "Content-Type": "application/json" } : {}),
+    ...(!usePollinationsDefault ? { "Content-Type": "application/json" } : {}),
   };
   const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
   if (token) {
@@ -112,6 +116,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(
+      !usePollinationsDefault
       customEndpoint
         ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}`
         : `Video generation failed (${res.status}). Set MEDIA_VIDEO_TOKEN for Pollinations, or set MEDIA_VIDEO_ENDPOINT to a custom provider.`
@@ -127,7 +132,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   return {
     kind: "video",
     prompt,
-    provider: customEndpoint ? "custom-free-tier" : "pollinations",
+    provider: usePollinationsDefault ? "pollinations" : "custom-free-tier",
     mimeType,
     ...persisted,
   };

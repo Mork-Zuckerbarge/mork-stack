@@ -748,7 +748,7 @@ const ComposeSchema = z.object({
   text: z.string().optional(),
   url: z.string().optional(),
   memeName: z.string().optional(),
-  maxChars: z.number().min(120).max(280).optional().default(260),
+  maxChars: z.number().min(120).max(560).optional().default(260),
 });
 
 async function getEdgeLines(limit = 6) {
@@ -878,7 +878,7 @@ app.get("/x/compose", async (req, res) => {
     const mode = String(req.query.mode ?? "observation");
     const kind = normalizeKind(mode);
 
-    const maxChars = Math.min(Math.max(Number(req.query.maxChars ?? 260), 120), 280);
+    const maxChars = Math.min(Math.max(Number(req.query.maxChars ?? 260), 120), 560);
     const memeName = String(req.query.memeName ?? "").trim() || undefined;
 
     const tweet = await composeTweet({
