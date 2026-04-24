@@ -79,7 +79,7 @@ export async function generateImage(prompt: string): Promise<GeneratedMedia> {
 
 export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   const customEndpoint = (process.env.MEDIA_VIDEO_ENDPOINT || "").trim();
-  const method = (process.env.MEDIA_VIDEO_METHOD || (customEndpoint ? "POST" : "GET")).toUpperCase();
+  const method = customEndpoint ? (process.env.MEDIA_VIDEO_METHOD || "POST").toUpperCase() : "GET";
   const model = (process.env.MEDIA_VIDEO_MODEL || "").trim();
   const seed = Number(process.env.MEDIA_VIDEO_SEED || "");
 
@@ -94,7 +94,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     }
   }
 
-  const body = customEndpoint ? JSON.stringify({ prompt }) : undefined;
+  const body = customEndpoint && method !== "GET" ? JSON.stringify({ prompt }) : undefined;
   const headers: HeadersInit = {
     ...(customEndpoint ? { "Content-Type": "application/json" } : {}),
   };
@@ -106,7 +106,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   const res = await fetch(url.toString(), {
     method,
     headers,
-    body: method === "GET" ? undefined : body,
+    body,
     cache: "no-store",
   });
   if (!res.ok) {

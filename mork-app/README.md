@@ -89,6 +89,7 @@ Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
   - `MEDIA_VIDEO_TOKEN` can be set to a Pollinations key if your account/rate limits require auth.
   - Optional overrides: `MEDIA_VIDEO_MODEL`, `MEDIA_VIDEO_SEED`.
   - Use `MEDIA_VIDEO_ENDPOINT` only when you intentionally want a custom provider.
+  - `MEDIA_VIDEO_METHOD` applies to custom endpoint mode only (Pollinations default uses `GET`).
 
 After editing env values, restart `./start.sh` (or restart `npm run dev`) so running processes pick up changes.
 
