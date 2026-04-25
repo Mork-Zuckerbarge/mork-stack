@@ -13,9 +13,10 @@ type WalletState = {
 export default function WalletPanel() {
   const [wallet, setWallet] = useState<WalletState | null>(null);
 
-  async function loadState() {
+  async function loadState(force = false) {
     try {
-      const res = await fetch("/api/agent/state");
+      const endpoint = force ? "/api/agent/state?force=1" : "/api/agent/state";
+      const res = await fetch(endpoint, { cache: "no-store" });
       const data = await res.json();
       setWallet(data.wallet);
     } catch {
@@ -35,7 +36,7 @@ export default function WalletPanel() {
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Wallet</h2>
         <button
-          onClick={loadState}
+          onClick={() => void loadState(true)}
           className="rounded-xl border border-white/20 px-3 py-1 text-sm"
         >
           Refresh

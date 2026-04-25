@@ -1,15 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getWalletState } from "@/lib/core/wallet";
 import { getOrchestratorState, updateHealth } from "@/lib/core/orchestrator";
 import { getPreflightStatus } from "@/lib/bootstrap/preflight";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const orchestrator = await getOrchestratorState();
   const preflight = await getPreflightStatus();
   const agentStatus = preflight.ok ? "active" : "degraded";
+  const force = req.nextUrl.searchParams.get("force") === "1";
 
   try {
-    const wallet = await getWalletState();
+    const wallet = await getWalletState(force);
     updateHealth("wallet", "healthy", "wallet query succeeded");
 
     return NextResponse.json({
