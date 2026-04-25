@@ -115,10 +115,13 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
+    const hasToken = Boolean(token);
     throw new Error(
       !usePollinationsDefault
         ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}`
-        : `Video generation failed (${res.status}). Set MEDIA_VIDEO_TOKEN for Pollinations, or set MEDIA_VIDEO_ENDPOINT to a custom provider.`
+        : hasToken
+        ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Pollinations rejected the request even though MEDIA_VIDEO_TOKEN is set.`
+        : `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Set MEDIA_VIDEO_TOKEN for Pollinations, or set MEDIA_VIDEO_ENDPOINT to a custom provider.`
     );
   }
 
