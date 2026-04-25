@@ -262,8 +262,12 @@ export default function JupiterPanel() {
 
   const loadWallet = useCallback(async () => {
     try {
-      const res = await fetch("/api/agent/state", { cache: "no-store" });
-      const data = (await res.json()) as { wallet?: WalletState };
+      const res = await fetch("/api/wallet/state", { cache: "no-store" });
+      const data = (await res.json()) as { ok?: boolean; wallet?: WalletState };
+      if (!res.ok || data.ok === false) {
+        setWallet(null);
+        return;
+      }
       setWallet(data.wallet ?? null);
     } catch {
       setWallet(null);

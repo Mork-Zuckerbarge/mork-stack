@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getWalletState } from "@/lib/core/wallet";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const wallet = await getWalletState();
+    const url = new URL(req.url);
+    const force = url.searchParams.get("force") === "1";
+    const wallet = await getWalletState(force);
 
     return NextResponse.json({
       ok: true,
