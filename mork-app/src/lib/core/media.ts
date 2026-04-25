@@ -12,6 +12,38 @@ export type GeneratedMedia = {
 };
 
 const GENERATED_DIR = path.join(process.cwd(), "public", "generated");
+const POLLINATIONS_VIDEO_MODELS = new Set([
+  "kontext",
+  "seedream5",
+  "seedream",
+  "seedream-pro",
+  "nanobanana",
+  "nanobanana-2",
+  "nanobanana-pro",
+  "gptimage",
+  "gptimage-large",
+  "gpt-image-2",
+  "veo",
+  "seedance",
+  "seedance-pro",
+  "wan",
+  "wan-fast",
+  "wan-image",
+  "wan-image-pro",
+  "qwen-image",
+  "grok-imagine",
+  "grok-imagine-pro",
+  "grok-video-pro",
+  "zimage",
+  "flux",
+  "klein",
+  "ltx-2",
+  "p-image",
+  "p-image-edit",
+  "p-video",
+  "nova-canvas",
+  "nova-reel",
+]);
 
 function safeBaseName(input: string): string {
   const normalized = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -83,6 +115,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   const usePollinationsDefault = !configuredEndpoint || pollinationsBaseRx.test(configuredEndpoint);
   const method = usePollinationsDefault ? "GET" : (process.env.MEDIA_VIDEO_METHOD || "POST").toUpperCase();
   const model = (process.env.MEDIA_VIDEO_MODEL || "").trim();
+  const hasInvalidPollinationsModel = usePollinationsDefault && Boolean(model) && !POLLINATIONS_VIDEO_MODELS.has(model);
   const seed = Number(process.env.MEDIA_VIDEO_SEED || "");
 
   const endpoint = usePollinationsDefault
@@ -90,7 +123,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     : configuredEndpoint;
   const url = new URL(endpoint);
   if (usePollinationsDefault) {
-    if (model) {
+    if (model && POLLINATIONS_VIDEO_MODELS.has(model)) {
       url.searchParams.set("model", model);
     }
     if (Number.isFinite(seed) && seed > 0) {
@@ -115,10 +148,13 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
+    const hasToken = Boolean(token);
     throw new Error(
       !usePollinationsDefault
         ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}`
-        : `Video generation failed (${res.status}). Set MEDIA_VIDEO_TOKEN for Pollinations, or set MEDIA_VIDEO_ENDPOINT to a custom provider.`
+        : hasToken
+        ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Pollinations rejected the request even though MEDIA_VIDEO_TOKEN is set.${hasInvalidPollinationsModel ? ` MEDIA_VIDEO_MODEL=${model} is not a supported Pollinations video model and was ignored.` : ""}`
+        : `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Set MEDIA_VIDEO_TOKEN for Pollinations, or set MEDIA_VIDEO_ENDPOINT to a custom provider.${hasInvalidPollinationsModel ? ` MEDIA_VIDEO_MODEL=${model} is not a supported Pollinations video model and was ignored.` : ""}`
     );
   }
 
