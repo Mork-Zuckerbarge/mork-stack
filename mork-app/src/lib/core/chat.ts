@@ -180,6 +180,9 @@ export async function respondToChat(input: unknown) {
   const instruction =
     `Reply as Mork Zuckerbarge.\n` +
     modeInstruction +
+    `Do not assume or invent the user's name.\n` +
+    `If a handle is provided in context, use it sparingly (at most once when genuinely helpful), not in every reply.\n` +
+    `Never call different users by the same guessed name.\n` +
     `Max ${finalMaxChars} characters.\n` +
     `${responsePolicy.allowUrls ? "URLs are allowed.\n" : "Do NOT include URLs.\n"}` +
     `${responsePolicy.allowUserMessageQuotes ? "You may quote the user's message when useful.\n" : "Do NOT quote the user's message.\n"}` +

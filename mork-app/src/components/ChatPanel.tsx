@@ -166,10 +166,10 @@ export default function ChatPanel() {
           { label: "show services", value: "show services" },
           { label: "start arb", value: "start arb" },
           { label: "stop sherpa", value: "stop sherpa" },
-          { label: "telegram:", value: "post to telegram: gm chat" },
-          { label: "generate image:", value: "generate image: neon cyberpunk frog DJ in a rainstorm" },
-          { label: "generate video:", value: "generate video cinematic drone shot over neon city at sunset" },
-          { label: "buy:", value: "go buy $2 of $spx" },
+          { label: "telegram:", value: "post to telegram:" },
+          { label: "generate image:", value: "generate image:" },
+          { label: "generate video:", value: "generate video:" },
+          { label: "buy:", value: "buy:" },
         ].map((preset) => (
           <button
             key={preset.label}
