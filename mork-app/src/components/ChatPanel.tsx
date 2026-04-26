@@ -148,11 +148,11 @@ export default function ChatPanel() {
                   </button>
                   <button
                     onClick={() =>
-                      setInput(`send ${m.media?.filename} to x with caption: ${m.media?.prompt || "Generated in Mork"}`)
+                      setInput(`load ${m.media?.filename} to sherpa with caption: ${m.media?.prompt || "Generated in Mork"}`)
                     }
                     className="rounded-full border border-white/20 bg-white/5 px-3 py-1"
                   >
-                    Send to X
+                    Load to Sherpa
                   </button>
                 </div>
               </div>

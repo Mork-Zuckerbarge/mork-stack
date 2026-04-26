@@ -88,12 +88,12 @@
 ## Step 3: Set Up Your Bot
 1. When the app opens, paste in your API keys. Save credentials.
 2. Create your character. (Or do it in the python file.)
-3. Click "Enable Scheduler" to launch autopilot.
+3. Click "Begin Automation" to launch autopilot.
 
 ## Important Notes
 - The bot posts every 1.5 hours
 - Maximum 500 tweets per month
-- Optional cross-posting can send content to Reddit, Facebook, and Instagram when those credentials are set
+- Optional destination toggles in Control Center let you route each post to X, Telegram, Reddit, Facebook, and Instagram (when credentials are set)
 - The following files are created automatically and contain your private data - never share them:
   - encryption.key
   - encrypted_credentials.bin

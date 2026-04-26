@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
+import { parseEnvStyleUrls, readStylePackUrls } from "@/lib/core/stylePack";
 
 export type GeneratedMedia = {
   kind: "image" | "video";
@@ -87,6 +88,12 @@ async function fetchBinary(url: string, context: string): Promise<{ bytes: Uint8
   return { bytes, mimeType };
 }
 
+async function getStyleReferenceUrls(): Promise<string[]> {
+  const envUrls = parseEnvStyleUrls(process.env.MEDIA_STYLE_IMAGE_URLS || "");
+  const persistedUrls = await readStylePackUrls();
+  return [...new Set([...envUrls, ...persistedUrls])].slice(0, 7);
+}
+
 export async function generateImage(prompt: string): Promise<GeneratedMedia> {
   const seed = Math.floor(Math.random() * 1_000_000_000);
   const imageUrl = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`);
@@ -98,6 +105,10 @@ export async function generateImage(prompt: string): Promise<GeneratedMedia> {
   const model = (process.env.MEDIA_IMAGE_MODEL || "flux").trim();
   if (model) {
     imageUrl.searchParams.set("model", model);
+  }
+  const styleRefs = await getStyleReferenceUrls();
+  if (styleRefs.length) {
+    imageUrl.searchParams.set("image", styleRefs.join(","));
   }
 
   const { bytes, mimeType } = await fetchBinary(imageUrl.toString(), "Image generation");
@@ -145,6 +156,10 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     }
     if ((process.env.MEDIA_VIDEO_AUDIO || "").trim() === "1") {
       url.searchParams.set("audio", "true");
+    }
+    const styleRefs = await getStyleReferenceUrls();
+    if (styleRefs.length) {
+      url.searchParams.set("image", styleRefs.join(","));
     }
   }
 

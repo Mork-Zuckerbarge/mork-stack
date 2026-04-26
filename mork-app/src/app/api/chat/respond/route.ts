@@ -3,7 +3,7 @@ import { respondToChat } from "@/lib/core/chat";
 import { getOrchestratorState, startRuntime, stopRuntime } from "@/lib/core/orchestrator";
 import { prisma } from "@/lib/core/prisma";
 import { generateImage, generateVideo } from "@/lib/core/media";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 type ChatChannel = "system" | "telegram" | "x";
@@ -12,7 +12,7 @@ type RoutedCommand =
   | { type: "tweet"; text: string }
   | { type: "telegram"; text: string }
   | { type: "media.generate"; mediaKind: "image" | "video"; prompt: string }
-  | { type: "media.share"; platform: "telegram" | "x"; filename: string; caption: string }
+  | { type: "media.share"; platform: "telegram" | "x" | "sherpa"; filename: string; caption: string }
   | { type: "buy"; usd: number; symbol: string }
   | { type: "services.status" }
   | { type: "service.start"; service: "arb" | "sherpa" }
@@ -119,13 +119,13 @@ function parseCommand(message: string): RoutedCommand | null {
   }
 
   const sendMediaMatch = trimmed.match(
-    /^send\s+([a-z0-9._-]+)\s+to\s+(telegram|x)(?:\s+with\s+caption\s*:\s*(.+))?\s*$/i
+    /^(?:send|load)\s+([a-z0-9._-]+)\s+to\s+(telegram|x|sherpa)(?:\s+with\s+caption\s*:\s*(.+))?\s*$/i
   );
   if (sendMediaMatch?.[1]?.trim()) {
     return {
       type: "media.share",
       filename: sendMediaMatch[1].trim(),
-      platform: sendMediaMatch[2].toLowerCase() as "telegram" | "x",
+      platform: sendMediaMatch[2].toLowerCase() as "telegram" | "x" | "sherpa",
       caption: sendMediaMatch[3]?.trim() || "",
     };
   }
@@ -298,13 +298,25 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     }
     const mediaPath = path.join(process.cwd(), "public", "generated", cleanFilename);
 
-    if (command.platform === "x") {
+    if (command.platform === "x" || command.platform === "sherpa") {
+      const queuedTopic = command.caption || cleanFilename;
+      const queueFile = path.join(process.cwd(), "..", "services", "sherpa", "current_topic_from_app.txt");
+      try {
+        await mkdir(path.dirname(queueFile), { recursive: true });
+        await writeFile(queueFile, queuedTopic, "utf8");
+      } catch {
+        return {
+          ok: false,
+          status: 500,
+          error: "Could not queue topic for Sherpa. Verify services/sherpa is writable.",
+        };
+      }
       return {
         ok: true,
         status: 200,
         routed: "sherpa/x",
         command: "media.share",
-        response: `Prepared X media draft for ${cleanFilename}. Caption: ${command.caption || "(none)"} (Direct X media posting is still external).`,
+        response: `Loaded ${cleanFilename} into Sherpa Current Topic/Story. Caption queued: ${command.caption || "(none)"}.`,
       };
     }
 
