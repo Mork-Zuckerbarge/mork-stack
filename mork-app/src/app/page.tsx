@@ -4,7 +4,6 @@ import JupiterPanel from "@/components/JupiterPanel";
 import AppControlPanel from "@/components/AppControlPanel";
 import PreflightStatusCard from "@/components/PreflightStatusCard";
 import SherpaPanel from "@/components/SherpaPanel";
-import WalletPanel from "@/components/WalletPanel";
 
 export default function HomePage() {
   return (
@@ -22,7 +21,6 @@ export default function HomePage() {
 
         <section className="space-y-6">
           <AppControlPanel />
-          <WalletPanel />
           <AgentStatusCard />
           <PreflightStatusCard />
         </section>
