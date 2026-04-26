@@ -199,7 +199,36 @@ export default function AppControlPanel() {
       setStatusText(`Upload ${STYLE_SETUP_IMAGE_TARGET} style images before completing first-time setup.`);
       return;
     }
-    await act("startup.completed.set", { value: true });
+    if (busy) return;
+    setBusy(true);
+    setStatusText("Uploading style pack…");
+    try {
+      const form = new FormData();
+      styleSetupImages.forEach((file) => form.append("files", file));
+      const uploadRes = await fetch("/api/app/style-pack", { method: "POST", body: form });
+      const uploadData = await uploadRes.json().catch(() => ({}));
+      if (!uploadRes.ok || !uploadData?.ok) {
+        setStatusText(uploadData?.error || `Style pack upload failed (${uploadRes.status})`);
+        return;
+      }
+
+      const setupRes = await fetch("/api/app/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "startup.completed.set", value: true }),
+      });
+      const setupData = await setupRes.json().catch(() => ({}));
+      if (!setupRes.ok || !setupData?.ok) {
+        setStatusText(setupData?.error || `Startup completion failed (${setupRes.status})`);
+        return;
+      }
+      setState(setupData.state);
+      setStatusText(`Setup complete. Stored ${uploadData?.count || styleSetupImages.length} style references.`);
+    } catch {
+      setStatusText("Failed to upload style pack.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
