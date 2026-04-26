@@ -730,6 +730,13 @@ class TwitterBot:
         self.meme_counter = 0
         self.meme_frequency = 5
         self.used_memes = set()
+        self.publish_targets = {
+            "x": True,
+            "telegram": False,
+            "facebook": False,
+            "instagram": False,
+            "reddit": False,
+        }
 
         if not os.path.exists("memes"):
             os.makedirs("memes")
@@ -2001,13 +2008,6 @@ class TwitterBot:
           - send_tweet(character_name, topic)  # generates text first
         """
         try:
-            if not self.twitter_client:
-                print("❌ Twitter client not initialized.")
-                return False
-
-            if not self.check_rate_limit():
-                return False
-
             if topic is None:
                 tweet_text = (tweet_or_character or "").strip()
             else:
@@ -2018,29 +2018,43 @@ class TwitterBot:
                 print("⚠ Empty tweet text; skipping send.")
                 return False
 
-            response = self.twitter_client.create_tweet(text=tweet_text)
-            if not response or not response.data:
-                print("⚠ Tweet send returned no data.")
-                return False
+            posted_anywhere = False
+            tweet_url = None
 
-            tweet_id = response.data.get("id")
-            self.last_successful_tweet = datetime.now()
-            self.update_rate_limit()
+            if self.publish_targets.get("x", True):
+                if not self.twitter_client:
+                    print("❌ Twitter client not initialized.")
+                    return False
+                if not self.check_rate_limit():
+                    return False
+                response = self.twitter_client.create_tweet(text=tweet_text)
+                if not response or not response.data:
+                    print("⚠ Tweet send returned no data.")
+                    return False
+                tweet_id = response.data.get("id")
+                self.last_successful_tweet = datetime.now()
+                self.update_rate_limit()
+                posted_anywhere = True
+                if tweet_id:
+                    username = (self.credentials.get("twitter_username") or "").lstrip("@")
+                    if username:
+                        tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+                print(f"✅ Tweet sent successfully: {tweet_id}")
 
-            if tweet_id:
-                username = (self.credentials.get("twitter_username") or "").lstrip("@")
-                tweet_url = None
-                if username:
-                    tweet_url = f"https://x.com/{username}/status/{tweet_id}"
-                    self.send_to_telegram(tweet_url)
-
-                # Optional cross-posting targets (best effort; never fail the X post)
+            if self.publish_targets.get("telegram", False):
+                self.send_to_telegram(tweet_url or tweet_text)
+                posted_anywhere = True
+            if self.publish_targets.get("reddit", False):
                 self.send_to_reddit(tweet_text, source_url=tweet_url)
+                posted_anywhere = True
+            if self.publish_targets.get("facebook", False):
                 self.send_to_facebook(tweet_text, source_url=tweet_url)
+                posted_anywhere = True
+            if self.publish_targets.get("instagram", False):
                 self.send_to_instagram(tweet_text)
+                posted_anywhere = True
 
-            print(f"✅ Tweet sent successfully: {tweet_id}")
-            return True
+            return posted_anywhere
         except tweepy.TooManyRequests as e:
             self.handle_rate_limit_error(e)
             return False
@@ -2781,11 +2795,14 @@ class TwitterBot:
             secondary_hue="green",
             neutral_hue="slate",
             text_size="lg",
-        )) as interface:
+        ), css="""
+        .compact-section .gr-block, .compact-section .gr-box { padding: 6px !important; margin-bottom: 6px !important; }
+        .compact-section .gr-form, .compact-section .gradio-row { gap: 6px !important; }
+        """) as interface:
             print("\n=== Creating UI Components ===")
             gr.Markdown("# 💻 AI Twitter Bot Control Center")
             
-            with gr.Accordion("🔑 Getting Started", open=True):
+            with gr.Accordion("🔑 Getting Started", open=True, elem_classes=["compact-section"]):
                 print("\nInitializing credential textboxes...")
                 
                 def load_initial_values():
@@ -3101,7 +3118,7 @@ class TwitterBot:
 
             
             print("\nInitializing character management components...")
-            with gr.Accordion("👤 Character Management", open=True):
+            with gr.Accordion("👤 Character Management", open=True, elem_classes=["compact-section"]):
                 gr.Markdown("Create and manage your AI characters")
                 
                 # Get list of characters and set default
@@ -3236,44 +3253,47 @@ class TwitterBot:
                     delete_status = gr.Textbox(label="Delete Status", interactive=False)
                 
             # Control Center section
-            with gr.Accordion("🎮 Control Center", open=True):
+            with gr.Accordion("🎮 Control Center", open=True, elem_classes=["compact-section"]):
                 gr.Markdown("Generate and post tweets using your AI characters")
                 
                 with gr.Row():
-                    character_dropdown = gr.Dropdown(
-                    choices=list(self.characters.keys()), 
-                    value=None if not self.characters else next(iter(self.characters.keys())), 
-                    label="Select Character",
-                    interactive=bool(self.characters)  # Disable if no characters
-                )
+                    with gr.Column(scale=1, min_width=360):
+                        character_dropdown = gr.Dropdown(
+                            choices=list(self.characters.keys()),
+                            value=None if not self.characters else next(iter(self.characters.keys())),
+                            label="Select Character",
+                            interactive=bool(self.characters)
+                        )
+                        subject_dropdown = gr.Dropdown(
+                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All)", "__surprise_all__")],
+                            value="crypto",
+                            label="Select Subject",
+                            interactive=True
+                        )
+                        with gr.Row():
+                            new_story_btn = gr.Button("New Story")
+                            tweet_btn = gr.Button("Post Single Tweet")
+                            pull_app_topic_btn = gr.Button("Pull App Topic")
+                        tweet_status = gr.Textbox(label="Tweet Status", interactive=False)
+                        scheduler_enabled = gr.Checkbox(label="Begin Automation", value=False)
+                        scheduler_status = gr.Markdown("Scheduler: NOT RUNNING")
+                        with gr.Row():
+                            target_x = gr.Checkbox(label="X", value=self.publish_targets.get("x", True), interactive=True)
+                            target_tg = gr.Checkbox(label="TG", value=self.publish_targets.get("telegram", False), interactive=True)
+                            target_fb = gr.Checkbox(label="FB", value=self.publish_targets.get("facebook", False), interactive=True)
+                            target_ig = gr.Checkbox(label="Instagram", value=self.publish_targets.get("instagram", False), interactive=True)
+                            target_reddit = gr.Checkbox(label="Reddit", value=self.publish_targets.get("reddit", False), interactive=True)
+                        with gr.Row():
+                            use_news = gr.Checkbox(value=True, label="Use News Feed", interactive=True)
+                            use_memes = gr.Checkbox(value=self.use_memes, label="Use Memes", interactive=True)
+                            meme_frequency = gr.Number(value=self.meme_frequency, label="Post meme every X tweets", minimum=1, maximum=100, step=1)
 
-                                    # --- Subject / content controls ---
-                    subject_dropdown = gr.Dropdown(
-                        choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All)", "__surprise_all__")],
-                        value="crypto",
-                        label="Select Subject",
-                        interactive=True
-                    )
-
-                    with gr.Row():
-                        use_news = gr.Checkbox(value=True, label="Use News Feed", interactive=True)
-                        use_memes = gr.Checkbox(value=self.use_memes, label="Use Memes", interactive=True)
-                        meme_frequency = gr.Number(value=self.meme_frequency, label="Post meme every X tweets", minimum=1, maximum=100, step=1)
-
-                    current_topic = gr.Textbox(
-                        label="Current Topic/Story",
-                        lines=3,
-                        interactive=True
-                    )
-
-                    with gr.Row():
-                        new_story_btn = gr.Button("New Story")
-                        tweet_btn = gr.Button("Post Single Tweet")
-
-                    tweet_status = gr.Textbox(label="Tweet Status", interactive=False)
-
-                    scheduler_enabled = gr.Checkbox(label="Enable Scheduler", value=False)
-                    scheduler_status = gr.Markdown("Scheduler: NOT RUNNING")
+                    with gr.Column(scale=2, min_width=420):
+                        current_topic = gr.Textbox(
+                            label="Current Topic/Story",
+                            lines=10,
+                            interactive=True
+                        )
 
                     # ---------- Helpers ----------
                     import random
@@ -3300,11 +3320,34 @@ class TwitterBot:
                         self.subject = subject
                         return gr.update()  # no UI change -> no network calls
 
+                    def _set_publish_targets(x, tg, fb, ig, reddit):
+                        self.publish_targets = {
+                            "x": bool(x),
+                            "telegram": bool(tg),
+                            "facebook": bool(fb),
+                            "instagram": bool(ig),
+                            "reddit": bool(reddit),
+                        }
+                        return "Destination toggles updated."
+
                     # Wire subject change ONLY to update the selected subject for the scheduler
                     subject_dropdown.change(_update_subject, inputs=[subject_dropdown], outputs=[])
 
                     # Button wiring (manual fetch only when you click New Story)
                     new_story_btn.click(get_story_dispatch, inputs=[subject_dropdown], outputs=[current_topic])
+
+                    def load_app_topic():
+                        queue_file = os.path.join(os.path.dirname(__file__), "current_topic_from_app.txt")
+                        if not os.path.exists(queue_file):
+                            return "No queued topic from app found."
+                        try:
+                            with open(queue_file, "r", encoding="utf-8") as f:
+                                queued = f.read().strip()
+                            return queued or "Queued app topic file was empty."
+                        except Exception as e:
+                            return f"Failed to load queued app topic: {e}"
+
+                    pull_app_topic_btn.click(load_app_topic, outputs=[current_topic])
 
                     def send_tweet(character, topic):
                         success = self.send_tweet(character, topic)
@@ -3392,6 +3435,12 @@ class TwitterBot:
                     inputs=[scheduler_enabled, character_dropdown, subject_dropdown],
                     outputs=[tweet_status, scheduler_status, current_topic]
                 )
+                for toggle in [target_x, target_tg, target_fb, target_ig, target_reddit]:
+                    toggle.change(
+                        _set_publish_targets,
+                        inputs=[target_x, target_tg, target_fb, target_ig, target_reddit],
+                        outputs=[tweet_status]
+                    )
             
                 def manual_tweet(character, topic):
                     if not character:
@@ -3524,7 +3573,7 @@ class TwitterBot:
             tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
 
             # NEW: connect the Surprise me (All Feeds) button to fill current_topic
-            surprise_all_btn.click(lambda: get_random_story_all(), outputs=[current_topic])
+            surprise_all_btn.click(lambda: self.get_random_story_all(), outputs=[current_topic])
 
             # Connect checkbox handlers
             def update_news_feed(value):
