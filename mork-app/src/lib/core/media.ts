@@ -136,6 +136,11 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     ...(!usePollinationsDefault ? { "Content-Type": "application/json" } : {}),
   };
   const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
+  if (usePollinationsDefault && token) {
+    // Pollinations docs support API keys in either Authorization bearer header or `?key=` query params.
+    // Setting both increases compatibility for proxies/gateways that strip auth headers.
+    url.searchParams.set("key", token);
+  }
   const authHeaders: HeadersInit = token ? { ...baseHeaders, Authorization: `Bearer ${token}` } : { ...baseHeaders };
 
   const executeRequest = async (requestUrl: URL, headers: HeadersInit = authHeaders) =>
