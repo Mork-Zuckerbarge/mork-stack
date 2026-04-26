@@ -149,7 +149,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     });
 
   let res = await executeRequest(url);
-  if (usePollinationsDefault && res.status === 400 && url.searchParams.has("model")) {
+  if (usePollinationsDefault && res.status === 400) {
     const detail = await res.text().catch(() => "");
     const invalidModelResponse =
       detail.includes("Invalid parameters") && detail.includes("Invalid option") && detail.includes("model");
@@ -165,6 +165,8 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     throw new Error(
       !usePollinationsDefault
         ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}`
+        : hasToken && res.status === 401
+        ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Pollinations rejected the provided MEDIA_VIDEO_TOKEN. Confirm the token is valid for gen.pollinations.ai/video and restart the app after updating env vars.${hasInvalidPollinationsModel ? ` MEDIA_VIDEO_MODEL=${model} is not a supported Pollinations video model and was ignored.` : ""}`
         : hasToken
         ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Pollinations rejected the request even though MEDIA_VIDEO_TOKEN is set.${hasInvalidPollinationsModel ? ` MEDIA_VIDEO_MODEL=${model} is not a supported Pollinations video model and was ignored.` : ""}`
         : `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Set MEDIA_VIDEO_TOKEN for Pollinations, or set MEDIA_VIDEO_ENDPOINT to a custom provider.${hasInvalidPollinationsModel ? ` MEDIA_VIDEO_MODEL=${model} is not a supported Pollinations video model and was ignored.` : ""}`
