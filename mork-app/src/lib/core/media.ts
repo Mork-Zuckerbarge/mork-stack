@@ -132,15 +132,13 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   }
 
   const body = !usePollinationsDefault && method !== "GET" ? JSON.stringify({ prompt }) : undefined;
-  const headers: HeadersInit = {
+  const baseHeaders: HeadersInit = {
     ...(!usePollinationsDefault ? { "Content-Type": "application/json" } : {}),
   };
   const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
+  const authHeaders: HeadersInit = token ? { ...baseHeaders, Authorization: `Bearer ${token}` } : { ...baseHeaders };
 
-  const executeRequest = async (requestUrl: URL) =>
+  const executeRequest = async (requestUrl: URL, headers: HeadersInit = authHeaders) =>
     fetch(requestUrl.toString(), {
       method,
       headers,
@@ -155,7 +153,17 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
       detail.includes("Invalid parameters") && detail.includes("Invalid option") && detail.includes("model");
     if (invalidModelResponse) {
       url.searchParams.delete("model");
-      res = await executeRequest(url);
+      res = await executeRequest(url, authHeaders);
+      if (!res.ok && token) {
+        const unauthDetail = await res.text().catch(() => "");
+        const invalidModelWithToken =
+          unauthDetail.includes("Invalid parameters") &&
+          unauthDetail.includes("Invalid option") &&
+          unauthDetail.includes("model");
+        if (invalidModelWithToken) {
+          res = await executeRequest(url, baseHeaders);
+        }
+      }
     }
   }
 
