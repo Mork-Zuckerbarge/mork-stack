@@ -3257,47 +3257,43 @@ class TwitterBot:
                 gr.Markdown("Generate and post tweets using your AI characters")
                 
                 with gr.Row():
-                    character_dropdown = gr.Dropdown(
-                    choices=list(self.characters.keys()), 
-                    value=None if not self.characters else next(iter(self.characters.keys())), 
-                    label="Select Character",
-                    interactive=bool(self.characters)  # Disable if no characters
-                )
+                    with gr.Column(scale=1, min_width=360):
+                        character_dropdown = gr.Dropdown(
+                            choices=list(self.characters.keys()),
+                            value=None if not self.characters else next(iter(self.characters.keys())),
+                            label="Select Character",
+                            interactive=bool(self.characters)
+                        )
+                        subject_dropdown = gr.Dropdown(
+                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All)", "__surprise_all__")],
+                            value="crypto",
+                            label="Select Subject",
+                            interactive=True
+                        )
+                        with gr.Row():
+                            new_story_btn = gr.Button("New Story")
+                            tweet_btn = gr.Button("Post Single Tweet")
+                            pull_app_topic_btn = gr.Button("Pull App Topic")
+                        tweet_status = gr.Textbox(label="Tweet Status", interactive=False)
+                        scheduler_enabled = gr.Checkbox(label="Begin Automation", value=False)
+                        scheduler_status = gr.Markdown("Scheduler: NOT RUNNING")
+                        with gr.Row():
+                            target_x = gr.Checkbox(label="X", value=self.publish_targets.get("x", True), interactive=True)
+                            target_tg = gr.Checkbox(label="TG", value=self.publish_targets.get("telegram", False), interactive=True)
+                            target_fb = gr.Checkbox(label="FB", value=self.publish_targets.get("facebook", False), interactive=True)
+                            target_ig = gr.Checkbox(label="Instagram", value=self.publish_targets.get("instagram", False), interactive=True)
+                            target_reddit = gr.Checkbox(label="Reddit", value=self.publish_targets.get("reddit", False), interactive=True)
+                        with gr.Row():
+                            use_news = gr.Checkbox(value=True, label="Use News Feed", interactive=True)
+                            use_memes = gr.Checkbox(value=self.use_memes, label="Use Memes", interactive=True)
+                            meme_frequency = gr.Number(value=self.meme_frequency, label="Post meme every X tweets", minimum=1, maximum=100, step=1)
 
-                                    # --- Subject / content controls ---
-                    subject_dropdown = gr.Dropdown(
-                        choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All)", "__surprise_all__")],
-                        value="crypto",
-                        label="Select Subject",
-                        interactive=True
-                    )
-
-                    with gr.Row():
-                        use_news = gr.Checkbox(value=True, label="Use News Feed", interactive=True)
-                        use_memes = gr.Checkbox(value=self.use_memes, label="Use Memes", interactive=True)
-                        meme_frequency = gr.Number(value=self.meme_frequency, label="Post meme every X tweets", minimum=1, maximum=100, step=1)
-
-                    current_topic = gr.Textbox(
-                        label="Current Topic/Story",
-                        lines=3,
-                        interactive=True
-                    )
-
-                    with gr.Row():
-                        new_story_btn = gr.Button("New Story")
-                        tweet_btn = gr.Button("Post Single Tweet")
-                        pull_app_topic_btn = gr.Button("Pull App Topic")
-
-                    tweet_status = gr.Textbox(label="Tweet Status", interactive=False)
-
-                    scheduler_enabled = gr.Checkbox(label="Begin Automation", value=False)
-                    scheduler_status = gr.Markdown("Scheduler: NOT RUNNING")
-                    with gr.Row():
-                        target_x = gr.Checkbox(label="X", value=self.publish_targets.get("x", True), interactive=True)
-                        target_tg = gr.Checkbox(label="TG", value=self.publish_targets.get("telegram", False), interactive=True)
-                        target_fb = gr.Checkbox(label="FB", value=self.publish_targets.get("facebook", False), interactive=True)
-                        target_ig = gr.Checkbox(label="Instagram", value=self.publish_targets.get("instagram", False), interactive=True)
-                        target_reddit = gr.Checkbox(label="Reddit", value=self.publish_targets.get("reddit", False), interactive=True)
+                    with gr.Column(scale=2, min_width=420):
+                        current_topic = gr.Textbox(
+                            label="Current Topic/Story",
+                            lines=10,
+                            interactive=True
+                        )
 
                     # ---------- Helpers ----------
                     import random

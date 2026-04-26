@@ -18,6 +18,22 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const contentType = req.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const body = (await req.json()) as { urls?: unknown };
+      const urls = Array.isArray(body?.urls)
+        ? body.urls.filter((entry): entry is string => typeof entry === "string" && /^https?:\/\//i.test(entry.trim()))
+        : [];
+      if (urls.length < 1) {
+        return NextResponse.json({ ok: false, error: "Provide at least one public http(s) style image URL." }, { status: 400 });
+      }
+      if (urls.length > 20) {
+        return NextResponse.json({ ok: false, error: "URL style pack limit is 20 images." }, { status: 400 });
+      }
+      await writeStylePackUrls(urls);
+      return NextResponse.json({ ok: true, urls, count: urls.length });
+    }
+
     const form = await req.formData();
     const files = form
       .getAll("files")

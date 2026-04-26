@@ -65,6 +65,13 @@ const personaModes = {
 
 const STYLE_SETUP_IMAGE_TARGET = 7;
 
+function parseStyleUrls(raw: string): string[] {
+  return raw
+    .split(/[,\n]/g)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 export default function AppControlPanel() {
   const [state, setState] = useState<AppControlState | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
@@ -74,7 +81,7 @@ export default function AppControlPanel() {
   const [sherpaBootstrapMessage, setSherpaBootstrapMessage] = useState("");
   const [sherpaBootstrapAction, setSherpaBootstrapAction] = useState("");
   const [openAiRuntime, setOpenAiRuntime] = useState<OpenAiRuntime>({ enabled: false });
-  const [styleSetupImages, setStyleSetupImages] = useState<File[]>([]);
+  const [styleSetupUrls, setStyleSetupUrls] = useState("");
 
   async function load() {
     const res = await fetch("/api/app/control");
@@ -195,17 +202,20 @@ export default function AppControlPanel() {
   }
 
   async function completeFirstTimeSetup() {
-    if (styleSetupImages.length < STYLE_SETUP_IMAGE_TARGET) {
-      setStatusText(`Upload ${STYLE_SETUP_IMAGE_TARGET} style images before completing first-time setup.`);
+    const urls = parseStyleUrls(styleSetupUrls);
+    if (urls.length < STYLE_SETUP_IMAGE_TARGET) {
+      setStatusText(`Provide ${STYLE_SETUP_IMAGE_TARGET} style image URLs before completing first-time setup.`);
       return;
     }
     if (busy) return;
     setBusy(true);
     setStatusText("Uploading style pack…");
     try {
-      const form = new FormData();
-      styleSetupImages.forEach((file) => form.append("files", file));
-      const uploadRes = await fetch("/api/app/style-pack", { method: "POST", body: form });
+      const uploadRes = await fetch("/api/app/style-pack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls }),
+      });
       const uploadData = await uploadRes.json().catch(() => ({}));
       if (!uploadRes.ok || !uploadData?.ok) {
         setStatusText(uploadData?.error || `Style pack upload failed (${uploadRes.status})`);
@@ -223,7 +233,7 @@ export default function AppControlPanel() {
         return;
       }
       setState(setupData.state);
-      setStatusText(`Setup complete. Stored ${uploadData?.count || styleSetupImages.length} style references.`);
+      setStatusText(`Setup complete. Stored ${uploadData?.count || urls.length} style references.`);
     } catch {
       setStatusText("Failed to upload style pack.");
     } finally {
@@ -253,7 +263,7 @@ export default function AppControlPanel() {
         <div className="space-y-4 text-sm">
           {!state.controls.startupCompleted ? (
             <div className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-              First startup setup is incomplete. Select a model and upload a <strong>{STYLE_SETUP_IMAGE_TARGET}-image</strong> style starter pack, then click <strong>Complete First-Time Setup</strong>.
+              First startup setup is incomplete. Select a model and provide <strong>{STYLE_SETUP_IMAGE_TARGET} public image URLs</strong> for style starter pack, then click <strong>Complete First-Time Setup</strong>.
             </div>
           ) : null}
 
@@ -300,23 +310,23 @@ export default function AppControlPanel() {
             </div>
             <div className="mt-3 rounded-xl border border-white/10 bg-black/25 p-3">
               <label className="mb-2 block text-xs text-white/70">
-                Style starter pack ({STYLE_SETUP_IMAGE_TARGET} images required)
+                Style starter pack ({STYLE_SETUP_IMAGE_TARGET} public image URLs required)
               </label>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={(e) => setStyleSetupImages(Array.from(e.target.files || []))}
+              <textarea
+                rows={4}
+                value={styleSetupUrls}
+                onChange={(e) => setStyleSetupUrls(e.target.value)}
                 disabled={busy}
-                className="w-full text-xs text-white/75 file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-white"
+                placeholder={`https://.../style1.jpg\nhttps://.../style2.jpg`}
+                className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/75 outline-none"
               />
               <p className="mt-2 text-xs text-white/60">
-                Selected: {styleSetupImages.length}/{STYLE_SETUP_IMAGE_TARGET}
+                Selected: {parseStyleUrls(styleSetupUrls).length}/{STYLE_SETUP_IMAGE_TARGET}
               </p>
             </div>
             <button
               onClick={completeFirstTimeSetup}
-              disabled={busy || styleSetupImages.length < STYLE_SETUP_IMAGE_TARGET}
+              disabled={busy || parseStyleUrls(styleSetupUrls).length < STYLE_SETUP_IMAGE_TARGET}
               className="mt-3 w-full rounded-xl border border-white/10 px-3 py-2"
             >
               Complete First-Time Setup
