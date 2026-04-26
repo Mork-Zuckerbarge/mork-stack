@@ -86,7 +86,7 @@ Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
 - Chat media generation:
   - Images default to Pollinations (no extra setup in this repo).
   - Videos now default to Pollinations `gen.pollinations.ai/video/{prompt}` when `MEDIA_VIDEO_ENDPOINT` is empty.
-  - `MEDIA_VIDEO_TOKEN` can be set to a Pollinations key if your account/rate limits require auth.
+  - `MEDIA_VIDEO_TOKEN` can be set to a Pollinations key if your account/rate limits require auth (the app sends this as both `Authorization: Bearer ...` and `?key=...` for compatibility with Pollinations auth modes).
   - Optional overrides: `MEDIA_VIDEO_MODEL`, `MEDIA_VIDEO_SEED`.
   - Use `MEDIA_VIDEO_ENDPOINT` only when you intentionally want a custom provider.
   - `MEDIA_VIDEO_METHOD` applies to custom endpoint mode only (Pollinations default uses `GET`).
