@@ -140,12 +140,25 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(url.toString(), {
-    method,
-    headers,
-    body,
-    cache: "no-store",
-  });
+  const executeRequest = async (requestUrl: URL) =>
+    fetch(requestUrl.toString(), {
+      method,
+      headers,
+      body,
+      cache: "no-store",
+    });
+
+  let res = await executeRequest(url);
+  if (usePollinationsDefault && res.status === 400 && url.searchParams.has("model")) {
+    const detail = await res.text().catch(() => "");
+    const invalidModelResponse =
+      detail.includes("Invalid parameters") && detail.includes("Invalid option") && detail.includes("model");
+    if (invalidModelResponse) {
+      url.searchParams.delete("model");
+      res = await executeRequest(url);
+    }
+  }
+
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     const hasToken = Boolean(token);

@@ -15,10 +15,14 @@ export default function WalletPanel() {
 
   async function loadState(force = false) {
     try {
-      const endpoint = force ? "/api/agent/state?force=1" : "/api/agent/state";
+      const endpoint = force ? "/api/wallet/state?force=1" : "/api/wallet/state";
       const res = await fetch(endpoint, { cache: "no-store" });
-      const data = await res.json();
-      setWallet(data.wallet);
+      const data = (await res.json()) as { ok?: boolean; wallet?: WalletState };
+      if (!res.ok || data.ok === false) {
+        setWallet(null);
+        return;
+      }
+      setWallet(data.wallet ?? null);
     } catch {
       setWallet(null);
     }
