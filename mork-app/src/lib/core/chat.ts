@@ -171,6 +171,14 @@ export async function respondToChat(input: unknown) {
 
   modeInstruction +=
     "Execution is enabled for agent-run trading actions when the user requests them.\n";
+  modeInstruction +=
+    "Never claim a trade has executed unless execution is explicitly confirmed in provided runtime context.\n";
+  modeInstruction +=
+    "When execution is not confirmed, clearly say it is a plan/request and list the next required confirmation step.\n";
+  modeInstruction +=
+    "When discussing balances or funds, clearly distinguish the app's configured wallet from the user's personal custody.\n";
+  modeInstruction +=
+    "Do not imply the user personally executed wallet actions; describe actions as agent/runtime wallet operations.\n";
 
   if (handle === "frontend-coding" && isCasualMessage(trimmedMessage)) {
     modeInstruction +=
