@@ -23,6 +23,25 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 const LAST_TRADE_FACT_KEY = "__agent_last_trade_iso_v1__";
 const BASE58_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const JUP_TOKEN_SEARCH_LIMIT = "100";
+const WORD_NUMBER_USD: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+};
+
+function parseUsdAmount(raw: string): number | null {
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  const normalized = raw.trim().toLowerCase();
+  return WORD_NUMBER_USD[normalized] ?? null;
+}
 
 function buildJupiterBaseCandidates() {
   const candidates = [
@@ -133,13 +152,30 @@ function parseCommand(message: string): RoutedCommand | null {
   const buyMatch =
     trimmed.match(/^go\s+buy\s+\$?(\d+(?:\.\d+)?)\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
     trimmed.match(/^buy\s+\$?(\d+(?:\.\d+)?)\s+(?:of\s+)?\$?([a-z0-9._-]+)(?:\s+now)?\s*$/i) ||
-    trimmed.match(/^ape\s+\$?(\d+(?:\.\d+)?)\s+into\s+\$?([a-z0-9._-]+)\s*$/i);
+    trimmed.match(/^ape\s+\$?(\d+(?:\.\d+)?)\s+into\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    trimmed.match(/^use\s+\$?(\d+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\s+to\s+buy\s+\$?([a-z0-9._-]+)\s*$/i);
   if (buyMatch) {
     return {
       type: "buy",
       usd: Number(buyMatch[1]),
       symbol: buyMatch[2].toUpperCase(),
     };
+  }
+
+  const buyWordsMatch =
+    trimmed.match(/^buy:\s*([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    trimmed.match(/^buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    trimmed.match(/^use\s+([a-z]+)\s*(?:usdc|usd|dollars?)\s+to\s+buy\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    trimmed.match(/^.*use\s+(?:the\s+)?usdc\s+to\s+buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i);
+  if (buyWordsMatch) {
+    const usd = parseUsdAmount(buyWordsMatch[1]);
+    if (usd) {
+      return {
+        type: "buy",
+        usd,
+        symbol: buyWordsMatch[2].toUpperCase(),
+      };
+    }
   }
 
   if (/^(?:services|service)\s+(?:status|list|show)$/i.test(trimmed) || /^show\s+services$/i.test(trimmed)) {
