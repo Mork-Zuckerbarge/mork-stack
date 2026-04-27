@@ -70,9 +70,8 @@ export async function POST(req: Request) {
     const agentInitiated = body.agentInitiated === true;
 
     if (agentInitiated) {
-      // Agent-triggered swaps bypass the panel/arb guard (they're intentional direct commands,
+      // Agent-triggered swaps bypass the panel/arb guard (intentional direct commands,
       // not UI trade-panel actions that conflict with the background ARB scanner).
-      // Instead, enforce the runtime execution authority settings.
       const authority = control.controls.executionAuthority;
       if (authority.mode === "emergency_stop") {
         return NextResponse.json(
@@ -87,7 +86,7 @@ export async function POST(req: Request) {
         );
       }
     } else {
-      // Manual UI swap: block when the ARB scanner is running or the trade panel is not active.
+      // Manual UI swap: block when the ARB scanner is running or trade panel is not active.
       if (control.arb.status === "running" || control.controls.activePanel !== "trade") {
         return NextResponse.json(
           { ok: false, error: "Trade panel is paused while ARB is active. Switch panel to Trade and stop ARB first." },
@@ -146,9 +145,7 @@ export async function POST(req: Request) {
         signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
       }).catch(() => null);
 
-      if (!quoteRes) {
-        continue;
-      }
+      if (!quoteRes) continue;
       if (!quoteRes.ok) {
         const text = await quoteRes.text().catch(() => "");
         quoteError = `Quote failed (${quoteRes.status}): ${text}`;
@@ -165,10 +162,7 @@ export async function POST(req: Request) {
 
     const swapRes = await fetch(`${jupiterBaseForSwap}/swap/v1/swap`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
       body: JSON.stringify({
         quoteResponse,
@@ -204,14 +198,7 @@ export async function POST(req: Request) {
       },
     });
 
-    return NextResponse.json({
-      ok: true,
-      signature,
-      amountIn,
-      inputMint,
-      outputMint,
-      wallet: signer.publicKey.toBase58(),
-    });
+    return NextResponse.json({ ok: true, signature, amountIn, inputMint, outputMint, wallet: signer.publicKey.toBase58() });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "direct swap failed";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
