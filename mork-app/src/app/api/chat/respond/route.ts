@@ -227,18 +227,21 @@ async function estimateSolForUsd(usd: number): Promise<number> {
 
 type JupiterTokenResult = { address?: string; symbol?: string };
 type JupiterAllToken = { address?: string; symbol?: string; name?: string };
+type JupiterTokenMeta = { decimals?: number };
 
 function matchTokenSymbol(normalized: string, tokens: Array<JupiterTokenResult & { address: string }>) {
-  const exact = tokens.find((item) => (item.symbol || "").toUpperCase() === normalized);
-  if (exact) return exact;
+  const exact = tokens.filter((item) => (item.symbol || "").toUpperCase() === normalized);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) throw new Error(`Token symbol $${normalized} is ambiguous on Jupiter. Use the token mint address instead.`);
   const noPunct = normalized.replace(/[^A-Z0-9]/g, "");
-  const tolerant = tokens.find((item) => (item.symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === noPunct);
-  if (tolerant) return tolerant;
-  return tokens.find((item) => (item.symbol || "").toUpperCase().startsWith(normalized)) || null;
+  const tolerant = tokens.filter((item) => (item.symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === noPunct);
+  if (tolerant.length === 1) return tolerant[0];
+  if (tolerant.length > 1) throw new Error(`Token symbol $${normalized} is ambiguous on Jupiter. Use the token mint address instead.`);
+  return null;
 }
 
 async function resolveTokenMint(symbolOrMint: string): Promise<{ mint: string; symbol: string }> {
-  const normalized = symbolOrMint.trim().toUpperCase();
+  const normalized = symbolOrMint.trim().replace(/^\$+/, "").replace(/[^A-Za-z0-9]+$/g, "").toUpperCase();
   if (!normalized) throw new Error("Buy command token symbol is required.");
 
   const staticMint = STATIC_SYMBOL_MINT_MAP[normalized];
@@ -269,6 +272,31 @@ async function resolveTokenMint(symbolOrMint: string): Promise<{ mint: string; s
   const selected = matchTokenSymbol(normalized, withAddress);
   if (!selected?.address) throw new Error(`Token symbol $${normalized} not found on Jupiter. Use the token mint address instead.`);
   return { mint: selected.address, symbol: (selected.symbol || normalized).toUpperCase() };
+}
+
+async function getTokenDecimals(mint: string): Promise<number> {
+  if (mint === SOL_MINT) return 9;
+  const token = (await fetchJsonWithJupiterFallback(`/tokens/v1/token/${mint}`, {})) as JupiterTokenMeta;
+  const decimals = Number(token.decimals);
+  return Number.isFinite(decimals) && decimals >= 0 ? decimals : 0;
+}
+
+async function estimateUsdNotional(inputMint: string, amountIn: number): Promise<number> {
+  if (amountIn <= 0) return 0;
+  if (inputMint === USDC_MINT) return amountIn;
+  const decimals = await getTokenDecimals(inputMint);
+  if (decimals < 0 || decimals > 12) throw new Error("Unable to resolve input token decimals for risk check.");
+  const amountBaseUnits = Math.floor(amountIn * 10 ** decimals);
+  if (amountBaseUnits <= 0) throw new Error("Trade quantity is too small for token precision.");
+  const quote = (await fetchJsonWithJupiterFallback("/swap/v1/quote", {
+    inputMint,
+    outputMint: USDC_MINT,
+    amount: String(amountBaseUnits),
+    slippageBps: "50",
+  })) as { outAmount?: string };
+  const outAmount = Number(quote.outAmount ?? 0);
+  if (!Number.isFinite(outAmount) || outAmount <= 0) throw new Error("Unable to estimate USD notional for trade guard.");
+  return outAmount / 1_000_000;
 }
 
 async function enforceTradeAuthority(usd: number) {
@@ -432,17 +460,6 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   if (normalizedInput === normalizedOutput) {
     return { ok: false, status: 400, error: "Input and output symbols must be different." };
   }
-  if (!(normalizedInput === "USDC" || normalizedInput === "USD")) {
-    return {
-      ok: false,
-      status: 400,
-      error: `Input token ${normalizedInput} is not supported in chat trade routing yet. Use: trade <quantity> USDC for <token>.`,
-    };
-  }
-
-  const tradeAuthority = await enforceTradeAuthority(command.quantity);
-  if (!tradeAuthority.ok) return tradeAuthority;
-
   let inputToken: { mint: string; symbol: string };
   let outputToken: { mint: string; symbol: string };
   try {
@@ -451,6 +468,17 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   } catch (error) {
     return { ok: false, status: 400, error: error instanceof Error ? error.message : "Token symbol resolution failed." };
   }
+
+  let usdNotional = command.quantity;
+  if (!(normalizedInput === "USDC" || normalizedInput === "USD")) {
+    try {
+      usdNotional = await estimateUsdNotional(inputToken.mint, command.quantity);
+    } catch (error) {
+      return { ok: false, status: 400, error: error instanceof Error ? error.message : "Could not estimate trade notional." };
+    }
+  }
+  const tradeAuthority = await enforceTradeAuthority(usdNotional);
+  if (!tradeAuthority.ok) return tradeAuthority;
 
   let swapRes: Response;
   try {
