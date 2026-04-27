@@ -22,146 +22,61 @@ function clipText(value: string | null | undefined, maxChars: number) {
 
 function isTechnicalMessage(message: string) {
   const m = message.toLowerCase();
-
   return [
-    "code",
-    "debug",
-    "bug",
-    "function",
-    "component",
-    "react",
-    "next",
-    "typescript",
-    "javascript",
-    "python",
-    "sql",
-    "html",
-    "css",
-    "api",
-    "server",
-    "wallet",
-    "trade",
-    "arb",
-    "token",
-    "sol",
-    "bbq",
-    "error",
-    "fix",
-    "build",
-    "compile",
-    "query",
-    "math",
-    "calculate",
-    "sqrt",
+    "code","debug","bug","function","component","react","next","typescript",
+    "javascript","python","sql","html","css","api","server","wallet","trade",
+    "arb","token","sol","bbq","error","fix","build","compile","query","math",
+    "calculate","sqrt",
   ].some((x) => m.includes(x));
 }
 
-export async function buildContext({
-  handle,
-  channel,
-  message,
-}: BuildContextArgs) {
-  if (!(await isMemoryEnabled())) {
-    return `CURRENT MESSAGE:\n${message}`;
-  }
+export async function buildContext({ handle, channel, message }: BuildContextArgs) {
+  if (!(await isMemoryEnabled())) return `CURRENT MESSAGE:\n${message}`;
 
   const technical = isTechnicalMessage(message);
   const plannerEnabled = await isPlannerEnabled();
-
   const normalizedHandle = (handle || "").trim();
 
   const [recentChat, walletMemory, tradeMemory, reflection, relationshipMemory, appControl, orchestratorState, preflight] =
     await Promise.all([
       prisma.memory.findMany({
-        where: {
-          OR: [
-            { source: "mork-app" },
-            { source: "frontend-coding" },
-            { source: channel },
-          ],
-        },
+        where: { OR: [{ source: "mork-app" }, { source: "frontend-coding" }, { source: channel }] },
         orderBy: { createdAt: "desc" },
         take: MAX_HISTORY_ITEMS,
       }),
-
-      technical
-        ? prisma.memory.findFirst({
-            where: { source: "wallet" },
-            orderBy: { createdAt: "desc" },
-          })
-        : Promise.resolve(null),
-
-      technical
-        ? prisma.memory.findFirst({
-            where: {
-              OR: [{ source: "arb" }, { source: "arb-bot" }, { source: "trade" }],
-            },
-            orderBy: { createdAt: "desc" },
-          })
-        : Promise.resolve(null),
-
-      plannerEnabled
-        ? prisma.memory.findFirst({
-            where: { type: "reflection" },
-            orderBy: { createdAt: "desc" },
-          })
-        : Promise.resolve(null),
-
+      technical ? prisma.memory.findFirst({ where: { source: "wallet" }, orderBy: { createdAt: "desc" } }) : Promise.resolve(null),
+      technical ? prisma.memory.findFirst({ where: { OR: [{ source: "arb" }, { source: "arb-bot" }, { source: "trade" }] }, orderBy: { createdAt: "desc" } }) : Promise.resolve(null),
+      plannerEnabled ? prisma.memory.findFirst({ where: { type: "reflection" }, orderBy: { createdAt: "desc" } }) : Promise.resolve(null),
       normalizedHandle
         ? prisma.memory.findFirst({
             where: {
               OR: [
-                {
-                  AND: [
-                    { source: "relationship" },
-                    { entities: { path: "$", string_contains: `handle:${normalizedHandle}` } },
-                  ],
-                },
+                { AND: [{ source: "relationship" }, { entities: { path: "$", string_contains: `handle:${normalizedHandle}` } }] },
                 { content: { contains: normalizedHandle } },
               ],
             },
             orderBy: { createdAt: "desc" },
           })
         : Promise.resolve(null),
-
       getAppControlState(),
-
       getOrchestratorState(),
-
       getPreflightStatus(),
     ]);
 
   const recentChatBlock = recentChat.length
-    ? "RECENT HISTORY:\n" +
-      [...recentChat]
-        .reverse()
-        .map((m) => `- [${m.source}/${m.type}] ${clipText(m.content, MAX_RECENT_LINE_CHARS)}`)
-        .join("\n")
+    ? "RECENT HISTORY:\n" + [...recentChat].reverse().map((m) => `- [${m.source}/${m.type}] ${clipText(m.content, MAX_RECENT_LINE_CHARS)}`).join("\n")
     : "";
 
-  const walletBlock = walletMemory
-    ? `LATEST WALLET STATE:\n- ${clipText(walletMemory.content, MAX_MEMORY_BLOCK_CHARS)}`
-    : "";
-
-  const tradeBlock = tradeMemory
-    ? `LATEST TRADE / ARB STATE:\n- ${clipText(tradeMemory.content, MAX_MEMORY_BLOCK_CHARS)}`
-    : "";
-
-  const reflectionBlock = reflection
-    ? `LATEST REFLECTION:\n- ${clipText(reflection.content, MAX_MEMORY_BLOCK_CHARS)}`
-    : "";
-
-  const relationshipBlock = relationshipMemory
-    ? `RELATIONSHIP MEMORY:\n- ${clipText(relationshipMemory.content, MAX_MEMORY_BLOCK_CHARS)}`
-    : "";
+  const walletBlock = walletMemory ? `LATEST WALLET STATE:\n- ${clipText(walletMemory.content, MAX_MEMORY_BLOCK_CHARS)}` : "";
+  const tradeBlock = tradeMemory ? `LATEST TRADE / ARB STATE:\n- ${clipText(tradeMemory.content, MAX_MEMORY_BLOCK_CHARS)}` : "";
+  const reflectionBlock = reflection ? `LATEST REFLECTION:\n- ${clipText(reflection.content, MAX_MEMORY_BLOCK_CHARS)}` : "";
+  const relationshipBlock = relationshipMemory ? `RELATIONSHIP MEMORY:\n- ${clipText(relationshipMemory.content, MAX_MEMORY_BLOCK_CHARS)}` : "";
 
   const failingHealth = Object.entries(orchestratorState.health)
     .filter(([, record]) => record.status === "degraded" || record.status === "stopped")
     .map(([component, record]) => `${component}: ${record.status} (${record.message})`);
 
-  const failingChecks = preflight.checks
-    .filter((check) => !check.ok)
-    .map((check) => `${check.key}: ${check.message}`);
+  const failingChecks = preflight.checks.filter((check) => !check.ok).map((check) => `${check.key}: ${check.message}`);
 
   const operationsBlock = [
     "OPERATIONS SNAPSHOT:",
@@ -171,12 +86,8 @@ export async function buildContext({
     `- executionAuthority: ${appControl.controls.executionAuthority.mode} (maxTradeUsd ${appControl.controls.executionAuthority.maxTradeUsd}, cooldownMinutes ${appControl.controls.executionAuthority.cooldownMinutes})`,
     `- channels: telegram=${appControl.controls.telegramEnabled}, x=${appControl.controls.xEnabled}`,
     `- memoryEnabled: ${appControl.controls.memoryEnabled}, plannerEnabled: ${appControl.controls.plannerEnabled}`,
-    failingHealth.length
-      ? `- failingHealth: ${failingHealth.join("; ")}`
-      : "- failingHealth: none",
-    failingChecks.length
-      ? `- failingPreflightChecks: ${failingChecks.join("; ")}`
-      : "- failingPreflightChecks: none",
+    failingHealth.length ? `- failingHealth: ${failingHealth.join("; ")}` : "- failingHealth: none",
+    failingChecks.length ? `- failingPreflightChecks: ${failingChecks.join("; ")}` : "- failingPreflightChecks: none",
     "TASK CONTROL CAPABILITIES:",
     "- You can instruct users to use app control actions to start or stop ARB and Sherpa runtimes.",
     "- The app chat also supports direct commands: `show services`, `start arb`, `stop arb`, `start sherpa`, `stop sherpa`.",
@@ -200,7 +111,5 @@ export async function buildContext({
     relationshipBlock,
     operationsBlock,
     `CURRENT MESSAGE:\n${message}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
