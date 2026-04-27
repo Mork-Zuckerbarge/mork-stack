@@ -14,6 +14,10 @@ type WalletState = {
   usdc: number;
   requirementMet: boolean;
 };
+export type WalletTokenBalance = {
+  mint: string;
+  balance: number;
+};
 
 let walletCache: WalletState | null = null;
 let walletCacheAt = 0;
@@ -105,6 +109,50 @@ export async function getWalletBalancesForMints(mints: string[]): Promise<Record
   );
 
   return balances;
+}
+
+export async function getWalletTokenBalances(): Promise<WalletTokenBalance[]> {
+  const RPC =
+    process.env.SOLANA_RPC_URL ||
+    process.env.SOLANA_RPC ||
+    process.env.RPC_URL ||
+    "https://api.mainnet-beta.solana.com";
+  const WALLET = resolveWalletAddressFromEnv();
+
+  if (!WALLET) {
+    throw new Error("Wallet not configured (set MORK_WALLET or MORK_WALLET_SECRET_KEY)");
+  }
+
+  const connection = new Connection(RPC);
+  const owner = new PublicKey(WALLET);
+  const tokenProgramId = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
+  const [solLamports, tokenAccounts] = await Promise.all([
+    withRpcRetry("getBalance", () => connection.getBalance(owner)),
+    withRpcRetry("getParsedTokenAccountsByOwner", () =>
+      connection.getParsedTokenAccountsByOwner(owner, {
+        programId: tokenProgramId,
+      })
+    ),
+  ]);
+
+  const balances = new Map<string, number>();
+  balances.set(SOL_MINT, solLamports / 1e9);
+
+  for (const account of tokenAccounts.value) {
+    const parsed = (account.account.data as ParsedAccountData).parsed;
+    const mint = String(parsed?.info?.mint ?? "").trim();
+    const amount = Number(parsed?.info?.tokenAmount?.uiAmount ?? 0);
+    if (!mint || !Number.isFinite(amount) || amount <= 0) {
+      continue;
+    }
+    balances.set(mint, (balances.get(mint) ?? 0) + amount);
+  }
+
+  return Array.from(balances.entries())
+    .filter(([, balance]) => balance > 0)
+    .map(([mint, balance]) => ({ mint, balance }))
+    .sort((a, b) => b.balance - a.balance);
 }
 
 async function fetchWalletState(): Promise<WalletState> {
