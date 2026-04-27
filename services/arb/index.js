@@ -871,13 +871,14 @@ async function executeRouteA(m, scan) {
 
     // fresh quotes at execution time
     const inUsdcUnits = BigInt(Math.floor(spendUsd * 1e6));
-    const q1 = await getQuote(USDC_MINT, m.inMint, inUsdcUnits, SLIPPAGE_BPS);
+    const slippageBps = Number(m?._slippageBpsOverride ?? SLIPPAGE_BPS);
+    const q1 = await getQuote(USDC_MINT, m.inMint, inUsdcUnits, slippageBps);
     if (!q1?.outAmount) return { ok: false, reason: "No quote (USDC→token)" };
 
     const tokenOutUnits = BigInt(q1.outAmount);
     if (tokenOutUnits <= 0n) return { ok: false, reason: "USDC→token outAmount=0" };
 
-    const q2 = await getQuote(m.inMint, USDC_MINT, tokenOutUnits, SLIPPAGE_BPS);
+    const q2 = await getQuote(m.inMint, USDC_MINT, tokenOutUnits, slippageBps);
     if (!q2?.outAmount) return { ok: false, reason: "No quote (token→USDC)" };
 
     const outUsdc = Number(q2.outAmount) / 1e6;
@@ -1304,6 +1305,26 @@ async function main() {
           paper: PAPER,
         });
         continue;
+      }
+
+      const policy = await morkGetPolicy(m.inMint);
+      if (policy?.blacklisted) {
+        const reason = policy.reason || "core_policy_blacklist";
+        console.log(`⛔ POLICY BLOCK ${m.symbol || m.inMint}: ${reason}`);
+        morkRouteResearch({
+          stage: "policy_block",
+          mint: m.inMint,
+          symbol: m.symbol || m.inMint,
+          edgePct: scan.edgePct,
+          netUsd: scan.netUsdProfit,
+          reason,
+          armed: ARMED,
+          paper: PAPER,
+        });
+        continue;
+      }
+      if (Number.isFinite(Number(policy?.slippageBpsOverride))) {
+        m._slippageBpsOverride = Number(policy.slippageBpsOverride);
       }
 
       recordTradeAttempt({ mint: m.inMint });

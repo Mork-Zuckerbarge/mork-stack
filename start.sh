@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$ROOT_DIR/mork-app"
 ARB_DIR="$ROOT_DIR/services/arb"
+MORK_CORE_DIR="$ROOT_DIR/services/mork-core"
 SHERPA_DIR="$ROOT_DIR/services/sherpa"
 SOL_MEV_BOT_DIR="$ROOT_DIR/services/sol-mev-bot"
 TELEGRAM_BRIDGE_DIR="$ROOT_DIR/services/telegram-bridge"
@@ -15,6 +16,7 @@ PERSIST_STYLE_PACK_IMAGE_DIR="$PERSIST_DIR/mork-app/style-pack"
 PERSIST_SHERPA_CREDS_FILE="$PERSIST_DIR/services/sherpa/encrypted_credentials.bin"
 
 ARB_PID=""
+MORK_CORE_PID=""
 SHERPA_PID=""
 SOL_MEV_BOT_PID=""
 TELEGRAM_PID=""
@@ -82,6 +84,10 @@ cleanup() {
     log "Stopping arb service (pid=$ARB_PID)"
     kill "$ARB_PID" >/dev/null 2>&1 || true
   fi
+  if [[ -n "$MORK_CORE_PID" ]] && kill -0 "$MORK_CORE_PID" >/dev/null 2>&1; then
+    log "Stopping mork-core service (pid=$MORK_CORE_PID)"
+    kill "$MORK_CORE_PID" >/dev/null 2>&1 || true
+  fi
   if [[ -n "$SHERPA_PID" ]] && kill -0 "$SHERPA_PID" >/dev/null 2>&1; then
     log "Stopping sherpa service (pid=$SHERPA_PID)"
     kill "$SHERPA_PID" >/dev/null 2>&1 || true
@@ -120,8 +126,35 @@ else
   log "No mork-app/.env.local found; continuing with current environment"
 fi
 
-export MORK_CORE_URL="${MORK_CORE_URL:-http://127.0.0.1:3000}"
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  export DATABASE_URL="file:${APP_DIR}/dev.db"
+elif [[ "${DATABASE_URL}" == file:./* ]]; then
+  export DATABASE_URL="file:${APP_DIR}/${DATABASE_URL#file:./}"
+fi
+
+export MORK_CORE_URL="${MORK_CORE_URL:-http://127.0.0.1:8790}"
 log "Using MORK_CORE_URL=$MORK_CORE_URL"
+log "Using DATABASE_URL=$DATABASE_URL"
+
+if [[ -d "$MORK_CORE_DIR" ]]; then
+  if [[ ! -d "$MORK_CORE_DIR/node_modules" ]]; then
+    log "Installing mork-core dependencies"
+    npm --prefix "$MORK_CORE_DIR" install
+  fi
+
+  log "Starting mork-core service"
+  (
+    cd "$MORK_CORE_DIR"
+    npm run dev >>"$LOG_DIR/mork-core.log" 2>&1
+  ) &
+  MORK_CORE_PID=$!
+  sleep 1
+  if ! kill -0 "$MORK_CORE_PID" >/dev/null 2>&1; then
+    warn "mork-core exited immediately. Check $LOG_DIR/mork-core.log"
+  fi
+else
+  log "Skipping mork-core service startup (missing $MORK_CORE_DIR)"
+fi
 
 if [[ -d "$ARB_DIR" ]]; then
   if [[ ! -d "$ARB_DIR/node_modules" ]]; then
