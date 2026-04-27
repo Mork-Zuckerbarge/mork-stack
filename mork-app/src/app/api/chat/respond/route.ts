@@ -96,29 +96,30 @@ function normalizeBotToken(rawToken: string): string {
 function parseCommand(message: string): RoutedCommand | null {
   const trimmed = message.trim();
   if (!trimmed) return null;
+  const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() ?? "";
 
   const tweetMatch =
-    trimmed.match(/^hey\s+tweet\s+this\s*:\s*(.+)$/i) ||
-    trimmed.match(/^(?:tweet|post)\s+this\s+(?:on\s+)?x\s*:\s*(.+)$/i) ||
-    trimmed.match(/^x\s+post\s*:\s*(.+)$/i);
+    firstLine.match(/^hey\s+tweet\s+this\s*:\s*(.+)$/i) ||
+    firstLine.match(/^(?:tweet|post)\s+this\s+(?:on\s+)?x\s*:\s*(.+)$/i) ||
+    firstLine.match(/^x\s+post\s*:\s*(.+)$/i);
   if (tweetMatch?.[1]?.trim()) return { type: "tweet", text: tweetMatch[1].trim() };
 
   const telegramMatch =
-    trimmed.match(/^(?:post\s+to\s+telegram|post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
-    trimmed.match(/^hey\s+telegram\s+this\s*:\s*(.+)$/i);
+    firstLine.match(/^(?:post\s+to\s+telegram|post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
+    firstLine.match(/^hey\s+telegram\s+this\s*:\s*(.+)$/i);
   if (telegramMatch?.[1]?.trim()) return { type: "telegram", text: telegramMatch[1].trim() };
 
   const imageMatch =
-    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?image\s*:\s*(.+)$/i) ||
-    trimmed.match(/^image\s*:\s*(.+)$/i);
+    firstLine.match(/^(?:generate|create|make)\s+(?:an?\s+)?image\s*:\s*(.+)$/i) ||
+    firstLine.match(/^image\s*:\s*(.+)$/i);
   if (imageMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "image", prompt: imageMatch[1].trim() };
 
   const videoMatch =
-    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?video(?:\s*:)?\s+(.+)$/i) ||
-    trimmed.match(/^video\s*:\s*(.+)$/i);
+    firstLine.match(/^(?:generate|create|make)\s+(?:an?\s+)?video(?:\s*:\s*|\s+)(.+)$/i) ||
+    firstLine.match(/^video\s*:\s*(.+)$/i);
   if (videoMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "video", prompt: videoMatch[1].trim() };
 
-  const sendMediaMatch = trimmed.match(
+  const sendMediaMatch = firstLine.match(
     /^(?:send|load)\s+([a-z0-9._-]+)\s+to\s+(telegram|x|sherpa)(?:\s+with\s+caption\s*:\s*(.+))?\s*$/i
   );
   if (sendMediaMatch?.[1]?.trim()) {
