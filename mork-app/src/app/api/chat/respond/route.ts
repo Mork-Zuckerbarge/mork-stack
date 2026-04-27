@@ -34,23 +34,14 @@ const STATIC_SYMBOL_MINT_MAP: Record<string, string> = {
   BBQ: BBQ_MINT,
 };
 const WORD_NUMBER_USD: Record<string, number> = {
-  one: 1,
-  two: 2,
-  three: 3,
-  four: 4,
-  five: 5,
-  six: 6,
-  seven: 7,
-  eight: 8,
-  nine: 9,
-  ten: 10,
+  one: 1, two: 2, three: 3, four: 4, five: 5,
+  six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
 };
 
 function parseUsdAmount(raw: string): number | null {
   const numeric = Number(raw);
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
-  const normalized = raw.trim().toLowerCase();
-  return WORD_NUMBER_USD[normalized] ?? null;
+  return WORD_NUMBER_USD[raw.trim().toLowerCase()] ?? null;
 }
 
 function buildJupiterBaseCandidates() {
@@ -65,25 +56,15 @@ function buildJupiterBaseCandidates() {
 async function fetchJsonWithJupiterFallback(path: string, query: Record<string, string>) {
   const candidates = buildJupiterBaseCandidates();
   let lastError: unknown = null;
-
   for (const base of candidates) {
     try {
       const url = new URL(`${base}${path}`);
-      Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
-      const res = await fetch(url.toString(), {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        lastError = new Error(`${path} failed on ${base} (${res.status})`);
-        continue;
-      }
+      Object.entries(query).forEach(([k, v]) => url.searchParams.set(k, v));
+      const res = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
+      if (!res.ok) { lastError = new Error(`${path} failed on ${base} (${res.status})`); continue; }
       return await res.json();
-    } catch (error) {
-      lastError = error;
-    }
+    } catch (error) { lastError = error; }
   }
-
   throw lastError instanceof Error ? lastError : new Error(`Jupiter request failed for ${path}`);
 }
 
@@ -108,9 +89,7 @@ function normalizeBotToken(rawToken: string): string {
   if (trimmed.toLowerCase().startsWith("https://api.telegram.org/bot")) {
     return trimmed.split("/bot", 2)[1]?.split("/", 2)[0]?.trim() ?? "";
   }
-  if (trimmed.toLowerCase().startsWith("bot")) {
-    return trimmed.slice(3).trim();
-  }
+  if (trimmed.toLowerCase().startsWith("bot")) return trimmed.slice(3).trim();
   return trimmed;
 }
 
@@ -122,30 +101,22 @@ function parseCommand(message: string): RoutedCommand | null {
     trimmed.match(/^hey\s+tweet\s+this\s*:\s*(.+)$/i) ||
     trimmed.match(/^(?:tweet|post)\s+this\s+(?:on\s+)?x\s*:\s*(.+)$/i) ||
     trimmed.match(/^x\s+post\s*:\s*(.+)$/i);
-  if (tweetMatch?.[1]?.trim()) {
-    return { type: "tweet", text: tweetMatch[1].trim() };
-  }
+  if (tweetMatch?.[1]?.trim()) return { type: "tweet", text: tweetMatch[1].trim() };
 
   const telegramMatch =
     trimmed.match(/^(?:post\s+to\s+telegram|post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
     trimmed.match(/^hey\s+telegram\s+this\s*:\s*(.+)$/i);
-  if (telegramMatch?.[1]?.trim()) {
-    return { type: "telegram", text: telegramMatch[1].trim() };
-  }
+  if (telegramMatch?.[1]?.trim()) return { type: "telegram", text: telegramMatch[1].trim() };
 
   const imageMatch =
     trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?image\s*:\s*(.+)$/i) ||
     trimmed.match(/^image\s*:\s*(.+)$/i);
-  if (imageMatch?.[1]?.trim()) {
-    return { type: "media.generate", mediaKind: "image", prompt: imageMatch[1].trim() };
-  }
+  if (imageMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "image", prompt: imageMatch[1].trim() };
 
   const videoMatch =
     trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?video(?:\s*:)?\s+(.+)$/i) ||
     trimmed.match(/^video\s*:\s*(.+)$/i);
-  if (videoMatch?.[1]?.trim()) {
-    return { type: "media.generate", mediaKind: "video", prompt: videoMatch[1].trim() };
-  }
+  if (videoMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "video", prompt: videoMatch[1].trim() };
 
   const sendMediaMatch = trimmed.match(
     /^(?:send|load)\s+([a-z0-9._-]+)\s+to\s+(telegram|x|sherpa)(?:\s+with\s+caption\s*:\s*(.+))?\s*$/i
@@ -164,13 +135,7 @@ function parseCommand(message: string): RoutedCommand | null {
     trimmed.match(/^buy\s+\$?(\d+(?:\.\d+)?)\s+(?:of\s+)?\$?([a-z0-9._-]+)(?:\s+now)?\s*$/i) ||
     trimmed.match(/^ape\s+\$?(\d+(?:\.\d+)?)\s+into\s+\$?([a-z0-9._-]+)\s*$/i) ||
     trimmed.match(/^use\s+\$?(\d+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\s+to\s+buy\s+\$?([a-z0-9._-]+)\s*$/i);
-  if (buyMatch) {
-    return {
-      type: "buy",
-      usd: Number(buyMatch[1]),
-      symbol: buyMatch[2].toUpperCase(),
-    };
-  }
+  if (buyMatch) return { type: "buy", usd: Number(buyMatch[1]), symbol: buyMatch[2].toUpperCase() };
 
   const buyWordsMatch =
     trimmed.match(/^buy:\s*([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
@@ -179,13 +144,7 @@ function parseCommand(message: string): RoutedCommand | null {
     trimmed.match(/^.*use\s+(?:the\s+)?usdc\s+to\s+buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i);
   if (buyWordsMatch) {
     const usd = parseUsdAmount(buyWordsMatch[1]);
-    if (usd) {
-      return {
-        type: "buy",
-        usd,
-        symbol: buyWordsMatch[2].toUpperCase(),
-      };
-    }
+    if (usd) return { type: "buy", usd, symbol: buyWordsMatch[2].toUpperCase() };
   }
 
   if (/^(?:services|service)\s+(?:status|list|show)$/i.test(trimmed) || /^show\s+services$/i.test(trimmed)) {
@@ -193,21 +152,16 @@ function parseCommand(message: string): RoutedCommand | null {
   }
 
   const startMatch = trimmed.match(/^(?:start|enable)\s+(arb|sherpa)\s*$/i);
-  if (startMatch) {
-    return { type: "service.start", service: startMatch[1].toLowerCase() as "arb" | "sherpa" };
-  }
+  if (startMatch) return { type: "service.start", service: startMatch[1].toLowerCase() as "arb" | "sherpa" };
 
   const stopMatch = trimmed.match(/^(?:stop|disable)\s+(arb|sherpa)\s*$/i);
-  if (stopMatch) {
-    return { type: "service.stop", service: stopMatch[1].toLowerCase() as "arb" | "sherpa" };
-  }
+  if (stopMatch) return { type: "service.stop", service: stopMatch[1].toLowerCase() as "arb" | "sherpa" };
 
   return null;
 }
 
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
-
   let data: { outAmount?: string };
   try {
     data = (await fetchJsonWithJupiterFallback("/swap/v1/quote", {
@@ -220,42 +174,30 @@ async function estimateSolForUsd(usd: number): Promise<number> {
     throw toUserFacingFetchError(error, "USD→SOL quote failed");
   }
   const outLamports = Number(data.outAmount ?? 0);
-  if (!Number.isFinite(outLamports) || outLamports <= 0) {
-    throw new Error("SOL conversion quote returned no output");
-  }
-
+  if (!Number.isFinite(outLamports) || outLamports <= 0) throw new Error("SOL conversion quote returned no output");
   return outLamports / 1_000_000_000;
 }
 
 type JupiterTokenResult = { address?: string; symbol?: string };
-
 type JupiterAllToken = { address?: string; symbol?: string; name?: string };
 
 function matchTokenSymbol(normalized: string, tokens: Array<JupiterTokenResult & { address: string }>) {
   const exact = tokens.find((item) => (item.symbol || "").toUpperCase() === normalized);
   if (exact) return exact;
-
-  const normalizedNoPunct = normalized.replace(/[^A-Z0-9]/g, "");
-  const tolerant = tokens.find((item) => (item.symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === normalizedNoPunct);
+  const noPunct = normalized.replace(/[^A-Z0-9]/g, "");
+  const tolerant = tokens.find((item) => (item.symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === noPunct);
   if (tolerant) return tolerant;
-
   return tokens.find((item) => (item.symbol || "").toUpperCase().startsWith(normalized)) || null;
 }
 
 async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; symbol: string }> {
   const normalized = symbolOrMint.trim().toUpperCase();
-  if (!normalized) {
-    throw new Error("Buy command token symbol is required.");
-  }
+  if (!normalized) throw new Error("Buy command token symbol is required.");
 
   const staticMint = STATIC_SYMBOL_MINT_MAP[normalized];
-  if (staticMint) {
-    return { mint: staticMint, symbol: normalized };
-  }
+  if (staticMint) return { mint: staticMint, symbol: normalized };
 
-  if (BASE58_MINT_RE.test(symbolOrMint.trim())) {
-    return { mint: symbolOrMint.trim(), symbol: normalized };
-  }
+  if (BASE58_MINT_RE.test(symbolOrMint.trim())) return { mint: symbolOrMint.trim(), symbol: normalized };
 
   try {
     const results = (await fetchJsonWithJupiterFallback("/tokens/v1/search", {
@@ -264,33 +206,21 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
     })) as JupiterTokenResult[];
     const withAddress = results.filter((item): item is JupiterTokenResult & { address: string } => typeof item.address === "string");
     const selected = matchTokenSymbol(normalized, withAddress);
-    if (selected?.address) {
-      return { mint: selected.address, symbol: (selected.symbol || normalized).toUpperCase() };
-    }
-  } catch {
-    // fall through to full list lookup
-  }
+    if (selected?.address) return { mint: selected.address, symbol: (selected.symbol || normalized).toUpperCase() };
+  } catch { /* fall through */ }
 
   let allRes: Response;
   try {
-    allRes = await fetch("https://token.jup.ag/all", {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+    allRes = await fetch("https://token.jup.ag/all", { headers: { Accept: "application/json" }, cache: "no-store" });
   } catch (error) {
     throw toUserFacingFetchError(error, "Token lookup failed");
   }
-  if (!allRes.ok) {
-    throw new Error(`Token lookup failed (${allRes.status}). Try a token mint address instead.`);
-  }
+  if (!allRes.ok) throw new Error(`Token lookup failed (${allRes.status}). Try a token mint address instead.`);
 
   const allTokens = (await allRes.json()) as JupiterAllToken[];
   const withAddress = allTokens.filter((item): item is JupiterAllToken & { address: string } => typeof item.address === "string");
   const selected = matchTokenSymbol(normalized, withAddress);
-  if (!selected?.address) {
-    throw new Error(`Token symbol $${normalized} not found on Jupiter. Use the token mint address instead.`);
-  }
-
+  if (!selected?.address) throw new Error(`Token symbol $${normalized} not found on Jupiter. Use the token mint address instead.`);
   return { mint: selected.address, symbol: (selected.symbol || normalized).toUpperCase() };
 }
 
@@ -333,43 +263,24 @@ async function noteTradeExecution() {
 async function executeCommand(req: NextRequest, command: RoutedCommand) {
   if (command.type === "media.generate") {
     const prompt = command.prompt.trim();
-    if (!prompt) {
-      return { ok: false, status: 400, error: "Media prompt is required." };
-    }
-
+    if (!prompt) return { ok: false, status: 400, error: "Media prompt is required." };
     try {
       const generated = command.mediaKind === "image" ? await generateImage(prompt) : await generateVideo(prompt);
       const downloadUrl = new URL(generated.url, req.url).toString();
       return {
-        ok: true,
-        routed: "media",
-        command: "media.generate",
+        ok: true, routed: "media", command: "media.generate",
         response: `Generated ${generated.kind} from prompt: "${prompt}"`,
         status: 200,
-        media: {
-          kind: generated.kind,
-          url: generated.url,
-          filename: generated.filename,
-          prompt: generated.prompt,
-          provider: generated.provider,
-          mimeType: generated.mimeType,
-          downloadUrl,
-        },
+        media: { kind: generated.kind, url: generated.url, filename: generated.filename, prompt: generated.prompt, provider: generated.provider, mimeType: generated.mimeType, downloadUrl },
       };
     } catch (error) {
-      return {
-        ok: false,
-        status: 502,
-        error: error instanceof Error ? error.message : "Media generation failed.",
-      };
+      return { ok: false, status: 502, error: error instanceof Error ? error.message : "Media generation failed." };
     }
   }
 
   if (command.type === "media.share") {
     const cleanFilename = path.basename(command.filename || "").trim();
-    if (!cleanFilename) {
-      return { ok: false, status: 400, error: "Filename is required. Example: send 2026...png to telegram" };
-    }
+    if (!cleanFilename) return { ok: false, status: 400, error: "Filename is required. Example: send 2026...png to telegram" };
     const mediaPath = path.join(process.cwd(), "public", "generated", cleanFilename);
 
     if (command.platform === "x" || command.platform === "sherpa") {
@@ -379,37 +290,20 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
         await mkdir(path.dirname(queueFile), { recursive: true });
         await writeFile(queueFile, queuedTopic, "utf8");
       } catch {
-        return {
-          ok: false,
-          status: 500,
-          error: "Could not queue topic for Sherpa. Verify services/sherpa is writable.",
-        };
+        return { ok: false, status: 500, error: "Could not queue topic for Sherpa. Verify services/sherpa is writable." };
       }
-      return {
-        ok: true,
-        status: 200,
-        routed: "sherpa/x",
-        command: "media.share",
-        response: `Loaded ${cleanFilename} into Sherpa Current Topic/Story. Caption queued: ${command.caption || "(none)"}.`,
-      };
+      return { ok: true, status: 200, routed: "sherpa/x", command: "media.share", response: `Loaded ${cleanFilename} into Sherpa Current Topic/Story. Caption queued: ${command.caption || "(none)"}.` };
     }
 
     const botToken = normalizeBotToken(process.env.TELEGRAM_BOT_TOKEN || "");
     const chatId = (process.env.TELEGRAM_CHAT_ID || "").trim();
     if (!botToken || !chatId) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Telegram send needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in mork-app/.env.local (restart after saving).",
-      };
+      return { ok: false, status: 400, error: "Telegram send needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in mork-app/.env.local (restart after saving)." };
     }
 
     let file: Buffer;
-    try {
-      file = await readFile(mediaPath);
-    } catch {
-      return { ok: false, status: 404, error: `Generated media not found: ${cleanFilename}` };
-    }
+    try { file = await readFile(mediaPath); }
+    catch { return { ok: false, status: 404, error: `Generated media not found: ${cleanFilename}` }; }
 
     const lower = cleanFilename.toLowerCase();
     const isVideo = lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mov");
@@ -421,35 +315,19 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     new Uint8Array(fileArrayBuffer).set(file);
     form.set(isVideo ? "video" : "photo", new Blob([fileArrayBuffer]), cleanFilename);
 
-    const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/${endpoint}`, {
-      method: "POST",
-      body: form,
-    });
+    const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/${endpoint}`, { method: "POST", body: form });
     const json = (await sendRes.json().catch(() => ({}))) as { ok?: boolean; description?: string };
     if (!sendRes.ok || !json.ok) {
-      return {
-        ok: false,
-        status: 502,
-        error: `Telegram media send failed${json.description ? `: ${json.description}` : ""}`,
-      };
+      return { ok: false, status: 502, error: `Telegram media send failed${json.description ? `: ${json.description}` : ""}` };
     }
-
-    return {
-      ok: true,
-      status: 200,
-      routed: "telegram",
-      command: "media.share",
-      response: `Sent ${cleanFilename} to Telegram${command.caption ? ` with caption: ${command.caption}` : ""}.`,
-    };
+    return { ok: true, status: 200, routed: "telegram", command: "media.share", response: `Sent ${cleanFilename} to Telegram${command.caption ? ` with caption: ${command.caption}` : ""}.` };
   }
 
   if (command.type === "services.status") {
     const orchestrator = await getOrchestratorState();
     const authority = orchestrator.app.controls.executionAuthority;
     return {
-      ok: true,
-      routed: "orchestrator",
-      command: "services.status",
+      ok: true, routed: "orchestrator", command: "services.status",
       response:
         `Services:\n` +
         `- arb: ${orchestrator.app.arb.status}\n` +
@@ -463,118 +341,57 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   if (command.type === "service.start") {
     await startRuntime(command.service);
     const orchestrator = await getOrchestratorState();
-    return {
-      ok: true,
-      routed: "orchestrator",
-      command: "service.start",
-      response: `Started ${command.service}. Current status: arb=${orchestrator.app.arb.status}, sherpa=${orchestrator.app.sherpa.status}.`,
-      status: 200,
-    };
+    return { ok: true, routed: "orchestrator", command: "service.start", response: `Started ${command.service}. Current status: arb=${orchestrator.app.arb.status}, sherpa=${orchestrator.app.sherpa.status}.`, status: 200 };
   }
 
   if (command.type === "service.stop") {
     await stopRuntime(command.service);
     const orchestrator = await getOrchestratorState();
-    return {
-      ok: true,
-      routed: "orchestrator",
-      command: "service.stop",
-      response: `Stopped ${command.service}. Current status: arb=${orchestrator.app.arb.status}, sherpa=${orchestrator.app.sherpa.status}.`,
-      status: 200,
-    };
+    return { ok: true, routed: "orchestrator", command: "service.stop", response: `Stopped ${command.service}. Current status: arb=${orchestrator.app.arb.status}, sherpa=${orchestrator.app.sherpa.status}.`, status: 200 };
   }
 
   if (command.type === "tweet") {
-    const draft = await respondToChat({
-      channel: "x",
-      handle: "app-user",
-      message: `Draft an X post using this user-provided text. Keep intent and key wording intact unless it violates policy: ${command.text}`,
-      maxChars: 560,
-    });
-
-    return {
-      ok: true,
-      routed: "sherpa/x",
-      command: "tweet",
-      response: draft.response || command.text,
-      status: 200,
-      note: "Draft generated for X voice. Sherpa posting remains external unless wired to X credentials.",
-    };
+    const draft = await respondToChat({ channel: "x", handle: "app-user", message: `Draft an X post using this user-provided text. Keep intent and key wording intact unless it violates policy: ${command.text}`, maxChars: 560 });
+    return { ok: true, routed: "sherpa/x", command: "tweet", response: draft.response || command.text, status: 200, note: "Draft generated for X voice. Sherpa posting remains external unless wired to X credentials." };
   }
 
   if (command.type === "telegram") {
     const botToken = normalizeBotToken(process.env.TELEGRAM_BOT_TOKEN || "");
     const chatId = (process.env.TELEGRAM_CHAT_ID || "").trim();
-
     if (!botToken || !chatId) {
-      return {
-        ok: false,
-        status: 400,
-        error:
-          "Telegram send needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in mork-app/.env.local (restart after saving).",
-      };
+      return { ok: false, status: 400, error: "Telegram send needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in mork-app/.env.local (restart after saving)." };
     }
-
     const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: command.text,
-      }),
+      body: JSON.stringify({ chat_id: chatId, text: command.text }),
     });
-
     const json = (await sendRes.json().catch(() => ({}))) as { ok?: boolean; description?: string };
     if (!sendRes.ok || !json.ok) {
-      return {
-        ok: false,
-        status: 502,
-        error: `Telegram send failed${json.description ? `: ${json.description}` : ""}`,
-      };
+      return { ok: false, status: 502, error: `Telegram send failed${json.description ? `: ${json.description}` : ""}` };
     }
-
-    return {
-      ok: true,
-      routed: "telegram",
-      command: "post",
-      response: `Posted to Telegram: ${command.text}`,
-      status: 200,
-    };
+    return { ok: true, routed: "telegram", command: "post", response: `Posted to Telegram: ${command.text}`, status: 200 };
   }
 
   if (!Number.isFinite(command.usd) || command.usd <= 0) {
-    return {
-      ok: false,
-      status: 400,
-      error: "Buy command amount must be a positive USD value.",
-    };
+    return { ok: false, status: 400, error: "Buy command amount must be a positive USD value." };
   }
 
   const tradeAuthority = await enforceTradeAuthority(command.usd);
-  if (!tradeAuthority.ok) {
-    return tradeAuthority;
-  }
+  if (!tradeAuthority.ok) return tradeAuthority;
 
   let outputToken: { mint: string; symbol: string };
   try {
     outputToken = await resolveOutputMint(command.symbol);
   } catch (error) {
-    return {
-      ok: false,
-      status: 400,
-      error: error instanceof Error ? error.message : "Token symbol resolution failed.",
-    };
+    return { ok: false, status: 400, error: error instanceof Error ? error.message : "Token symbol resolution failed." };
   }
 
   let amountSol = 0;
   try {
     amountSol = await estimateSolForUsd(command.usd);
   } catch (error) {
-    return {
-      ok: false,
-      status: 502,
-      error: error instanceof Error ? error.message : "USD→SOL quote failed.",
-    };
+    return { ok: false, status: 502, error: error instanceof Error ? error.message : "USD→SOL quote failed." };
   }
 
   let swapRes: Response;
@@ -585,37 +402,18 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
       body: JSON.stringify({ amountSol, slippageBps: 50, outputMint: outputToken.mint, agentInitiated: true }),
     });
   } catch (error) {
-    return {
-      ok: false,
-      status: 502,
-      error: toUserFacingFetchError(error, "Trade execution request failed").message,
-    };
+    return { ok: false, status: 502, error: toUserFacingFetchError(error, "Trade execution request failed").message };
   }
 
-  const swapJson = (await swapRes.json().catch(() => ({}))) as {
-    ok?: boolean;
-    error?: string;
-    signature?: string;
-    amountSol?: number;
-  };
-
+  const swapJson = (await swapRes.json().catch(() => ({}))) as { ok?: boolean; error?: string; signature?: string; amountSol?: number };
   if (!swapRes.ok || !swapJson.ok) {
-    return {
-      ok: false,
-      status: swapRes.status || 500,
-      error: swapJson.error || `Trade execution failed (${swapRes.status})`,
-    };
+    return { ok: false, status: swapRes.status || 500, error: swapJson.error || `Trade execution failed (${swapRes.status})` };
   }
 
   await noteTradeExecution();
-
   return {
-    ok: true,
-    routed: "arb",
-    command: "buy",
-    response:
-      `Executed buy for ~$${command.usd.toFixed(2)} of $${outputToken.symbol} ` +
-      `(${(swapJson.amountSol ?? amountSol).toFixed(6)} SOL route). Signature: ${swapJson.signature}`,
+    ok: true, routed: "arb", command: "buy",
+    response: `Executed buy for ~$${command.usd.toFixed(2)} of $${outputToken.symbol} (${(swapJson.amountSol ?? amountSol).toFixed(6)} SOL route). Signature: ${swapJson.signature}`,
     status: 200,
   };
 }
@@ -640,9 +438,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result, { status: result.status || 200 });
   } catch (e: unknown) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : "chat route failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "chat route failed" }, { status: 500 });
   }
 }
