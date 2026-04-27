@@ -17,6 +17,7 @@ type SwapBody = {
   slippageBps?: number;
   inputMint?: string;
   outputMint?: string;
+  agentInitiated?: boolean;
 };
 
 type JupiterTokenMeta = { decimals?: number };
@@ -63,11 +64,36 @@ async function getTokenDecimals(mint: string): Promise<number> {
 export async function POST(req: Request) {
   try {
     const control = await getAppControlState();
-    if (control.arb.status === "running" || control.controls.activePanel !== "trade") {
-      return NextResponse.json(
-        { ok: false, error: "Trade panel is paused while ARB is active. Switch panel to Trade and stop ARB first." },
-        { status: 409 }
-      );
+
+    // Parse body first so we can read agentInitiated before applying guards.
+    const body = (await req.json()) as SwapBody;
+    const agentInitiated = body.agentInitiated === true;
+
+    if (agentInitiated) {
+      // Agent-triggered swaps bypass the panel/arb guard (they're intentional direct commands,
+      // not UI trade-panel actions that conflict with the background ARB scanner).
+      // Instead, enforce the runtime execution authority settings.
+      const authority = control.controls.executionAuthority;
+      if (authority.mode === "emergency_stop") {
+        return NextResponse.json(
+          { ok: false, error: "Trading disabled: emergency_stop mode is active." },
+          { status: 403 }
+        );
+      }
+      if (authority.mode === "user_only") {
+        return NextResponse.json(
+          { ok: false, error: "Trading disabled: execution authority is user_only. Change to agent_assisted in App Controls to allow agent trades." },
+          { status: 403 }
+        );
+      }
+    } else {
+      // Manual UI swap: block when the ARB scanner is running or the trade panel is not active.
+      if (control.arb.status === "running" || control.controls.activePanel !== "trade") {
+        return NextResponse.json(
+          { ok: false, error: "Trade panel is paused while ARB is active. Switch panel to Trade and stop ARB first." },
+          { status: 409 }
+        );
+      }
     }
 
     if (process.env.MORK_AGENT_SWAP_ENABLED !== "1") {
@@ -77,7 +103,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = (await req.json()) as SwapBody;
     const amountIn = Number(body.amountIn ?? body.amountSol ?? 0);
     const slippageBps = Math.min(Math.max(Number(body.slippageBps ?? 50), 10), 300);
     const maxSol = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
