@@ -180,6 +180,14 @@ export async function buildContext({
     "TASK CONTROL CAPABILITIES:",
     "- You can instruct users to use app control actions to start or stop ARB and Sherpa runtimes.",
     "- The app chat also supports direct commands: `show services`, `start arb`, `stop arb`, `start sherpa`, `stop sherpa`.",
+    "- TRADE COMMANDS (executed immediately by the agent when typed in chat):",
+    "  `buy $<amount> of <TOKEN>` — buys TOKEN using USDC→SOL→TOKEN via Jupiter (e.g. `buy $20 of BBQ`)",
+    "  `go buy $<amount> of <TOKEN>` — same as above",
+    "  `ape $<amount> into <TOKEN>` — same as above",
+    "  `use $<amount> USDC to buy <TOKEN>` — same as above",
+    "  TOKEN can be a symbol (SOL, BBQ, USDC, BTC) or a Solana mint address.",
+    "  Requirements: MORK_AGENT_SWAP_ENABLED=1 must be set, execution authority must be agent_assisted, and amount must not exceed maxTradeUsd.",
+    "- If the user asks to make a trade, respond with the exact command format and note any current blockers (authority mode, MORK_AGENT_SWAP_ENABLED, cooldown).",
     "- If the user asks to start tasks, answer with the exact action(s) needed and call out current blockers first.",
   ].join("\n");
 
