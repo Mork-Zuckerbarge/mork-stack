@@ -96,29 +96,30 @@ function normalizeBotToken(rawToken: string): string {
 function parseCommand(message: string): RoutedCommand | null {
   const trimmed = message.trim();
   if (!trimmed) return null;
+  const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() ?? "";
 
   const tweetMatch =
-    trimmed.match(/^hey\s+tweet\s+this\s*:\s*(.+)$/i) ||
-    trimmed.match(/^(?:tweet|post)\s+this\s+(?:on\s+)?x\s*:\s*(.+)$/i) ||
-    trimmed.match(/^x\s+post\s*:\s*(.+)$/i);
+    firstLine.match(/^hey\s+tweet\s+this\s*:\s*(.+)$/i) ||
+    firstLine.match(/^(?:tweet|post)\s+this\s+(?:on\s+)?x\s*:\s*(.+)$/i) ||
+    firstLine.match(/^x\s+post\s*:\s*(.+)$/i);
   if (tweetMatch?.[1]?.trim()) return { type: "tweet", text: tweetMatch[1].trim() };
 
   const telegramMatch =
-    trimmed.match(/^(?:post\s+to\s+telegram|post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
-    trimmed.match(/^hey\s+telegram\s+this\s*:\s*(.+)$/i);
+    firstLine.match(/^(?:post\s+to\s+telegram|post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
+    firstLine.match(/^hey\s+telegram\s+this\s*:\s*(.+)$/i);
   if (telegramMatch?.[1]?.trim()) return { type: "telegram", text: telegramMatch[1].trim() };
 
   const imageMatch =
-    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?image\s*:\s*(.+)$/i) ||
-    trimmed.match(/^image\s*:\s*(.+)$/i);
+    firstLine.match(/^(?:generate|create|make)\s+(?:an?\s+)?image\s*:\s*(.+)$/i) ||
+    firstLine.match(/^image\s*:\s*(.+)$/i);
   if (imageMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "image", prompt: imageMatch[1].trim() };
 
   const videoMatch =
-    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?video(?:\s*:)?\s+(.+)$/i) ||
-    trimmed.match(/^video\s*:\s*(.+)$/i);
+    firstLine.match(/^(?:generate|create|make)\s+(?:an?\s+)?video(?:\s*:\s*|\s+)(.+)$/i) ||
+    firstLine.match(/^video\s*:\s*(.+)$/i);
   if (videoMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "video", prompt: videoMatch[1].trim() };
 
-  const sendMediaMatch = trimmed.match(
+  const sendMediaMatch = firstLine.match(
     /^(?:send|load)\s+([a-z0-9._-]+)\s+to\s+(telegram|x|sherpa)(?:\s+with\s+caption\s*:\s*(.+))?\s*$/i
   );
   if (sendMediaMatch?.[1]?.trim()) {
@@ -158,6 +159,41 @@ function parseCommand(message: string): RoutedCommand | null {
   if (stopMatch) return { type: "service.stop", service: stopMatch[1].toLowerCase() as "arb" | "sherpa" };
 
   return null;
+}
+
+function parseVibeMediaCommand(message: string): RoutedCommand | null {
+  const trimmed = message.trim();
+  if (!trimmed || trimmed.endsWith("?")) return null;
+
+  const hasVideoWord = /\b(video|clip|reel|animation)\b/i.test(trimmed);
+  const hasImageWord = /\b(image|photo|picture|pic|artwork|art)\b/i.test(trimmed);
+  const requestCue =
+    /\b(make|create|generate|render|craft|produce|show|give)\b/i.test(trimmed) ||
+    /^(can|could|would)\s+you\b/i.test(trimmed) ||
+    /^(please|pls)\b/i.test(trimmed) ||
+    /^i\s+(?:want|need)\b/i.test(trimmed) ||
+    /^let'?s\b/i.test(trimmed);
+
+  if (!requestCue || (!hasVideoWord && !hasImageWord)) return null;
+  if (hasVideoWord && hasImageWord) return null;
+
+  const prompt = trimmed
+    .replace(/^(?:can|could|would)\s+you\s+/i, "")
+    .replace(/^(?:please|pls)\s+/i, "")
+    .replace(/^i\s+(?:want|need)(?:\s+you\s+to)?\s+/i, "")
+    .replace(/^let'?s\s+/i, "")
+    .replace(/\b(?:make|create|generate|render|craft|produce|show|give)\b/gi, "")
+    .replace(/\b(?:me|us)\b/gi, "")
+    .replace(/\b(?:a|an|the)\b/gi, " ")
+    .replace(/\b(?:video|clip|reel|animation|image|photo|picture|pic|artwork|art)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    type: "media.generate",
+    mediaKind: hasVideoWord ? "video" : "image",
+    prompt: prompt || trimmed,
+  };
 }
 
 async function estimateSolForUsd(usd: number): Promise<number> {
@@ -422,7 +458,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const message = typeof body?.message === "string" ? body.message : "";
-    const command = parseCommand(message);
+    const command = parseCommand(message) || parseVibeMediaCommand(message);
 
     if (command) {
       const result = await executeCommand(req, command);

@@ -10,6 +10,8 @@ TELEGRAM_BRIDGE_DIR="$ROOT_DIR/services/telegram-bridge"
 LOG_DIR="$ROOT_DIR/.logs"
 PERSIST_DIR="${MORK_PERSIST_DIR:-${HOME:-$ROOT_DIR}/.mork-stack}"
 PERSIST_ENV_FILE="$PERSIST_DIR/mork-app/.env.local"
+PERSIST_STYLE_PACK_FILE="$PERSIST_DIR/mork-app/style-pack.json"
+PERSIST_STYLE_PACK_IMAGE_DIR="$PERSIST_DIR/mork-app/style-pack"
 PERSIST_SHERPA_CREDS_FILE="$PERSIST_DIR/services/sherpa/encrypted_credentials.bin"
 
 ARB_PID=""
@@ -38,6 +40,18 @@ restore_persistent_state() {
     cp "$PERSIST_SHERPA_CREDS_FILE" "$SHERPA_DIR/encrypted_credentials.bin"
     log "Restored Sherpa encrypted credentials from persistent state ($PERSIST_DIR)"
   fi
+
+  if [[ -f "$PERSIST_STYLE_PACK_FILE" && ! -f "$APP_DIR/data/style-pack.json" ]]; then
+    mkdir -p "$APP_DIR/data"
+    cp "$PERSIST_STYLE_PACK_FILE" "$APP_DIR/data/style-pack.json"
+    log "Restored style-pack URL config from persistent state ($PERSIST_DIR)"
+  fi
+
+  if [[ -d "$PERSIST_STYLE_PACK_IMAGE_DIR" && ! -d "$APP_DIR/public/style-pack" ]]; then
+    mkdir -p "$APP_DIR/public"
+    cp -R "$PERSIST_STYLE_PACK_IMAGE_DIR" "$APP_DIR/public/style-pack"
+    log "Restored uploaded style-pack images from persistent state ($PERSIST_DIR)"
+  fi
 }
 
 sync_persistent_state() {
@@ -49,6 +63,15 @@ sync_persistent_state() {
 
   if [[ -f "$SHERPA_DIR/encrypted_credentials.bin" ]]; then
     cp "$SHERPA_DIR/encrypted_credentials.bin" "$PERSIST_SHERPA_CREDS_FILE"
+  fi
+
+  if [[ -f "$APP_DIR/data/style-pack.json" ]]; then
+    cp "$APP_DIR/data/style-pack.json" "$PERSIST_STYLE_PACK_FILE"
+  fi
+
+  if [[ -d "$APP_DIR/public/style-pack" ]]; then
+    rm -rf "$PERSIST_STYLE_PACK_IMAGE_DIR"
+    cp -R "$APP_DIR/public/style-pack" "$PERSIST_STYLE_PACK_IMAGE_DIR"
   fi
 }
 
