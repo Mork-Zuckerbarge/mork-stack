@@ -55,8 +55,8 @@ function loadConfig(): AgentConfig {
     minProfitLamports: parseInt(process.env.MIN_PROFIT_LAMPORTS ?? '5000'),
     maxPositionSol: parseFloat(process.env.MAX_POSITION_SOL ?? '0.5'),
     priorityFeeMicrolamports: parseInt(process.env.PRIORITY_FEE_MICROLAMPORTS ?? '50000'),
-    enableAmmImbalance: process.env.ENABLE_AMM_IMBALANCE !== 'false',
-    enableArb: process.env.ENABLE_ARB !== 'false',
+    enableAmmImbalance: process.env.ENABLE_AMM_IMBALANCE !== 'true',
+    enableArb: process.env.ENABLE_ARB !== 'true',
     enableMomentum: process.env.ENABLE_MOMENTUM === 'true',
     ammMinImbalancePct: parseFloat(process.env.AMM_MIN_IMBALANCE_PCT ?? '5'),
     arbTokenMints: (process.env.ARB_TOKEN_MINTS ?? [
