@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { respondToChat } from "@/lib/core/chat";
 import { getOrchestratorState, startRuntime, stopRuntime } from "@/lib/core/orchestrator";
+import { getAppControlState } from "@/lib/core/appControl";
 import { prisma } from "@/lib/core/prisma";
 import { generateImage, generateVideo } from "@/lib/core/media";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -294,7 +295,30 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
 }
 
 async function enforceTradeAuthority(usd: number) {
-  void usd;
+  const control = await getAppControlState();
+  const authority = control.controls.executionAuthority;
+
+  if (authority.mode === "emergency_stop") {
+    return { ok: false, status: 403, error: "Trading disabled: emergency_stop mode is active." } as const;
+  }
+  if (authority.mode === "user_only") {
+    return { ok: false, status: 403, error: "Trading disabled: execution authority is user_only. Change to agent_assisted in App Controls." } as const;
+  }
+  if (usd > authority.maxTradeUsd) {
+    return { ok: false, status: 400, error: `Trade amount $${usd.toFixed(2)} exceeds the configured max of $${authority.maxTradeUsd}.` } as const;
+  }
+
+  const lastTradeRow = await prisma.memoryFact.findUnique({ where: { key: LAST_TRADE_FACT_KEY } });
+  if (lastTradeRow?.value) {
+    const lastMs = new Date(lastTradeRow.value).getTime();
+    const cooldownMs = authority.cooldownMinutes * 60 * 1000;
+    const elapsed = Date.now() - lastMs;
+    if (elapsed < cooldownMs) {
+      const remainSec = Math.ceil((cooldownMs - elapsed) / 1000);
+      return { ok: false, status: 429, error: `Trade cooldown active: ${remainSec}s remaining (cooldown=${authority.cooldownMinutes}min).` } as const;
+    }
+  }
+
   return { ok: true, status: 200 } as const;
 }
 
@@ -558,7 +582,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     swapRes = await fetch(new URL("/api/trade/swap", req.url), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amountSol, slippageBps: 50, outputMint: outputToken.mint }),
+      body: JSON.stringify({ amountSol, slippageBps: 50, outputMint: outputToken.mint, agentInitiated: true }),
     });
   } catch (error) {
     return {
