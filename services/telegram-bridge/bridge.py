@@ -196,7 +196,7 @@ def build_candidate_paths() -> list[str]:
     return candidates
 
 
-def core_reply(handle: str, message: str, user_id: int) -> str:
+def core_reply(handle: str, message: str, user_id: int) -> dict:
     prompt = build_context(user_id, message)
     payload = {
         "channel": "telegram",
@@ -221,8 +221,10 @@ def core_reply(handle: str, message: str, user_id: int) -> str:
         raise RuntimeError(f"chat upstream failed after paths={candidate_paths}: {' | '.join(errors)}")
 
     if not j.get("ok"):
-        return "My thoughts failed to compile. Try again in a moment."
-    return (j.get("reply") or j.get("response") or "").strip() or "…"
+        return {"text": "My thoughts failed to compile. Try again in a moment.", "media": None}
+    text = (j.get("reply") or j.get("response") or "").strip() or "…"
+    media = j.get("media") if isinstance(j.get("media"), dict) else None
+    return {"text": text, "media": media}
 
 
 def send_message(chat_id: int, text: str, reply_to: int | None = None):
@@ -231,6 +233,37 @@ def send_message(chat_id: int, text: str, reply_to: int | None = None):
         data["reply_to_message_id"] = reply_to
         data["allow_sending_without_reply"] = True
     requests.post(f"{API}/sendMessage", data=data, timeout=20)
+
+
+def send_generated_media(chat_id: int, media: dict, caption: str = "", reply_to: int | None = None):
+    url = (media.get("downloadUrl") or media.get("url") or "").strip()
+    kind = (media.get("kind") or "").strip().lower()
+    if not url or kind not in ("image", "video"):
+        return False
+
+    if url.startswith("/"):
+        url = f"{CORE_URL}{url}"
+    elif not url.startswith("http://") and not url.startswith("https://"):
+        url = f"{CORE_URL}/{url.lstrip('/')}"
+
+    file_res = requests.get(url, timeout=60)
+    file_res.raise_for_status()
+    file_bytes = file_res.content
+
+    data = {"chat_id": chat_id}
+    if reply_to:
+        data["reply_to_message_id"] = reply_to
+        data["allow_sending_without_reply"] = True
+    if caption:
+        data["caption"] = caption[:1024]
+
+    if kind == "video":
+        files = {"video": ("mork.mp4", file_bytes, "video/mp4")}
+        requests.post(f"{API}/sendVideo", data=data, files=files, timeout=90).raise_for_status()
+    else:
+        files = {"photo": ("mork.png", file_bytes, "image/png")}
+        requests.post(f"{API}/sendPhoto", data=data, files=files, timeout=90).raise_for_status()
+    return True
 
 
 def elevenlabs_tts_mp3_bytes(text: str) -> bytes:
@@ -431,19 +464,35 @@ def main():
                         contextual_text = text
                         if display_name:
                             contextual_text = f"[speaker_name={display_name}] {text}"
-                        reply = core_reply(handle=handle, message=contextual_text, user_id=user_id)
+                        chat_result = core_reply(handle=handle, message=contextual_text, user_id=user_id)
+                        reply = (chat_result.get("text") or "").strip() or "…"
+                        media = chat_result.get("media")
                         remember_message(user_id, "user", text, msg)
                         remember_message(user_id, "assistant", reply, msg)
 
-                        # Voice OR text, not both
-                        if should_send_voice_reply(user_id):
+                        media_sent = False
+                        if isinstance(media, dict):
                             try:
-                                send_voice(chat_id, reply, reply_to=msg.get("message_id"))
-                            except Exception as ve:
-                                print("[bridge] voice error:", repr(ve))
+                                media_sent = send_generated_media(
+                                    chat_id,
+                                    media,
+                                    caption=reply if reply and reply != "…" else "",
+                                    reply_to=msg.get("message_id"),
+                                )
+                            except Exception as me:
+                                print("[bridge] media send error:", repr(me))
+                                media_sent = False
+
+                        if not media_sent:
+                            # Voice OR text, not both
+                            if should_send_voice_reply(user_id):
+                                try:
+                                    send_voice(chat_id, reply, reply_to=msg.get("message_id"))
+                                except Exception as ve:
+                                    print("[bridge] voice error:", repr(ve))
+                                    send_message(chat_id, reply, reply_to=msg.get("message_id"))
+                            else:
                                 send_message(chat_id, reply, reply_to=msg.get("message_id"))
-                        else:
-                            send_message(chat_id, reply, reply_to=msg.get("message_id"))
 
                         last_reply_ts[user_id] = now
                     except Exception as re:
