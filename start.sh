@@ -133,7 +133,9 @@ elif [[ "${DATABASE_URL}" == file:./* ]]; then
 fi
 
 export MORK_CORE_URL="${MORK_CORE_URL:-http://127.0.0.1:8790}"
+export MORK_APP_URL="${MORK_APP_URL:-http://127.0.0.1:3000}"
 log "Using MORK_CORE_URL=$MORK_CORE_URL"
+log "Using MORK_APP_URL=$MORK_APP_URL"
 log "Using DATABASE_URL=$DATABASE_URL"
 
 log "Ensuring runtime Prisma schema exists for DATABASE_URL"
@@ -252,7 +254,7 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
     fi
 
     if [[ -n "$TELEGRAM_PYTHON" ]]; then
-      log "Starting telegram bridge (MORK_CORE_URL=$MORK_CORE_URL)"
+      log "Starting telegram bridge (MORK_CORE_URL=$MORK_CORE_URL, MORK_APP_URL=$MORK_APP_URL)"
       (
         cd "$TELEGRAM_BRIDGE_DIR"
         "$TELEGRAM_PYTHON" bridge.py >>"$LOG_DIR/telegram-bridge.log" 2>&1
