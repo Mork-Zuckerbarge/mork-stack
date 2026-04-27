@@ -161,6 +161,41 @@ function parseCommand(message: string): RoutedCommand | null {
   return null;
 }
 
+function parseVibeMediaCommand(message: string): RoutedCommand | null {
+  const trimmed = message.trim();
+  if (!trimmed || trimmed.endsWith("?")) return null;
+
+  const hasVideoWord = /\b(video|clip|reel|animation)\b/i.test(trimmed);
+  const hasImageWord = /\b(image|photo|picture|pic|artwork|art)\b/i.test(trimmed);
+  const requestCue =
+    /\b(make|create|generate|render|craft|produce|show|give)\b/i.test(trimmed) ||
+    /^(can|could|would)\s+you\b/i.test(trimmed) ||
+    /^(please|pls)\b/i.test(trimmed) ||
+    /^i\s+(?:want|need)\b/i.test(trimmed) ||
+    /^let'?s\b/i.test(trimmed);
+
+  if (!requestCue || (!hasVideoWord && !hasImageWord)) return null;
+  if (hasVideoWord && hasImageWord) return null;
+
+  const prompt = trimmed
+    .replace(/^(?:can|could|would)\s+you\s+/i, "")
+    .replace(/^(?:please|pls)\s+/i, "")
+    .replace(/^i\s+(?:want|need)(?:\s+you\s+to)?\s+/i, "")
+    .replace(/^let'?s\s+/i, "")
+    .replace(/\b(?:make|create|generate|render|craft|produce|show|give)\b/gi, "")
+    .replace(/\b(?:me|us)\b/gi, "")
+    .replace(/\b(?:a|an|the)\b/gi, " ")
+    .replace(/\b(?:video|clip|reel|animation|image|photo|picture|pic|artwork|art)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    type: "media.generate",
+    mediaKind: hasVideoWord ? "video" : "image",
+    prompt: prompt || trimmed,
+  };
+}
+
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
   let data: { outAmount?: string };
@@ -423,7 +458,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const message = typeof body?.message === "string" ? body.message : "";
-    const command = parseCommand(message);
+    const command = parseCommand(message) || parseVibeMediaCommand(message);
 
     if (command) {
       const result = await executeCommand(req, command);
