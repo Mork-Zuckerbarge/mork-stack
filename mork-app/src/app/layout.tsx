@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Script from "next/script";
+import { ensurePlannerAutopilotStarted } from "@/lib/core/plannerAutopilot";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -12,6 +13,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  ensurePlannerAutopilotStarted();
   return (
     <html lang="en">
       <body>

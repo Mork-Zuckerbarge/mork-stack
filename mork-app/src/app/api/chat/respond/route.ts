@@ -5,6 +5,8 @@ import { getAppControlState } from "@/lib/core/appControl";
 import { prisma } from "@/lib/core/prisma";
 import { generateImage, generateVideo } from "@/lib/core/media";
 import { getWalletBalancesForMints } from "@/lib/core/wallet";
+import { ensurePlannerAutopilotStarted } from "@/lib/core/plannerAutopilot";
+import { POST as runPlannerTickRoute } from "@/app/planner/tick/route";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -17,6 +19,7 @@ type RoutedCommand =
   | { type: "media.share"; platform: "telegram" | "x" | "sherpa"; filename: string; caption: string }
   | { type: "trade"; quantity: number; inputSymbol: string; outputSymbol: string }
   | { type: "trade.sellAll"; inputSymbol: string; outputSymbol: string }
+  | { type: "trade.autosearch" }
   | { type: "services.status" }
   | { type: "service.start"; service: "arb" | "sherpa" }
   | { type: "service.stop"; service: "arb" | "sherpa" };
@@ -170,6 +173,14 @@ function parseCommand(message: string): RoutedCommand | null {
   if (buyWordsMatch) {
     const quantity = parseUsdAmount(buyWordsMatch[1]);
     if (quantity) return { type: "trade", quantity, inputSymbol: "USDC", outputSymbol: buyWordsMatch[2].toUpperCase() };
+  }
+
+  if (
+    /(?:search|scan|look)\s+for\s+trade\s+opportunit(?:y|ies)/i.test(trimmed) ||
+    /automated\s+trades?\s+on\s+(?:your|its)\s+own/i.test(trimmed) ||
+    /make\s+.*automated\s+trades?/i.test(trimmed)
+  ) {
+    return { type: "trade.autosearch" };
   }
 
   if (/^(?:services|service)\s+(?:status|list|show)$/i.test(trimmed) || /^show\s+services$/i.test(trimmed)) {
@@ -461,6 +472,56 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     return { ok: true, routed: "sherpa/x", command: "tweet", response: draft.response || command.text, status: 200, note: "Draft generated for X voice. Sherpa posting remains external unless wired to X credentials." };
   }
 
+  if (command.type === "trade.autosearch") {
+    const plannerResponse = await runPlannerTickRoute();
+    const plannerJson = (await plannerResponse.json().catch(() => ({}))) as {
+      ok?: boolean;
+      status?: string;
+      reason?: string;
+      minutesRemaining?: number;
+      signature?: string | null;
+      usd?: number;
+      outputMint?: string;
+      error?: string;
+    };
+    if (plannerJson.status === "executed") {
+      return {
+        ok: true,
+        status: 200,
+        routed: "planner",
+        command: "trade.autosearch",
+        response: `Autonomous trade scan executed and placed a trade${plannerJson.usd ? ` ($${plannerJson.usd.toFixed(2)} target)` : ""}${plannerJson.signature ? `, signature: ${plannerJson.signature}` : ""}.`,
+      };
+    }
+    if (plannerJson.status === "hold") {
+      return {
+        ok: true,
+        status: 200,
+        routed: "planner",
+        command: "trade.autosearch",
+        response: `Autonomous trade scan executed. Decision: HOLD (${plannerJson.reason || "no qualifying setup"}).`,
+      };
+    }
+    if (plannerJson.status === "skipped") {
+      const cooldownDetail =
+        plannerJson.reason === "cooldown_active" && typeof plannerJson.minutesRemaining === "number"
+          ? ` (${plannerJson.minutesRemaining.toFixed(1)} min remaining)`
+          : "";
+      return {
+        ok: true,
+        status: 200,
+        routed: "planner",
+        command: "trade.autosearch",
+        response: `Autonomous trade scan did not run: ${plannerJson.reason || "skipped"}${cooldownDetail}.`,
+      };
+    }
+    return {
+      ok: false,
+      status: plannerResponse.status || 500,
+      error: plannerJson.error || plannerJson.reason || "Autonomous trade scan failed.",
+    };
+  }
+
   if (command.type === "telegram") {
     const botToken = normalizeBotToken(process.env.TELEGRAM_BOT_TOKEN || "");
     const chatId = (process.env.TELEGRAM_CHAT_ID || "").trim();
@@ -556,6 +617,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
 
 export async function POST(req: NextRequest) {
   try {
+    ensurePlannerAutopilotStarted();
     const body = await req.json();
     const message = typeof body?.message === "string" ? body.message : "";
     const command = parseCommand(message) || parseVibeMediaCommand(message);
