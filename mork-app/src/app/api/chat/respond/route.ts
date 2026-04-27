@@ -14,7 +14,7 @@ type RoutedCommand =
   | { type: "telegram"; text: string }
   | { type: "media.generate"; mediaKind: "image" | "video"; prompt: string }
   | { type: "media.share"; platform: "telegram" | "x" | "sherpa"; filename: string; caption: string }
-  | { type: "buy"; usd: number; symbol: string }
+  | { type: "trade"; quantity: number; inputSymbol: string; outputSymbol: string }
   | { type: "services.status" }
   | { type: "service.start"; service: "arb" | "sherpa" }
   | { type: "service.stop"; service: "arb" | "sherpa" };
@@ -96,29 +96,30 @@ function normalizeBotToken(rawToken: string): string {
 function parseCommand(message: string): RoutedCommand | null {
   const trimmed = message.trim();
   if (!trimmed) return null;
+  const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() ?? "";
 
   const tweetMatch =
-    trimmed.match(/^hey\s+tweet\s+this\s*:\s*(.+)$/i) ||
-    trimmed.match(/^(?:tweet|post)\s+this\s+(?:on\s+)?x\s*:\s*(.+)$/i) ||
-    trimmed.match(/^x\s+post\s*:\s*(.+)$/i);
+    firstLine.match(/^hey\s+tweet\s+this\s*:\s*(.+)$/i) ||
+    firstLine.match(/^(?:tweet|post)\s+this\s+(?:on\s+)?x\s*:\s*(.+)$/i) ||
+    firstLine.match(/^x\s+post\s*:\s*(.+)$/i);
   if (tweetMatch?.[1]?.trim()) return { type: "tweet", text: tweetMatch[1].trim() };
 
   const telegramMatch =
-    trimmed.match(/^(?:post\s+to\s+telegram|post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
-    trimmed.match(/^hey\s+telegram\s+this\s*:\s*(.+)$/i);
+    firstLine.match(/^(?:post\s+to\s+telegram|post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
+    firstLine.match(/^hey\s+telegram\s+this\s*:\s*(.+)$/i);
   if (telegramMatch?.[1]?.trim()) return { type: "telegram", text: telegramMatch[1].trim() };
 
   const imageMatch =
-    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?image\s*:\s*(.+)$/i) ||
-    trimmed.match(/^image\s*:\s*(.+)$/i);
+    firstLine.match(/^(?:generate|create|make)\s+(?:an?\s+)?image\s*:\s*(.+)$/i) ||
+    firstLine.match(/^image\s*:\s*(.+)$/i);
   if (imageMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "image", prompt: imageMatch[1].trim() };
 
   const videoMatch =
-    trimmed.match(/^(?:generate|create|make)\s+(?:an?\s+)?video(?:\s*:)?\s+(.+)$/i) ||
-    trimmed.match(/^video\s*:\s*(.+)$/i);
+    firstLine.match(/^(?:generate|create|make)\s+(?:an?\s+)?video(?:\s*:\s*|\s+)(.+)$/i) ||
+    firstLine.match(/^video\s*:\s*(.+)$/i);
   if (videoMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "video", prompt: videoMatch[1].trim() };
 
-  const sendMediaMatch = trimmed.match(
+  const sendMediaMatch = firstLine.match(
     /^(?:send|load)\s+([a-z0-9._-]+)\s+to\s+(telegram|x|sherpa)(?:\s+with\s+caption\s*:\s*(.+))?\s*$/i
   );
   if (sendMediaMatch?.[1]?.trim()) {
@@ -130,21 +131,32 @@ function parseCommand(message: string): RoutedCommand | null {
     };
   }
 
-  const buyMatch =
+  const tradeMatch =
+    trimmed.match(/^(?:market\s+)?trade\s+\$?(\d+(?:\.\d+)?)\s+\$?([a-z0-9._-]+)\s+for\s+\$?([a-z0-9._-]+)\s*$/i) ||
     trimmed.match(/^go\s+buy\s+\$?(\d+(?:\.\d+)?)\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
     trimmed.match(/^buy\s+\$?(\d+(?:\.\d+)?)\s+(?:of\s+)?\$?([a-z0-9._-]+)(?:\s+now)?\s*$/i) ||
     trimmed.match(/^ape\s+\$?(\d+(?:\.\d+)?)\s+into\s+\$?([a-z0-9._-]+)\s*$/i) ||
     trimmed.match(/^use\s+\$?(\d+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\s+to\s+buy\s+\$?([a-z0-9._-]+)\s*$/i);
-  if (buyMatch) return { type: "buy", usd: Number(buyMatch[1]), symbol: buyMatch[2].toUpperCase() };
+  if (tradeMatch) {
+    if (/for/i.test(trimmed)) {
+      return {
+        type: "trade",
+        quantity: Number(tradeMatch[1]),
+        inputSymbol: tradeMatch[2].toUpperCase(),
+        outputSymbol: tradeMatch[3].toUpperCase(),
+      };
+    }
+    return { type: "trade", quantity: Number(tradeMatch[1]), inputSymbol: "USDC", outputSymbol: tradeMatch[2].toUpperCase() };
+  }
 
   const buyWordsMatch =
-    trimmed.match(/^buy:\s*([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    trimmed.match(/^buy:\s*([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)(?:\s+with\s+\$?(usdc|usd))?\s*$/i) ||
     trimmed.match(/^buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
     trimmed.match(/^use\s+([a-z]+)\s*(?:usdc|usd|dollars?)\s+to\s+buy\s+\$?([a-z0-9._-]+)\s*$/i) ||
     trimmed.match(/^.*use\s+(?:the\s+)?usdc\s+to\s+buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i);
   if (buyWordsMatch) {
-    const usd = parseUsdAmount(buyWordsMatch[1]);
-    if (usd) return { type: "buy", usd, symbol: buyWordsMatch[2].toUpperCase() };
+    const quantity = parseUsdAmount(buyWordsMatch[1]);
+    if (quantity) return { type: "trade", quantity, inputSymbol: "USDC", outputSymbol: buyWordsMatch[2].toUpperCase() };
   }
 
   if (/^(?:services|service)\s+(?:status|list|show)$/i.test(trimmed) || /^show\s+services$/i.test(trimmed)) {
@@ -160,22 +172,39 @@ function parseCommand(message: string): RoutedCommand | null {
   return null;
 }
 
-async function estimateSolForUsd(usd: number): Promise<number> {
-  const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
-  let data: { outAmount?: string };
-  try {
-    data = (await fetchJsonWithJupiterFallback("/swap/v1/quote", {
-      inputMint: USDC_MINT,
-      outputMint: SOL_MINT,
-      amount: String(amountUsdcBase),
-      slippageBps: "50",
-    })) as { outAmount?: string };
-  } catch (error) {
-    throw toUserFacingFetchError(error, "USD→SOL quote failed");
-  }
-  const outLamports = Number(data.outAmount ?? 0);
-  if (!Number.isFinite(outLamports) || outLamports <= 0) throw new Error("SOL conversion quote returned no output");
-  return outLamports / 1_000_000_000;
+function parseVibeMediaCommand(message: string): RoutedCommand | null {
+  const trimmed = message.trim();
+  if (!trimmed || trimmed.endsWith("?")) return null;
+
+  const hasVideoWord = /\b(video|clip|reel|animation)\b/i.test(trimmed);
+  const hasImageWord = /\b(image|photo|picture|pic|artwork|art)\b/i.test(trimmed);
+  const requestCue =
+    /\b(make|create|generate|render|craft|produce|show|give)\b/i.test(trimmed) ||
+    /^(can|could|would)\s+you\b/i.test(trimmed) ||
+    /^(please|pls)\b/i.test(trimmed) ||
+    /^i\s+(?:want|need)\b/i.test(trimmed) ||
+    /^let'?s\b/i.test(trimmed);
+
+  if (!requestCue || (!hasVideoWord && !hasImageWord)) return null;
+  if (hasVideoWord && hasImageWord) return null;
+
+  const prompt = trimmed
+    .replace(/^(?:can|could|would)\s+you\s+/i, "")
+    .replace(/^(?:please|pls)\s+/i, "")
+    .replace(/^i\s+(?:want|need)(?:\s+you\s+to)?\s+/i, "")
+    .replace(/^let'?s\s+/i, "")
+    .replace(/\b(?:make|create|generate|render|craft|produce|show|give)\b/gi, "")
+    .replace(/\b(?:me|us)\b/gi, "")
+    .replace(/\b(?:a|an|the)\b/gi, " ")
+    .replace(/\b(?:video|clip|reel|animation|image|photo|picture|pic|artwork|art)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    type: "media.generate",
+    mediaKind: hasVideoWord ? "video" : "image",
+    prompt: prompt || trimmed,
+  };
 }
 
 type JupiterTokenResult = { address?: string; symbol?: string };
@@ -190,7 +219,7 @@ function matchTokenSymbol(normalized: string, tokens: Array<JupiterTokenResult &
   return tokens.find((item) => (item.symbol || "").toUpperCase().startsWith(normalized)) || null;
 }
 
-async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; symbol: string }> {
+async function resolveTokenMint(symbolOrMint: string): Promise<{ mint: string; symbol: string }> {
   const normalized = symbolOrMint.trim().toUpperCase();
   if (!normalized) throw new Error("Buy command token symbol is required.");
 
@@ -373,25 +402,36 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     return { ok: true, routed: "telegram", command: "post", response: `Posted to Telegram: ${command.text}`, status: 200 };
   }
 
-  if (!Number.isFinite(command.usd) || command.usd <= 0) {
-    return { ok: false, status: 400, error: "Buy command amount must be a positive USD value." };
+  if (!Number.isFinite(command.quantity) || command.quantity <= 0) {
+    return { ok: false, status: 400, error: "Trade quantity must be a positive number." };
   }
 
-  const tradeAuthority = await enforceTradeAuthority(command.usd);
+  const normalizedInput = command.inputSymbol.trim().toUpperCase();
+  const normalizedOutput = command.outputSymbol.trim().toUpperCase();
+  if (!normalizedInput || !normalizedOutput) {
+    return { ok: false, status: 400, error: "Trade command requires both input and output symbols." };
+  }
+  if (normalizedInput === normalizedOutput) {
+    return { ok: false, status: 400, error: "Input and output symbols must be different." };
+  }
+  if (!(normalizedInput === "USDC" || normalizedInput === "USD")) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Input token ${normalizedInput} is not supported in chat trade routing yet. Use: trade <quantity> USDC for <token>.`,
+    };
+  }
+
+  const tradeAuthority = await enforceTradeAuthority(command.quantity);
   if (!tradeAuthority.ok) return tradeAuthority;
 
+  let inputToken: { mint: string; symbol: string };
   let outputToken: { mint: string; symbol: string };
   try {
-    outputToken = await resolveOutputMint(command.symbol);
+    inputToken = await resolveTokenMint(normalizedInput);
+    outputToken = await resolveTokenMint(normalizedOutput);
   } catch (error) {
     return { ok: false, status: 400, error: error instanceof Error ? error.message : "Token symbol resolution failed." };
-  }
-
-  let amountSol = 0;
-  try {
-    amountSol = await estimateSolForUsd(command.usd);
-  } catch (error) {
-    return { ok: false, status: 502, error: error instanceof Error ? error.message : "USD→SOL quote failed." };
   }
 
   let swapRes: Response;
@@ -399,21 +439,27 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     swapRes = await fetch(new URL("/api/trade/swap", req.url), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amountSol, slippageBps: 50, outputMint: outputToken.mint, agentInitiated: true }),
+      body: JSON.stringify({
+        amountIn: command.quantity,
+        inputMint: inputToken.mint,
+        outputMint: outputToken.mint,
+        slippageBps: 50,
+        agentInitiated: true,
+      }),
     });
   } catch (error) {
     return { ok: false, status: 502, error: toUserFacingFetchError(error, "Trade execution request failed").message };
   }
 
-  const swapJson = (await swapRes.json().catch(() => ({}))) as { ok?: boolean; error?: string; signature?: string; amountSol?: number };
+  const swapJson = (await swapRes.json().catch(() => ({}))) as { ok?: boolean; error?: string; signature?: string; amountIn?: number };
   if (!swapRes.ok || !swapJson.ok) {
     return { ok: false, status: swapRes.status || 500, error: swapJson.error || `Trade execution failed (${swapRes.status})` };
   }
 
   await noteTradeExecution();
   return {
-    ok: true, routed: "arb", command: "buy",
-    response: `Executed buy for ~$${command.usd.toFixed(2)} of $${outputToken.symbol} (${(swapJson.amountSol ?? amountSol).toFixed(6)} SOL route). Signature: ${swapJson.signature}`,
+    ok: true, routed: "arb", command: "trade",
+    response: `Executed market trade: quantity ${Number(swapJson.amountIn ?? command.quantity).toFixed(6)} $${inputToken.symbol} for $${outputToken.symbol}. Signature: ${swapJson.signature}`,
     status: 200,
   };
 }
@@ -422,7 +468,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const message = typeof body?.message === "string" ? body.message : "";
-    const command = parseCommand(message);
+    const command = parseCommand(message) || parseVibeMediaCommand(message);
 
     if (command) {
       const result = await executeCommand(req, command);

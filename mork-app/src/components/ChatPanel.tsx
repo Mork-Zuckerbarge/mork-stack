@@ -169,7 +169,7 @@ export default function ChatPanel() {
           { label: "telegram:", value: "post to telegram:" },
           { label: "generate image:", value: "generate image:" },
           { label: "generate video:", value: "generate video:" },
-          { label: "buy:", value: "buy:" },
+          { label: "trade qty", value: "trade 2 usdc for btc" },
         ].map((preset) => (
           <button
             key={preset.label}
@@ -186,7 +186,7 @@ export default function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder="Try: post to telegram: ... | generate image: ... | generate video ... | send <file> to telegram with caption: ..."
+          placeholder="Try: trade 2 usdc for btc | generate image: ... | generate video ... | send <file> to telegram with caption: ..."
           className="flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 outline-none"
         />
         <button

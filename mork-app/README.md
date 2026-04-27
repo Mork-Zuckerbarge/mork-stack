@@ -89,6 +89,7 @@ Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
   - `MEDIA_VIDEO_TOKEN` can be set to a Pollinations key if your account/rate limits require auth (the app sends this as both `Authorization: Bearer ...` and `?key=...` for compatibility with Pollinations auth modes).
   - Style conditioning references can be supplied through `MEDIA_STYLE_IMAGE_URLS` (comma-separated public URLs) and are applied to both image/video generation as Pollinations `image=` references.
   - The first-time setup now accepts 7 public style image URLs and persists them via `/api/app/style-pack` for automatic Pollinations conditioning.
+  - `./start.sh` also snapshots/restores `mork-app/data/style-pack.json` (and uploaded `public/style-pack/*` files) into `${MORK_PERSIST_DIR:-~/.mork-stack}` so the style pack survives repo updates.
   - Optional overrides: `MEDIA_VIDEO_MODEL`, `MEDIA_VIDEO_MODEL_DEFAULT`, `MEDIA_VIDEO_SEED`, `MEDIA_VIDEO_DURATION`, `MEDIA_VIDEO_ASPECT_RATIO`, `MEDIA_VIDEO_AUDIO`.
   - Use `MEDIA_VIDEO_ENDPOINT` only when you intentionally want a custom provider.
   - `MEDIA_VIDEO_METHOD` applies to custom endpoint mode only (Pollinations default uses `GET`).
