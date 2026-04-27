@@ -20,9 +20,18 @@ type RoutedCommand =
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
+const BTC_MINT = "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E";
+const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 const LAST_TRADE_FACT_KEY = "__agent_last_trade_iso_v1__";
 const BASE58_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const JUP_TOKEN_SEARCH_LIMIT = "100";
+const STATIC_SYMBOL_MINT_MAP: Record<string, string> = {
+  SOL: SOL_MINT,
+  USDC: USDC_MINT,
+  BTC: BTC_MINT,
+  WBTC: BTC_MINT,
+  BBQ: BBQ_MINT,
+};
 const WORD_NUMBER_USD: Record<string, number> = {
   one: 1,
   two: 2,
@@ -236,6 +245,11 @@ async function resolveOutputMint(symbolOrMint: string): Promise<{ mint: string; 
   const normalized = symbolOrMint.trim().toUpperCase();
   if (!normalized) {
     throw new Error("Buy command token symbol is required.");
+  }
+
+  const staticMint = STATIC_SYMBOL_MINT_MAP[normalized];
+  if (staticMint) {
+    return { mint: staticMint, symbol: normalized };
   }
 
   if (BASE58_MINT_RE.test(symbolOrMint.trim())) {
