@@ -403,6 +403,86 @@ app.post("/chat/respond", async (req, res) => {
     res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 });
+
+app.post("/market/opportunity", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const symbol = String(payload.symbol || payload.inMint || "unknown");
+    const netUsd = Number(payload.netUsd ?? payload.net ?? 0);
+    const edgePct = Number(payload.edgePct ?? 0);
+    const spendUsd = Number(payload.spendUsd ?? 0);
+    const source = String(payload.source || "arb");
+
+    await prisma.memory.create({
+      data: {
+        type: "event",
+        content: `Opportunity ${symbol}: edge=${edgePct.toFixed(3)} net=${netUsd.toFixed(4)} spend=${spendUsd.toFixed(2)}`,
+        entities: ["market:opportunity", `symbol:${symbol}`],
+        importance: 0.6,
+        source,
+      },
+    });
+
+    return res.json({ ok: true });
+  } catch (e: unknown) {
+    return res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/wallet/balances", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const pubkey = String(payload.pubkey || "");
+    if (!pubkey) {
+      return res.status(400).json({ ok: false, error: "pubkey required" });
+    }
+
+    const sol = Number(payload.sol ?? 0);
+    const usdc = Number(payload.usdc ?? 0);
+    const bbq = Number(payload.bbq ?? 0);
+    const source = String(payload.source || "arb");
+
+    await prisma.memory.create({
+      data: {
+        type: "event",
+        content: `Balances ${pubkey}: SOL=${sol.toFixed(4)} USDC=${usdc.toFixed(4)} BBQ=${bbq.toFixed(4)}`,
+        entities: ["wallet:balances", `wallet:${pubkey}`],
+        importance: 0.45,
+        source,
+      },
+    });
+
+    return res.json({ ok: true });
+  } catch (e: unknown) {
+    return res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/market/execution", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const symbol = String(payload.symbol || "unknown");
+    const sig = String(payload.sig || "");
+    const ok = Boolean(payload.ok);
+    const reason = payload.reason ? String(payload.reason) : "";
+    const source = String(payload.source || "arb");
+
+    await prisma.memory.create({
+      data: {
+        type: "event",
+        content: `Execution ${symbol}: ok=${ok}${sig ? ` sig=${sig}` : ""}${reason ? ` reason=${reason}` : ""}`,
+        entities: ["market:execution", `symbol:${symbol}`],
+        importance: ok ? 0.7 : 0.5,
+        source,
+      },
+    });
+
+    return res.json({ ok: true });
+  } catch (e: unknown) {
+    return res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 app.post("/wallet/refresh", async (_req, res) => {
   try {
     const wallet = await getWalletState();
@@ -424,35 +504,6 @@ app.post("/wallet/refresh", async (_req, res) => {
     return res.json({ ok: true, wallet });
   } catch (e: unknown) {
     return res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
-  }
-});
-
-app.post("/arb/event", async (req, res) => {
-  try {
-
-    const { pair, edge, route } = req.body || {};
-
-    if (!pair) {
-      return res.status(400).json({ ok: false, error: "pair required" });
-    }
-
-    const content =
-      `Arbitrage opportunity detected: ${pair} edge=${edge}`;
-
-    await prisma.memory.create({
-      data: {
-        type: "event",
-        content,
-        entities: ["arb", `pair:${pair}`],
-        importance: 0.55,
-        source: "arb-bot",
-      },
-    });
-
-    res.json({ ok: true });
-
-  } catch (e: unknown) {
-    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 });
 
