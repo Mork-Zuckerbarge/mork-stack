@@ -102,10 +102,10 @@ export async function POST(req: Request) {
         );
       }
     } else {
-      // Manual UI swap: block when the ARB scanner is running or trade panel is not active.
-      if (control.arb.status === "running" || control.controls.activePanel !== "trade") {
+      // Manual UI swap: only block when trade panel is not active.
+      if (control.controls.activePanel !== "trade") {
         return NextResponse.json(
-          { ok: false, error: "Trade panel is paused while ARB is active. Switch panel to Trade and stop ARB first." },
+          { ok: false, error: "Trade panel is paused. Switch panel control to Trade first." },
           { status: 409 }
         );
       }

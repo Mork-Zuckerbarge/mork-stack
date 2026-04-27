@@ -4,6 +4,7 @@ import { getOrchestratorState, startRuntime, stopRuntime } from "@/lib/core/orch
 import { getAppControlState } from "@/lib/core/appControl";
 import { prisma } from "@/lib/core/prisma";
 import { generateImage, generateVideo } from "@/lib/core/media";
+import { getWalletBalancesForMints } from "@/lib/core/wallet";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -15,6 +16,7 @@ type RoutedCommand =
   | { type: "media.generate"; mediaKind: "image" | "video"; prompt: string }
   | { type: "media.share"; platform: "telegram" | "x" | "sherpa"; filename: string; caption: string }
   | { type: "trade"; quantity: number; inputSymbol: string; outputSymbol: string }
+  | { type: "trade.sellAll"; inputSymbol: string; outputSymbol: string }
   | { type: "services.status" }
   | { type: "service.start"; service: "arb" | "sherpa" }
   | { type: "service.stop"; service: "arb" | "sherpa" };
@@ -132,13 +134,13 @@ function parseCommand(message: string): RoutedCommand | null {
   }
 
   const tradeMatch =
-    trimmed.match(/^(?:market\s+)?trade\s+\$?(\d+(?:\.\d+)?)\s+\$?([a-z0-9._-]+)\s+for\s+\$?([a-z0-9._-]+)\s*$/i) ||
-    trimmed.match(/^go\s+buy\s+\$?(\d+(?:\.\d+)?)\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
-    trimmed.match(/^buy\s+\$?(\d+(?:\.\d+)?)\s+(?:of\s+)?\$?([a-z0-9._-]+)(?:\s+now)?\s*$/i) ||
-    trimmed.match(/^ape\s+\$?(\d+(?:\.\d+)?)\s+into\s+\$?([a-z0-9._-]+)\s*$/i) ||
-    trimmed.match(/^use\s+\$?(\d+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\s+to\s+buy\s+\$?([a-z0-9._-]+)\s*$/i);
+    firstLine.match(/^(?:market\s+)?trade\s+\$?(\d+(?:\.\d+)?)\s+\$?([a-z0-9._-]+)\s+for\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    firstLine.match(/^go\s+buy\s+\$?(\d+(?:\.\d+)?)\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    firstLine.match(/^buy\s+\$?(\d+(?:\.\d+)?)\s+(?:of\s+)?\$?([a-z0-9._-]+)(?:\s+now)?\s*$/i) ||
+    firstLine.match(/^ape\s+\$?(\d+(?:\.\d+)?)\s+into\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    firstLine.match(/^use\s+\$?(\d+(?:\.\d+)?)\s*(?:usdc|usd|dollars?)\s+to\s+buy\s+\$?([a-z0-9._-]+)\s*$/i);
   if (tradeMatch) {
-    if (/for/i.test(trimmed)) {
+    if (/for/i.test(firstLine)) {
       return {
         type: "trade",
         quantity: Number(tradeMatch[1]),
@@ -149,11 +151,22 @@ function parseCommand(message: string): RoutedCommand | null {
     return { type: "trade", quantity: Number(tradeMatch[1]), inputSymbol: "USDC", outputSymbol: tradeMatch[2].toUpperCase() };
   }
 
+  const sellAllMatch =
+    firstLine.match(/^sell\s+all\s+\$?([a-z0-9._-]+)\s+for\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    firstLine.match(/^sell\s+all\s+\$?([a-z0-9._-]+)\s*$/i);
+  if (sellAllMatch) {
+    return {
+      type: "trade.sellAll",
+      inputSymbol: sellAllMatch[1].toUpperCase(),
+      outputSymbol: (sellAllMatch[2] || "USDC").toUpperCase(),
+    };
+  }
+
   const buyWordsMatch =
-    trimmed.match(/^buy:\s*([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)(?:\s+with\s+\$?(usdc|usd))?\s*$/i) ||
-    trimmed.match(/^buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
-    trimmed.match(/^use\s+([a-z]+)\s*(?:usdc|usd|dollars?)\s+to\s+buy\s+\$?([a-z0-9._-]+)\s*$/i) ||
-    trimmed.match(/^.*use\s+(?:the\s+)?usdc\s+to\s+buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i);
+    firstLine.match(/^buy:\s*([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)(?:\s+with\s+\$?(usdc|usd))?\s*$/i) ||
+    firstLine.match(/^buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    firstLine.match(/^use\s+([a-z]+)\s*(?:usdc|usd|dollars?)\s+to\s+buy\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    firstLine.match(/^.*use\s+(?:the\s+)?usdc\s+to\s+buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i);
   if (buyWordsMatch) {
     const quantity = parseUsdAmount(buyWordsMatch[1]);
     if (quantity) return { type: "trade", quantity, inputSymbol: "USDC", outputSymbol: buyWordsMatch[2].toUpperCase() };
@@ -226,7 +239,7 @@ async function estimateSolForUsd(usd: number): Promise<number> {
 }
 
 type JupiterTokenResult = { address?: string; symbol?: string };
-type JupiterAllToken = { address?: string; symbol?: string; name?: string };
+type JupiterAllToken = { address?: string; symbol?: string; name?: string; decimals?: number };
 type JupiterTokenMeta = { decimals?: number };
 
 function matchTokenSymbol(normalized: string, tokens: Array<JupiterTokenResult & { address: string }>) {
@@ -276,8 +289,18 @@ async function resolveTokenMint(symbolOrMint: string): Promise<{ mint: string; s
 
 async function getTokenDecimals(mint: string): Promise<number> {
   if (mint === SOL_MINT) return 9;
-  const token = (await fetchJsonWithJupiterFallback(`/tokens/v1/token/${mint}`, {})) as JupiterTokenMeta;
-  const decimals = Number(token.decimals);
+  if (mint === USDC_MINT || mint === BTC_MINT) return 6;
+  try {
+    const token = (await fetchJsonWithJupiterFallback(`/tokens/v1/token/${mint}`, {})) as JupiterTokenMeta;
+    const decimals = Number(token.decimals);
+    if (Number.isFinite(decimals) && decimals >= 0) return decimals;
+  } catch { /* fallback below */ }
+
+  const allRes = await fetch("https://token.jup.ag/all", { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
+  if (!allRes?.ok) return 0;
+  const allTokens = (await allRes.json()) as JupiterAllToken[];
+  const token = allTokens.find((item) => item.address === mint);
+  const decimals = Number(token?.decimals);
   return Number.isFinite(decimals) && decimals >= 0 ? decimals : 0;
 }
 
@@ -297,6 +320,14 @@ async function estimateUsdNotional(inputMint: string, amountIn: number): Promise
   const outAmount = Number(quote.outAmount ?? 0);
   if (!Number.isFinite(outAmount) || outAmount <= 0) throw new Error("Unable to estimate USD notional for trade guard.");
   return outAmount / 1_000_000;
+}
+
+async function resolveSellAllQuantity(inputMint: string): Promise<number> {
+  const balances = await getWalletBalancesForMints([inputMint]);
+  const raw = Number(balances[inputMint] ?? 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  if (inputMint === SOL_MINT) return Math.max(0, raw - 0.01);
+  return raw;
 }
 
 async function enforceTradeAuthority(usd: number) {
@@ -448,7 +479,8 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     return { ok: true, routed: "telegram", command: "post", response: `Posted to Telegram: ${command.text}`, status: 200 };
   }
 
-  if (!Number.isFinite(command.quantity) || command.quantity <= 0) {
+  const requestedQuantity = command.type === "trade" ? command.quantity : Number.NaN;
+  if (command.type === "trade" && (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0)) {
     return { ok: false, status: 400, error: "Trade quantity must be a positive number." };
   }
 
@@ -469,10 +501,22 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     return { ok: false, status: 400, error: error instanceof Error ? error.message : "Token symbol resolution failed." };
   }
 
-  let usdNotional = command.quantity;
+  let quantity = requestedQuantity;
+  if (command.type === "trade.sellAll") {
+    try {
+      quantity = await resolveSellAllQuantity(inputToken.mint);
+    } catch (error) {
+      return { ok: false, status: 500, error: error instanceof Error ? error.message : "Could not read wallet balance for sell all." };
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return { ok: false, status: 400, error: `No ${inputToken.symbol} balance available to sell.` };
+    }
+  }
+
+  let usdNotional = quantity;
   if (!(normalizedInput === "USDC" || normalizedInput === "USD")) {
     try {
-      usdNotional = await estimateUsdNotional(inputToken.mint, command.quantity);
+      usdNotional = await estimateUsdNotional(inputToken.mint, quantity);
     } catch (error) {
       return { ok: false, status: 400, error: error instanceof Error ? error.message : "Could not estimate trade notional." };
     }
@@ -486,7 +530,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        amountIn: command.quantity,
+        amountIn: quantity,
         inputMint: inputToken.mint,
         outputMint: outputToken.mint,
         slippageBps: 50,
@@ -505,7 +549,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   await noteTradeExecution();
   return {
     ok: true, routed: "arb", command: "trade",
-    response: `Executed market trade: quantity ${Number(swapJson.amountIn ?? command.quantity).toFixed(6)} $${inputToken.symbol} for $${outputToken.symbol}. Signature: ${swapJson.signature}`,
+    response: `Executed market trade: quantity ${Number(swapJson.amountIn ?? quantity).toFixed(6)} $${inputToken.symbol} for $${outputToken.symbol}. Signature: ${swapJson.signature}`,
     status: 200,
   };
 }

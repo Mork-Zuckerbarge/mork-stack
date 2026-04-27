@@ -65,7 +65,6 @@ type ExecutionAuthority = {
   cooldownMinutes: number;
 };
 
-type RuntimeStatus = "running" | "stopped";
 type ActivePanel = "arb" | "trade";
 
 type PoolWatchMode = "all_available";
@@ -161,7 +160,6 @@ export default function JupiterPanel() {
   const [executionBusy, setExecutionBusy] = useState(false);
   const [executionStatus, setExecutionStatus] = useState("");
   const [walletRefreshBusy, setWalletRefreshBusy] = useState(false);
-  const [arbStatus, setArbStatus] = useState<RuntimeStatus>("stopped");
   const [panelRefreshBusy, setPanelRefreshBusy] = useState(false);
   const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
   const [strategyEngines, setStrategyEngines] = useState<StrategyEngines | null>(null);
@@ -190,7 +188,7 @@ export default function JupiterPanel() {
   const showOutputTokenOptions =
     outputTokenResults.length > 1 || (outputTokenResults.length === 1 && outputTokenResults[0].mint !== selectedOutputMint);
   const tradePaused = activePanel !== "trade";
-  const swapBlocked = arbStatus === "running" || activePanel !== "trade";
+  const swapBlocked = activePanel !== "trade";
   const arbPaused = activePanel !== "arb";
 
   const fetchTokenOptions = useCallback(async (query: string): Promise<TokenOption[]> => {
@@ -280,7 +278,6 @@ export default function JupiterPanel() {
       const data = (await res.json()) as {
         ok?: boolean;
         state?: {
-          arb?: { status?: RuntimeStatus };
           controls?: {
             executionAuthority?: ExecutionAuthority;
             startupCompleted?: boolean;
@@ -291,16 +288,13 @@ export default function JupiterPanel() {
       };
       if (!res.ok || !data.ok || !data.state?.controls?.executionAuthority) {
         setExecution(null);
-        setArbStatus("stopped");
         return;
       }
       setExecution(data.state.controls.executionAuthority);
-      setArbStatus(data.state.arb?.status === "running" ? "running" : "stopped");
       setActivePanel(data.state.controls.activePanel === "arb" ? "arb" : "trade");
       setStrategyEngines(data.state.controls.strategyEngines ?? null);
     } catch {
       setExecution(null);
-      setArbStatus("stopped");
       setActivePanel("trade");
       setStrategyEngines(null);
     }
@@ -645,7 +639,7 @@ export default function JupiterPanel() {
         <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
           {swapBlocked ? (
             <div className="mb-3 rounded-xl border border-amber-300/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-              Swap execution is blocked while automation is active. You can still search pairs and inspect quotes.
+              Swap execution is paused while Automation side is active. Switch to Trade side to execute swaps.
             </div>
           ) : null}
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-white/15 bg-black/30 px-3 py-2">
