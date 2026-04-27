@@ -136,6 +136,12 @@ export MORK_CORE_URL="${MORK_CORE_URL:-http://127.0.0.1:8790}"
 log "Using MORK_CORE_URL=$MORK_CORE_URL"
 log "Using DATABASE_URL=$DATABASE_URL"
 
+log "Ensuring runtime Prisma schema exists for DATABASE_URL"
+(
+  cd "$APP_DIR"
+  DATABASE_URL="$DATABASE_URL" npm exec prisma db push >>"$LOG_DIR/prisma-runtime.log" 2>&1
+)
+
 if [[ -d "$MORK_CORE_DIR" ]]; then
   if [[ ! -d "$MORK_CORE_DIR/node_modules" ]]; then
     log "Installing mork-core dependencies"
