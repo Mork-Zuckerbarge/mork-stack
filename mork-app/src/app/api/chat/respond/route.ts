@@ -207,6 +207,24 @@ function parseVibeMediaCommand(message: string): RoutedCommand | null {
   };
 }
 
+async function estimateSolForUsd(usd: number): Promise<number> {
+  const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
+  let data: { outAmount?: string };
+  try {
+    data = (await fetchJsonWithJupiterFallback("/swap/v1/quote", {
+      inputMint: USDC_MINT,
+      outputMint: SOL_MINT,
+      amount: String(amountUsdcBase),
+      slippageBps: "50",
+    })) as { outAmount?: string };
+  } catch (error) {
+    throw toUserFacingFetchError(error, "USD→SOL quote failed");
+  }
+  const outLamports = Number(data.outAmount ?? 0);
+  if (!Number.isFinite(outLamports) || outLamports <= 0) throw new Error("SOL conversion quote returned no output");
+  return outLamports / 1_000_000_000;
+}
+
 type JupiterTokenResult = { address?: string; symbol?: string };
 type JupiterAllToken = { address?: string; symbol?: string; name?: string };
 
