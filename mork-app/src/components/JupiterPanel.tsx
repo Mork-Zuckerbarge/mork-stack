@@ -15,6 +15,7 @@ type TokenOption = {
   mint: string;
   name?: string;
   logoUri?: string;
+  balance?: number;
 };
 
 function shortMint(mint: string): string {
@@ -164,6 +165,7 @@ export default function JupiterPanel() {
   const [panelRefreshStatus, setPanelRefreshStatus] = useState("");
   const [strategyEngines, setStrategyEngines] = useState<StrategyEngines | null>(null);
   const [activePanel, setActivePanel] = useState<ActivePanel>("trade");
+  const [loadingWalletSellTokens, setLoadingWalletSellTokens] = useState(false);
 
   const selectedInputToken = useMemo(
     () => inputTokenResults.find((token) => token.mint === selectedInputMint) ?? { symbol: shortMint(selectedInputMint), mint: selectedInputMint },
@@ -221,6 +223,23 @@ export default function JupiterPanel() {
       setOutputTokenResults(results);
     }
   }, [fetchTokenOptions]);
+
+  const loadWalletSellTokenOptions = useCallback(async () => {
+    if (tradePaused || loadingWalletSellTokens) return;
+    setLoadingWalletSellTokens(true);
+    try {
+      const res = await fetch("/api/trade/wallet-tokens", { cache: "no-store" });
+      const data = (await res.json()) as { ok?: boolean; tokens?: TokenOption[] };
+      if (!res.ok || data.ok === false || !data.tokens?.length) {
+        return;
+      }
+      setInputTokenResults(data.tokens);
+    } catch {
+      // no-op
+    } finally {
+      setLoadingWalletSellTokens(false);
+    }
+  }, [loadingWalletSellTokens, tradePaused]);
 
   const applyPairSearch = useCallback(async (query: string) => {
     const parts = query
@@ -687,6 +706,9 @@ export default function JupiterPanel() {
                 type="text"
                 value={inputSearch}
                 onChange={(e) => setInputSearch(e.target.value)}
+                onFocus={() => {
+                  void loadWalletSellTokenOptions();
+                }}
                 disabled={tradePaused}
                 placeholder="Search name, symbol, or CA"
                 className="mt-1 block w-full rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-sm"
@@ -715,6 +737,9 @@ export default function JupiterPanel() {
                         <div className="text-[11px] text-white/60">{token.name || shortMint(token.mint)}</div>
                       </div>
                       <span className="ml-auto text-white/60">{shortMint(token.mint)}</span>
+                      {typeof token.balance === "number" ? (
+                        <span className="ml-2 text-white/50">{formatTokenAmount(token.balance, 4)}</span>
+                      ) : null}
                     </button>
                   );
                 })}
