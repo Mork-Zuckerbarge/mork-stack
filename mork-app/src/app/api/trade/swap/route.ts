@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
 import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
@@ -46,7 +46,7 @@ function getSigner(): Keypair {
   return Keypair.fromSecretKey(secret);
 }
 
-async function getTokenDecimals(mint: string): Promise<number> {
+async function getTokenDecimalsFromJupiter(mint: string): Promise<number> {
   if (mint === SOL_MINT) return 9;
   for (const base of getJupiterBaseCandidates()) {
     const res = await fetch(`${base}/tokens/v1/token/${mint}`, {
@@ -59,6 +59,22 @@ async function getTokenDecimals(mint: string): Promise<number> {
     return Number.isFinite(token.decimals) ? Number(token.decimals) : 0;
   }
   return 0;
+}
+
+async function getTokenDecimals(mint: string, connection: Connection): Promise<number> {
+  if (mint === SOL_MINT) return 9;
+
+  const jupiterDecimals = await getTokenDecimalsFromJupiter(mint);
+  if (jupiterDecimals > 0) return jupiterDecimals;
+
+  try {
+    const mintPk = new PublicKey(mint);
+    const parsed = await connection.getParsedAccountInfo(mintPk, "processed").catch(() => null);
+    const decimals = Number((parsed?.value as { data?: { parsed?: { info?: { decimals?: number } } } } | null)?.data?.parsed?.info?.decimals);
+    return Number.isFinite(decimals) ? decimals : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export async function POST(req: Request) {
@@ -112,16 +128,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "amountIn must be > 0" }, { status: 400 });
     }
 
-    if (amountIn > maxSol) {
+    if (inputMint === SOL_MINT && amountIn > maxSol) {
       return NextResponse.json(
-        { ok: false, error: `amountIn exceeds configured max of ${maxSol} ${inputMint === SOL_MINT ? "SOL" : "input token units"}` },
+        { ok: false, error: `amountIn exceeds configured max of ${maxSol} SOL` },
         { status: 400 }
       );
     }
 
     const signer = getSigner();
     const connection = new Connection(RPC, "processed");
-    const inDecimals = await getTokenDecimals(inputMint);
+    const inDecimals = await getTokenDecimals(inputMint, connection);
     if (inDecimals <= 0 || inDecimals > 12) {
       return NextResponse.json(
         { ok: false, error: `Unable to resolve decimals for input mint ${inputMint}` },
