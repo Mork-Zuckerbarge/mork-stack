@@ -21,6 +21,7 @@ def normalize_bot_token(raw_token: str) -> str:
 
 BOT_TOKEN = normalize_bot_token(os.getenv("TELEGRAM_BOT_TOKEN", ""))
 CORE_URL = os.getenv("MORK_CORE_URL", "http://127.0.0.1:8790").strip().rstrip("/")
+APP_URL = os.getenv("MORK_APP_URL", "http://127.0.0.1:3000").strip().rstrip("/")
 CHAT_ENDPOINT = os.getenv("MORK_CHAT_ENDPOINT", "/chat/respond").strip() or "/chat/respond"
 REPLY_MODE = os.getenv("REPLY_MODE", "mentions").strip().lower()  # mentions | all | dm
 if REPLY_MODE not in ("mentions", "all", "dm"):
@@ -166,34 +167,35 @@ def should_reply(msg: dict, bot_username: str, bot_id: int) -> bool:
     return False
 
 
-def post_to_chat_endpoint(path: str, payload: dict) -> dict:
-    url = f"{CORE_URL}{path}"
+def post_to_chat_endpoint(base_url: str, path: str, payload: dict) -> dict:
+    url = f"{base_url}{path}"
     response = requests.post(url, json=payload, timeout=CHAT_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
 
 
-def build_candidate_paths() -> list[str]:
+def build_candidate_targets() -> list[tuple[str, str]]:
     normalized = CHAT_ENDPOINT if CHAT_ENDPOINT.startswith("/") else f"/{CHAT_ENDPOINT}"
+    targets: list[tuple[str, str]] = []
 
-    # Next.js app surface uses /api/chat/respond on :3000.
-    if ":3000" in CORE_URL:
-        candidates: list[str] = []
-        if normalized.startswith("/api/"):
-            candidates.append(normalized)
-        if "/api/chat/respond" not in candidates:
-            candidates.append("/api/chat/respond")
-        return candidates
+    def add_target(base_url: str, path: str):
+        target = (base_url, path)
+        if target not in targets:
+            targets.append(target)
 
-    # mork-core first
-    candidates: list[str] = []
+    # Prefer mork-core for /chat/respond.
     if normalized:
-        candidates.append(normalized)
-    if "/chat/respond" not in candidates:
-        candidates.append("/chat/respond")
-    if "/api/chat/respond" not in candidates:
-        candidates.append("/api/chat/respond")
-    return candidates
+        add_target(CORE_URL, normalized)
+    add_target(CORE_URL, "/chat/respond")
+
+    # Fallback to app API surface if core is unavailable.
+    if normalized.startswith("/api/"):
+        add_target(APP_URL, normalized)
+    add_target(APP_URL, "/api/chat/respond")
+
+    # As a final fallback, try app base with /chat/respond in case of custom rewrites.
+    add_target(APP_URL, "/chat/respond")
+    return targets
 
 
 def core_reply(handle: str, message: str, user_id: int) -> dict:
@@ -205,20 +207,21 @@ def core_reply(handle: str, message: str, user_id: int) -> dict:
         "maxChars": TELEGRAM_MAX_CHARS,
     }
 
-    candidate_paths = build_candidate_paths()
+    candidate_targets = build_candidate_targets()
 
     errors: list[str] = []
     j = None
-    for path in candidate_paths:
+    for base_url, path in candidate_targets:
+        url = f"{base_url}{path}"
         try:
-            j = post_to_chat_endpoint(path, payload)
+            j = post_to_chat_endpoint(base_url, path, payload)
             break
         except Exception as err:
-            errors.append(f"{path}: {repr(err)}")
+            errors.append(f"{url}: {repr(err)}")
             continue
 
     if j is None:
-        raise RuntimeError(f"chat upstream failed after paths={candidate_paths}: {' | '.join(errors)}")
+        raise RuntimeError(f"chat upstream failed after targets={candidate_targets}: {' | '.join(errors)}")
 
     if not j.get("ok"):
         return {"text": "My thoughts failed to compile. Try again in a moment.", "media": None}
@@ -386,7 +389,7 @@ def main():
     print(
         f"[bridge] bot=@{bot_username} id={bot_id} core={CORE_URL} endpoint={CHAT_ENDPOINT} mode={REPLY_MODE}"
     )
-    print(f"[bridge] chat endpoint candidates={build_candidate_paths()}")
+    print(f"[bridge] chat endpoint candidates={build_candidate_targets()}")
     if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
         pct = int(VOICE_REPLY_PROBABILITY * 100)
         print(f"[bridge] ElevenLabs: enabled (voice replies available; random chance {pct}%)")
