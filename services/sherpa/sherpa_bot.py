@@ -273,6 +273,36 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
                 print("⚠ core_compose GET retrying local mork-core after exception")
     return ""
 
+def core_chat_reply(handle: str, message: str, max_chars: int = 260, timeout: int = 10) -> str:
+    """
+    Ask mork-core /chat/respond for a conversational X reply draft.
+    """
+    base = _core_base_url()
+    chat_bases = _core_retry_bases(base)
+    payload = {
+        "channel": "x",
+        "handle": handle or "x_user",
+        "message": message,
+        "maxChars": int(max(120, min(560, max_chars))),
+    }
+    for i, chat_base in enumerate(chat_bases):
+        try:
+            r = requests.post(f"{chat_base}/chat/respond", json=payload, timeout=timeout)
+            if r.ok:
+                data = r.json() if "application/json" in (r.headers.get("content-type") or "") else {}
+                text = (data.get("reply") or data.get("response") or "").strip()
+                if text:
+                    return text
+            else:
+                print(f"⚠ core_chat_reply bad status {r.status_code} from {chat_base}: {r.text[:200]}")
+                if i + 1 < len(chat_bases):
+                    print(f"⚠ core_chat_reply retrying mork-core at {chat_bases[i + 1]}")
+        except Exception as e:
+            print(f"⚠ core_chat_reply failed against {chat_base}: {e}")
+            if i + 1 < len(chat_bases):
+                print(f"⚠ core_chat_reply retrying mork-core at {chat_bases[i + 1]}")
+    return ""
+
 def _wrap_280(s: str, max_len: int = X_INTERNAL_DRAFT_MAX_CHARS) -> str:
     # Preserve newlines for tweet formatting, but collapse repeated spaces
     s = (s or "").strip()
@@ -2459,17 +2489,26 @@ class TwitterBot:
                 tw = tw[:220]
 
                 prompt = (
-                    "Compose a direct reply tweet in character.\n"
-                    "Rules: do not quote, copy, or restate the user's words.\n"
+                    "You are replying on X in character.\n"
+                    "Do not quote, copy, or restate the user's words.\n"
                     "No hashtags, no emojis, no URLs, no canned opener/closer.\n"
                     "Write 1-3 natural sentences that move the conversation forward.\n"
                     "Reference ideas at a high level only.\n\n"
                     f"Context (do not quote): {tw}"
                 )
 
+                out = core_chat_reply(
+                    handle="x_reply",
+                    message=prompt,
+                    max_chars=260,
+                    timeout=10,
+                ) or ""
+                if out:
+                    return _wrap_280(out, 260)
+
                 out = core_compose_payload(
                     {
-                        "kind": "reply",
+                        "kind": "observation",
                         "text": prompt,
                         "maxChars": 260,
                         "constraints": {

@@ -49,6 +49,13 @@ function parseUsdAmount(raw: string): number | null {
   return WORD_NUMBER_USD[raw.trim().toLowerCase()] ?? null;
 }
 
+function normalizeTokenRef(raw: string): string {
+  const trimmed = raw.trim().replace(/^\$+/, "");
+  if (!trimmed) return "";
+  if (BASE58_MINT_RE.test(trimmed)) return trimmed;
+  return trimmed.toUpperCase();
+}
+
 function buildJupiterBaseCandidates() {
   const candidates = [
     (process.env.JUP_BASE_URL || "").trim(),
@@ -136,6 +143,17 @@ function parseCommand(message: string): RoutedCommand | null {
     };
   }
 
+  const tradeAllMatch =
+    firstLine.match(/^trade\s+all\s+\$?([a-z0-9._-]+)\s+(?:for|to)\s+\$?([a-z0-9._-]+)\s*$/i) ||
+    firstLine.match(/^swap\s+all\s+\$?([a-z0-9._-]+)\s+(?:for|to)\s+\$?([a-z0-9._-]+)\s*$/i);
+  if (tradeAllMatch) {
+    return {
+      type: "trade.sellAll",
+      inputSymbol: normalizeTokenRef(tradeAllMatch[1]),
+      outputSymbol: normalizeTokenRef(tradeAllMatch[2] || "USDC"),
+    };
+  }
+
   const tradeMatch =
     firstLine.match(/^(?:market\s+)?trade\s+\$?(\d+(?:\.\d+)?)\s+\$?([a-z0-9._-]+)\s+for\s+\$?([a-z0-9._-]+)\s*$/i) ||
     firstLine.match(/^go\s+buy\s+\$?(\d+(?:\.\d+)?)\s+of\s+\$?([a-z0-9._-]+)\s*$/i) ||
@@ -147,11 +165,11 @@ function parseCommand(message: string): RoutedCommand | null {
       return {
         type: "trade",
         quantity: Number(tradeMatch[1]),
-        inputSymbol: tradeMatch[2].toUpperCase(),
-        outputSymbol: tradeMatch[3].toUpperCase(),
+        inputSymbol: normalizeTokenRef(tradeMatch[2]),
+        outputSymbol: normalizeTokenRef(tradeMatch[3]),
       };
     }
-    return { type: "trade", quantity: Number(tradeMatch[1]), inputSymbol: "USDC", outputSymbol: tradeMatch[2].toUpperCase() };
+    return { type: "trade", quantity: Number(tradeMatch[1]), inputSymbol: "USDC", outputSymbol: normalizeTokenRef(tradeMatch[2]) };
   }
 
   const sellAllMatch =
@@ -160,8 +178,8 @@ function parseCommand(message: string): RoutedCommand | null {
   if (sellAllMatch) {
     return {
       type: "trade.sellAll",
-      inputSymbol: sellAllMatch[1].toUpperCase(),
-      outputSymbol: (sellAllMatch[2] || "USDC").toUpperCase(),
+      inputSymbol: normalizeTokenRef(sellAllMatch[1]),
+      outputSymbol: normalizeTokenRef(sellAllMatch[2] || "USDC"),
     };
   }
 
@@ -172,7 +190,7 @@ function parseCommand(message: string): RoutedCommand | null {
     firstLine.match(/^.*use\s+(?:the\s+)?usdc\s+to\s+buy\s+([a-z]+)\s+dollars?\s+of\s+\$?([a-z0-9._-]+)\s*$/i);
   if (buyWordsMatch) {
     const quantity = parseUsdAmount(buyWordsMatch[1]);
-    if (quantity) return { type: "trade", quantity, inputSymbol: "USDC", outputSymbol: buyWordsMatch[2].toUpperCase() };
+    if (quantity) return { type: "trade", quantity, inputSymbol: "USDC", outputSymbol: normalizeTokenRef(buyWordsMatch[2]) };
   }
 
   if (
@@ -547,13 +565,10 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     return { ok: false, status: 400, error: "Trade quantity must be a positive number." };
   }
 
-  const normalizedInput = command.inputSymbol.trim().toUpperCase();
-  const normalizedOutput = command.outputSymbol.trim().toUpperCase();
+  const normalizedInput = normalizeTokenRef(command.inputSymbol);
+  const normalizedOutput = normalizeTokenRef(command.outputSymbol);
   if (!normalizedInput || !normalizedOutput) {
     return { ok: false, status: 400, error: "Trade command requires both input and output symbols." };
-  }
-  if (normalizedInput === normalizedOutput) {
-    return { ok: false, status: 400, error: "Input and output symbols must be different." };
   }
   let inputToken: { mint: string; symbol: string };
   let outputToken: { mint: string; symbol: string };
@@ -562,6 +577,9 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     outputToken = await resolveTokenMint(normalizedOutput);
   } catch (error) {
     return { ok: false, status: 400, error: error instanceof Error ? error.message : "Token symbol resolution failed." };
+  }
+  if (inputToken.mint === outputToken.mint) {
+    return { ok: false, status: 400, error: "Input and output tokens resolve to the same mint. Choose two different tokens." };
   }
 
   let quantity = requestedQuantity;
@@ -577,7 +595,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   }
 
   let usdNotional = quantity;
-  if (!(normalizedInput === "USDC" || normalizedInput === "USD")) {
+  if (inputToken.mint !== USDC_MINT) {
     try {
       usdNotional = await estimateUsdNotional(inputToken.mint, quantity);
     } catch (error) {
