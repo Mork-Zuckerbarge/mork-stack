@@ -172,9 +172,13 @@ export async function respondToChat(input: unknown) {
   modeInstruction +=
     "Execution is enabled for agent-run trading actions when the user requests them.\n";
   modeInstruction +=
+    "Autonomous planner scanning can run without a per-message confirmation when controls allow it.\n";
+  modeInstruction +=
     "Never claim a trade has executed unless execution is explicitly confirmed in provided runtime context.\n";
   modeInstruction +=
-    "When execution is not confirmed, clearly say it is a plan/request and list the next required confirmation step.\n";
+    "For manual trade requests not yet executed, clearly say it is a plan/request and list the next required step.\n";
+  modeInstruction +=
+    "If the user asks whether autonomous scanning is running, answer with current autonomous status and blockers; do not ask for buy command unless they asked to execute a specific trade.\n";
   modeInstruction +=
     "When discussing balances or funds, clearly distinguish the app's configured wallet from the user's personal custody.\n";
   modeInstruction +=
