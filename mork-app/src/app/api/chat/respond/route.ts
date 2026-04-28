@@ -177,6 +177,8 @@ function parseCommand(message: string): RoutedCommand | null {
 
   if (
     /(?:search|scan|look)\s+for\s+trade\s+opportunit(?:y|ies)/i.test(trimmed) ||
+    /scann(?:ing)?\s+for\s+trade\s+opportunit(?:y|ies)/i.test(trimmed) ||
+    /what\s+trade\s+opportunit(?:y|ies).*(?:scan|search|find)/i.test(trimmed) ||
     /automated\s+trades?\s+on\s+(?:your|its)\s+own/i.test(trimmed) ||
     /make\s+.*automated\s+trades?/i.test(trimmed)
   ) {
