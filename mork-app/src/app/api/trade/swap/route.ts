@@ -111,9 +111,9 @@ export async function POST(req: Request) {
       }
     }
 
-    if (process.env.MORK_AGENT_SWAP_ENABLED !== "1") {
+    if (!agentInitiated && process.env.MORK_AGENT_SWAP_ENABLED !== "1") {
       return NextResponse.json(
-        { ok: false, error: "Direct agent swap is disabled (set MORK_AGENT_SWAP_ENABLED=1 to enable)." },
+        { ok: false, error: "Direct swap is disabled (set MORK_AGENT_SWAP_ENABLED=1 to enable manual swap endpoint)." },
         { status: 403 }
       );
     }
