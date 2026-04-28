@@ -108,7 +108,6 @@ export async function POST() {
   if (!control.controls.plannerEnabled) return NextResponse.json({ ok: true, status: "skipped", reason: "planner_disabled" });
   if (authority.mode === "emergency_stop") return NextResponse.json({ ok: true, status: "skipped", reason: "emergency_stop" });
   if (authority.mode === "user_only") return NextResponse.json({ ok: true, status: "skipped", reason: "user_only_mode" });
-  if (process.env.MORK_AGENT_SWAP_ENABLED !== "1") return NextResponse.json({ ok: true, status: "skipped", reason: "agent_swap_disabled" });
 
   const lastTradeFact = await prisma.memoryFact.findUnique({ where: { key: LAST_PLANNER_TRADE_KEY } });
   const minutesElapsed = minutesSince(lastTradeFact?.value ?? null);
