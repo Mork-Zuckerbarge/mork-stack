@@ -11,13 +11,6 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
 
-function minutesSince(iso: string | null): number {
-  if (!iso) return Number.POSITIVE_INFINITY;
-  const ts = Date.parse(iso);
-  if (!Number.isFinite(ts)) return Number.POSITIVE_INFINITY;
-  return (Date.now() - ts) / 60_000;
-}
-
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
   const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
@@ -111,13 +104,6 @@ export async function POST() {
 
   if (!control.controls.plannerEnabled) return NextResponse.json({ ok: true, status: "skipped", reason: "planner_disabled" });
   if (authority.mode === "emergency_stop") return NextResponse.json({ ok: true, status: "skipped", reason: "emergency_stop" });
-  if (authority.mode === "user_only") return NextResponse.json({ ok: true, status: "skipped", reason: "user_only_mode" });
-
-  const lastTradeFact = await prisma.memoryFact.findUnique({ where: { key: LAST_PLANNER_TRADE_KEY } });
-  const minutesElapsed = minutesSince(lastTradeFact?.value ?? null);
-  if (minutesElapsed < authority.cooldownMinutes) {
-    return NextResponse.json({ ok: true, status: "skipped", reason: "cooldown_active", minutesRemaining: Math.max(0, authority.cooldownMinutes - minutesElapsed) });
-  }
 
   const allowlist = authority.mintAllowlist.filter((m) => m !== SOL_MINT && m !== USDC_MINT);
   if (allowlist.length === 0) return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty" });

@@ -95,12 +95,6 @@ export async function POST(req: Request) {
           { status: 403 }
         );
       }
-      if (authority.mode === "user_only") {
-        return NextResponse.json(
-          { ok: false, error: "Trading disabled: execution authority is user_only. Change to agent_assisted in App Controls to allow agent trades." },
-          { status: 403 }
-        );
-      }
     } else {
       // Manual UI swap: only block when trade panel is not active.
       if (control.controls.activePanel !== "trade") {
