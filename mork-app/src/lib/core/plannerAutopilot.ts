@@ -31,6 +31,7 @@ async function runTick(state: PlannerAutopilotState) {
 
 export function ensurePlannerAutopilotStarted() {
   if (process.env.MORK_PLANNER_AUTORUN === "0") return;
+  if (process.env.MORK_AUTONOMOUS_TRADING_ENABLED !== "1") return;
   if (globalThis.__morkPlannerAutopilotState) return;
 
   const intervalMs = getIntervalMs();

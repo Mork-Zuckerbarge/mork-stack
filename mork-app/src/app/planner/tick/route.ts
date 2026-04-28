@@ -102,6 +102,10 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<{
 }
 
 export async function POST() {
+  if (process.env.MORK_AUTONOMOUS_TRADING_ENABLED !== "1") {
+    return NextResponse.json({ ok: true, status: "skipped", reason: "autonomous_disabled" });
+  }
+
   const control = await getAppControlState();
   const authority = control.controls.executionAuthority;
 
