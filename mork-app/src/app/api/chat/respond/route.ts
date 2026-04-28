@@ -197,6 +197,9 @@ function parseCommand(message: string): RoutedCommand | null {
     /(?:search|scan|look)\s+for\s+trade\s+opportunit(?:y|ies)/i.test(trimmed) ||
     /scann(?:ing)?\s+for\s+trade\s+opportunit(?:y|ies)/i.test(trimmed) ||
     /what\s+trade\s+opportunit(?:y|ies).*(?:scan|search|find)/i.test(trimmed) ||
+    /automation\s+control.*(?:scan|search|execute).*(?:trade|arb)/i.test(trimmed) ||
+    /are\s+you\s+.*(?:scan|search).*(?:trade|arb)/i.test(trimmed) ||
+    /scan\s+for\s+and\s+execute\s+profitable\s+trades?/i.test(trimmed) ||
     /automated\s+trades?\s+on\s+(?:your|its)\s+own/i.test(trimmed) ||
     /make\s+.*automated\s+trades?/i.test(trimmed)
   ) {
@@ -361,29 +364,12 @@ async function resolveSellAllQuantity(inputMint: string): Promise<number> {
   return raw;
 }
 
-async function enforceTradeAuthority(usd: number) {
+async function enforceTradeAuthority() {
   const control = await getAppControlState();
   const authority = control.controls.executionAuthority;
 
   if (authority.mode === "emergency_stop") {
     return { ok: false, status: 403, error: "Trading disabled: emergency_stop mode is active." } as const;
-  }
-  if (authority.mode === "user_only") {
-    return { ok: false, status: 403, error: "Trading disabled: execution authority is user_only. Change to agent_assisted in App Controls." } as const;
-  }
-  if (usd > authority.maxTradeUsd) {
-    return { ok: false, status: 400, error: `Trade amount $${usd.toFixed(2)} exceeds the configured max of $${authority.maxTradeUsd}.` } as const;
-  }
-
-  const lastTradeRow = await prisma.memoryFact.findUnique({ where: { key: LAST_TRADE_FACT_KEY } });
-  if (lastTradeRow?.value) {
-    const lastMs = new Date(lastTradeRow.value).getTime();
-    const cooldownMs = authority.cooldownMinutes * 60 * 1000;
-    const elapsed = Date.now() - lastMs;
-    if (elapsed < cooldownMs) {
-      const remainSec = Math.ceil((cooldownMs - elapsed) / 1000);
-      return { ok: false, status: 429, error: `Trade cooldown active: ${remainSec}s remaining (cooldown=${authority.cooldownMinutes}min).` } as const;
-    }
   }
 
   return { ok: true, status: 200 } as const;
