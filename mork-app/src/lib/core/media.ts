@@ -94,6 +94,40 @@ async function getStyleReferenceUrls(): Promise<string[]> {
   return [...new Set([...envUrls, ...persistedUrls])].slice(0, 7);
 }
 
+async function detectRemoteMimeType(url: string): Promise<string | null> {
+  const attempt = async (method: "HEAD" | "GET"): Promise<string | null> => {
+    const res = await fetch(url, { method, cache: "no-store" });
+    if (!res.ok) return null;
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    return contentType.split(";")[0]?.trim() || null;
+  };
+
+  try {
+    const viaHead = await attempt("HEAD");
+    if (viaHead) return viaHead;
+  } catch {
+    // Some image hosts block HEAD; ignore and retry with GET.
+  }
+
+  try {
+    return await attempt("GET");
+  } catch {
+    return null;
+  }
+}
+
+async function normalizeVideoStyleReferences(model: string, refs: string[]): Promise<string[]> {
+  if (model !== "nova-reel" || !refs.length) return refs;
+  const accepted: string[] = [];
+  for (const ref of refs) {
+    const mimeType = await detectRemoteMimeType(ref);
+    if (mimeType === "image/png") {
+      accepted.push(ref);
+    }
+  }
+  return accepted;
+}
+
 export async function generateImage(prompt: string): Promise<GeneratedMedia> {
   const seed = Math.floor(Math.random() * 1_000_000_000);
   const imageUrl = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`);
@@ -157,7 +191,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     if ((process.env.MEDIA_VIDEO_AUDIO || "").trim() === "1") {
       url.searchParams.set("audio", "true");
     }
-    const styleRefs = await getStyleReferenceUrls();
+    const styleRefs = await normalizeVideoStyleReferences(selectedModel, await getStyleReferenceUrls());
     if (styleRefs.length) {
       url.searchParams.set("image", styleRefs.join(","));
     }
@@ -208,6 +242,10 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
         ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}`
         : hasToken && res.status === 401
         ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Pollinations rejected the provided MEDIA_VIDEO_TOKEN. Confirm the token is valid for gen.pollinations.ai/video and restart the app after updating env vars.`
+        : usePollinationsDefault &&
+          selectedModel === "nova-reel" &&
+          detail.toLowerCase().includes("expected type image/png")
+        ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. MEDIA_VIDEO_MODEL=nova-reel only accepts PNG style/reference images. Convert MEDIA_STYLE_IMAGE_URLS (and Setup style-pack URLs) to PNG, or switch MEDIA_VIDEO_MODEL to a model that accepts JPEG references.`
         : hasToken
         ? `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Pollinations rejected the request even though MEDIA_VIDEO_TOKEN is set.${model && !POLLINATIONS_VIDEO_MODELS.has(model) ? ` MEDIA_VIDEO_MODEL=${model} is not a supported Pollinations video model; using ${selectedModel}.` : ""}`
         : `Video generation failed (${res.status})${detail ? `: ${detail}` : ""}. Set MEDIA_VIDEO_TOKEN for Pollinations, or set MEDIA_VIDEO_ENDPOINT to a custom provider.${model && !POLLINATIONS_VIDEO_MODELS.has(model) ? ` MEDIA_VIDEO_MODEL=${model} is not a supported Pollinations video model; using ${selectedModel}.` : ""}`
