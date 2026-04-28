@@ -519,7 +519,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
         status: 200,
         routed: "planner",
         command: "trade.autosearch",
-        response: `Autonomous trade scan executed. Decision: HOLD (${plannerJson.reason || "no qualifying setup"}).`,
+        response: `Autonomous trade scan executed. Decision: HOLD (${plannerJson.reason || "no qualifying setup"}). This is a normal no-trade outcome for this tick, not a permission block.`,
       };
     }
     if (plannerJson.status === "skipped") {

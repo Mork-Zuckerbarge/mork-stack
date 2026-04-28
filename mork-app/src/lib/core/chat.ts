@@ -180,9 +180,15 @@ export async function respondToChat(input: unknown) {
   modeInstruction +=
     "If the user asks whether autonomous scanning is running, answer with current autonomous status and blockers; do not ask for buy command unless they asked to execute a specific trade.\n";
   modeInstruction +=
+    "Important planner wording: HOLD means a normal no-trade decision for that tick (not a permission block). Only treat status=skipped/error as blocked, and name the exact blocker.\n";
+  modeInstruction +=
     "When discussing balances or funds, clearly distinguish the app's configured wallet from the user's personal custody.\n";
   modeInstruction +=
     "Do not imply the user personally executed wallet actions; describe actions as agent/runtime wallet operations.\n";
+  if (channel === "telegram" || channel === "x") {
+    modeInstruction +=
+      "Treat app UI conversations, internal logs, and non-public trade details as private; do not disclose them on social channels unless explicitly provided in the current channel context.\n";
+  }
 
   if (handle === "frontend-coding" && isCasualMessage(trimmedMessage)) {
     modeInstruction +=

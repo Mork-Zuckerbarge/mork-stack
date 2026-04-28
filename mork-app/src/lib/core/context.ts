@@ -33,20 +33,28 @@ function isTechnicalMessage(message: string) {
 export async function buildContext({ handle, channel, message }: BuildContextArgs) {
   if (!(await isMemoryEnabled())) return `CURRENT MESSAGE:\n${message}`;
 
-  const technical = isTechnicalMessage(message);
+  const technical = (channel === "app" || channel === "system") && isTechnicalMessage(message);
   const plannerEnabled = await isPlannerEnabled();
   const normalizedHandle = (handle || "").trim();
+  const recentSources =
+    channel === "telegram"
+      ? ["telegram"]
+      : channel === "x"
+      ? ["x"]
+      : ["mork-app", "frontend-coding", channel];
 
   const [recentChat, walletMemory, tradeMemory, reflection, relationshipMemory, appControl, orchestratorState, preflight] =
     await Promise.all([
       prisma.memory.findMany({
-        where: { OR: [{ source: "mork-app" }, { source: "frontend-coding" }, { source: channel }] },
+        where: { source: { in: recentSources } },
         orderBy: { createdAt: "desc" },
         take: MAX_HISTORY_ITEMS,
       }),
       technical ? prisma.memory.findFirst({ where: { source: "wallet" }, orderBy: { createdAt: "desc" } }) : Promise.resolve(null),
       technical ? prisma.memory.findFirst({ where: { OR: [{ source: "arb" }, { source: "arb-bot" }, { source: "trade" }] }, orderBy: { createdAt: "desc" } }) : Promise.resolve(null),
-      plannerEnabled ? prisma.memory.findFirst({ where: { type: "reflection" }, orderBy: { createdAt: "desc" } }) : Promise.resolve(null),
+      plannerEnabled && channel !== "telegram" && channel !== "x"
+        ? prisma.memory.findFirst({ where: { type: "reflection" }, orderBy: { createdAt: "desc" } })
+        : Promise.resolve(null),
       normalizedHandle
         ? prisma.memory.findFirst({
             where: {
@@ -98,7 +106,7 @@ export async function buildContext({ handle, channel, message }: BuildContextArg
     "  `use $<amount> USDC to buy <TOKEN>` — same as above",
     "  TOKEN can be a symbol (SOL, BBQ, USDC, BTC) or a Solana mint address.",
     "  Requirements: MORK_AGENT_SWAP_ENABLED=1 must be set, execution authority must be agent_assisted, and amount must not exceed maxTradeUsd.",
-    "- AUTONOMOUS PLANNER: when plannerEnabled is true, the app continuously scans for opportunities on its own using planner ticks.",
+    "- AUTONOMOUS PLANNER: requires plannerEnabled=true and MORK_AUTONOMOUS_TRADING_ENABLED=1; otherwise autonomous ticks are skipped.",
     "- If asked whether the agent is scanning autonomously, answer status-first (enabled/disabled and exact blocker if disabled) and do NOT redirect to manual buy command format.",
     "- Use manual buy command format only when the user asks to execute a specific immediate trade by chat command.",
     "- If the user asks to start tasks, answer with the exact action(s) needed and call out current blockers first.",
