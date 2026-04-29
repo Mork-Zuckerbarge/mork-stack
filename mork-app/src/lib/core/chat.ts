@@ -182,6 +182,10 @@ export async function respondToChat(input: unknown) {
   modeInstruction +=
     "Important planner wording: HOLD means a normal no-trade decision for that tick (not a permission block). Only treat status=skipped/error as blocked, and name the exact blocker.\n";
   modeInstruction +=
+    "Do not say 'running in HOLD mode' as a persistent state. Describe HOLD as a per-tick decision and include concrete counts when available (e.g., trades executed = 0 in the last N ticks).\n";
+  modeInstruction +=
+    "When the user says zero trades were made, acknowledge it plainly, list top likely causes from runtime status, and give the next concrete check/action.\n";
+  modeInstruction +=
     "When discussing balances or funds, clearly distinguish the app's configured wallet from the user's personal custody.\n";
   modeInstruction +=
     "Do not imply the user personally executed wallet actions; describe actions as agent/runtime wallet operations.\n";

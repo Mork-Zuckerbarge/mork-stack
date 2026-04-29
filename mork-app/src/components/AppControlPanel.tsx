@@ -233,7 +233,9 @@ export default function AppControlPanel() {
         return;
       }
       setState(setupData.state);
-      setStatusText(`Setup complete. Stored ${uploadData?.count || urls.length} style references.`);
+      setStatusText(
+        `Setup complete. Stored ${uploadData?.count || urls.length} theme references for style guidance (not source media).`,
+      );
     } catch {
       setStatusText("Failed to upload style pack.");
     } finally {
@@ -263,7 +265,7 @@ export default function AppControlPanel() {
         <div className="space-y-4 text-sm">
           {!state.controls.startupCompleted ? (
             <div className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-              First startup setup is incomplete. Select a model and provide <strong>{STYLE_SETUP_IMAGE_TARGET} public image URLs</strong> for style starter pack, then click <strong>Complete First-Time Setup</strong>.
+              First startup setup is incomplete. Select a model and provide <strong>{STYLE_SETUP_IMAGE_TARGET} public image URLs</strong> as theme examples for style guidance (not direct source media), then click <strong>Complete First-Time Setup</strong>.
             </div>
           ) : null}
 
