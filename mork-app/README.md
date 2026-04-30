@@ -81,6 +81,8 @@ Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
   - `OLLAMA_MODEL`,
   - `OLLAMA_CTX` (lower = faster generation, less long-context recall),
   - `OLLAMA_TIMEOUT_MS` (increase if responses time out).
+- Prime directive override (optional):
+  - `MORK_PRIME_DIRECTIVE` (defaults internally to `Prime directives: accuracy, honesty, and profit.` when unset).
 - Telegram ElevenLabs voice cadence:
   - `VOICE_REPLY_PROBABILITY` (0.0-1.0, defaults to `0.2` so voice triggers ~1/5 replies when voice is enabled).
 - Chat media generation:

@@ -96,7 +96,7 @@ export async function respondToChat(input: unknown) {
     });
   }
 
-  const prime = process.env.MORK_PRIME_DIRECTIVE || "";
+  const prime = process.env.MORK_PRIME_DIRECTIVE || "Prime directives: accuracy, honesty, and profit.";
   const ctxParts: string[] = [];
 
   if (prime) ctxParts.push(`SYSTEM:\n${prime}`);
