@@ -8,6 +8,12 @@ import type { Prisma } from "@prisma/client";
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.2:3b";
+const DEFAULT_PRIME_DIRECTIVE = "Prime directives: accuracy, honesty, and profit.";
+
+function getPrimeDirective() {
+  return process.env.MORK_PRIME_DIRECTIVE || process.env.MORK_SYSTEM || DEFAULT_PRIME_DIRECTIVE;
+}
+
 const BANNED_PHRASES = [
   "I noticed something and it noticed me back.",
   "Today’s market felt like a sad play performed in a smokehouse.",
@@ -335,7 +341,7 @@ app.post("/chat/respond", async (req, res) => {
         source: channel,
       },
     });
-    const prime = process.env.MORK_PRIME_DIRECTIVE || process.env.MORK_SYSTEM || "";
+    const prime = getPrimeDirective();
     const edgeLines = await getEdgeLines(6);
     const reflection = await getLatestReflection();
 
@@ -604,7 +610,7 @@ app.post("/chat/respond_v2", async (req, res) => {
     });
 
     // 2) Build layered recall context
-    const prime = process.env.MORK_PRIME_DIRECTIVE || process.env.MORK_SYSTEM || "";
+    const prime = getPrimeDirective();
 
     const facts = await prisma.memoryFact.findMany({
       orderBy: [{ weight: "desc" }, { updatedAt: "desc" }],
@@ -839,7 +845,7 @@ async function composeTweet(input: {
 }) {
   const { kind, memeName, title, text, url, maxChars } = input;
 
-  const prime = process.env.MORK_PRIME_DIRECTIVE || process.env.MORK_SYSTEM || "";
+  const prime = getPrimeDirective();
   const ctxParts: string[] = [];
   if (prime) ctxParts.push(`SYSTEM:\n${prime}`);
 
