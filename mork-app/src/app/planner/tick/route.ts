@@ -95,18 +95,40 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<{
 }
 
 export async function POST() {
+  const logSkip = async (reason: string) => {
+    await prisma.memory.create({
+      data: {
+        type: "reflection",
+        content: `Autonomous planner tick skipped: ${reason}`,
+        entities: ["planner:skip"],
+        importance: 0.45,
+        source: "system",
+      },
+    });
+  };
+
   if (process.env.MORK_AUTONOMOUS_TRADING_ENABLED !== "1") {
+    await logSkip("autonomous_disabled");
     return NextResponse.json({ ok: true, status: "skipped", reason: "autonomous_disabled" });
   }
 
   const control = await getAppControlState();
   const authority = control.controls.executionAuthority;
 
-  if (!control.controls.plannerEnabled) return NextResponse.json({ ok: true, status: "skipped", reason: "planner_disabled" });
-  if (authority.mode === "emergency_stop") return NextResponse.json({ ok: true, status: "skipped", reason: "emergency_stop" });
+  if (!control.controls.plannerEnabled) {
+    await logSkip("planner_disabled");
+    return NextResponse.json({ ok: true, status: "skipped", reason: "planner_disabled" });
+  }
+  if (authority.mode === "emergency_stop") {
+    await logSkip("emergency_stop");
+    return NextResponse.json({ ok: true, status: "skipped", reason: "emergency_stop" });
+  }
 
   const allowlist = authority.mintAllowlist.filter((m) => m !== SOL_MINT && m !== USDC_MINT);
-  if (allowlist.length === 0) return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty" });
+  if (allowlist.length === 0) {
+    await logSkip("allowlist_empty");
+    return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty" });
+  }
 
   const context = await buildDecisionContext();
   const decision = await getTradeDecision(context, authority.maxTradeUsd);
@@ -118,7 +140,10 @@ export async function POST() {
   if (!decision.go) return NextResponse.json({ ok: true, status: "hold", reason: decision.reason });
 
   const outputMint = await pickBestMint(allowlist);
-  if (!outputMint) return NextResponse.json({ ok: true, status: "skipped", reason: "no_eligible_mint" });
+  if (!outputMint) {
+    await logSkip("no_eligible_mint");
+    return NextResponse.json({ ok: true, status: "skipped", reason: "no_eligible_mint" });
+  }
 
   let amountSol: number;
   try { amountSol = await estimateSolForUsd(decision.usd); }
