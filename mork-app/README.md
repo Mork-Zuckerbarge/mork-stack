@@ -90,6 +90,7 @@ Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
   - Videos default to Pollinations `gen.pollinations.ai/image/{prompt}` with a video model when `MEDIA_VIDEO_ENDPOINT` is empty.
   - `MEDIA_VIDEO_TOKEN` can be set to a Pollinations key if your account/rate limits require auth (the app sends this as both `Authorization: Bearer ...` and `?key=...` for compatibility with Pollinations auth modes).
   - Style conditioning references can be supplied through `MEDIA_STYLE_IMAGE_URLS` (comma-separated public URLs) and are applied to both image/video generation as Pollinations `image=` references.
+  - If `MEDIA_VIDEO_MODEL=nova-reel`, style/reference URLs must resolve to PNG images (`image/png`). Example: `MEDIA_STYLE_IMAGE_URLS="https://cdn.example.com/style/ref-01.png,https://cdn.example.com/style/ref-02.png"`.
   - The first-time setup now accepts 7 public style image URLs and persists them via `/api/app/style-pack` for automatic Pollinations conditioning.
   - `./start.sh` also snapshots/restores `mork-app/data/style-pack.json` (and uploaded `public/style-pack/*` files) into `${MORK_PERSIST_DIR:-~/.mork-stack}` so the style pack survives repo updates.
   - Optional overrides: `MEDIA_VIDEO_MODEL`, `MEDIA_VIDEO_MODEL_DEFAULT`, `MEDIA_VIDEO_SEED`, `MEDIA_VIDEO_DURATION`, `MEDIA_VIDEO_ASPECT_RATIO`, `MEDIA_VIDEO_AUDIO`.
