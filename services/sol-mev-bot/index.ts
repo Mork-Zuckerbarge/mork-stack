@@ -136,6 +136,11 @@ async function main(): Promise<void> {
   const balance = await connection.getBalance(wallet.publicKey);
   const balanceSol = balance / LAMPORTS_PER_SOL;
   logger.info('Balance', { sol: balanceSol.toFixed(4) });
+  logger.info('Trade gates', {
+    dryRun: config.dryRun,
+    strategyEnabledCount: [config.enableArb, config.enableAmmImbalance, config.enableMomentum].filter(Boolean).length,
+    lowBalanceBlocksLiveTrading: balance < 0.05 * LAMPORTS_PER_SOL && !config.dryRun,
+  });
 
   if (balance < 0.05 * LAMPORTS_PER_SOL && !config.dryRun) {
     logger.error('Wallet balance too low — fund with at least 0.05 SOL');
@@ -210,9 +215,18 @@ async function main(): Promise<void> {
     }
     const bal = await connection.getBalance(wallet.publicKey).catch(() => 0);
     stats.updateBalance(bal / LAMPORTS_PER_SOL);
+    const session = stats.getSession();
     logger.info('Heartbeat', {
       balance: (bal / LAMPORTS_PER_SOL).toFixed(4) + ' SOL',
       uptime: Math.floor(process.uptime() / 60) + 'm',
+      totalTrades: session.totalTrades,
+      dryRunTrades: session.dryRunTrades,
+      strategyEnabled: {
+        arb: config.enableArb,
+        ammImbalance: config.enableAmmImbalance,
+        momentum: config.enableMomentum,
+      },
+      dryRun: config.dryRun,
     });
   }, 60_000);
 
