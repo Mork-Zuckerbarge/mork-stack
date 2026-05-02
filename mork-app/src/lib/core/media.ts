@@ -217,7 +217,19 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
       cache: "no-store",
     });
 
+  const maybeRetryWithoutNovaReel = async (response: Response): Promise<Response> => {
+    if (!usePollinationsDefault || selectedModel !== "nova-reel") return response;
+    if (url.searchParams.get("model") !== "nova-reel") return response;
+    const detail = await response.clone().text().catch(() => "");
+    if (!detail.toLowerCase().includes("http2.connect method is not implemented")) {
+      return response;
+    }
+    url.searchParams.set("model", "ltx-2");
+    return executeRequest(url, authHeaders);
+  };
+
   let res = await executeRequest(url);
+  res = await maybeRetryWithoutNovaReel(res);
   if (usePollinationsDefault && res.status === 400) {
     const detail = await res.text().catch(() => "");
     const invalidModelResponse = isPollinationsModelError(detail);
