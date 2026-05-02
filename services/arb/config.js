@@ -1,5 +1,8 @@
 module.exports = {
-  RPC_URL: process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com",
+  RPC_URL:
+    process.env.SOLANA_RPC_URL ||
+    process.env.HELIUS_RPC_URL ||
+    "https://api.mainnet-beta.solana.com",
 
   BASE_QUOTE: {
     symbol: "USDC",
@@ -11,7 +14,7 @@ module.exports = {
 
   LOOP_DELAY_MS: 8000,
 
-  MIN_EDGE_PCT: 0.10,
+  MIN_EDGE_PCT: 0,
   MIN_ABS_PROFIT_USD: 0.01,
 
   // Safety filters

@@ -47,9 +47,10 @@ export class PoolImbalanceDetector {
 
   // Track recently processed pools to avoid duplicate signals
   private recentlyActed: Map<string, number> = new Map();
-  private cooldownMs = Math.max(parseInt(process.env.AMM_POOL_COOLDOWN_MS ?? '5000', 10), 500);
+  private cooldownMs = Math.max(parseInt(process.env.AMM_POOL_COOLDOWN_MS ?? '0', 10), 0);
   private swapSeen = 0;
   private swapPassedCooldown = 0;
+  private rejectReasons: Record<string, number> = {};
   private lastSwapSummaryTs = Date.now();
 
   constructor(
@@ -98,7 +99,10 @@ export class PoolImbalanceDetector {
 
     // Cooldown check — don't hammer the same pool
     const lastActed = this.recentlyActed.get(poolAddress);
-    if (lastActed && Date.now() - lastActed < this.cooldownMs) return;
+    if (this.cooldownMs > 0 && lastActed && Date.now() - lastActed < this.cooldownMs) {
+      this.bumpRejectReason('cooldown_active');
+      return;
+    }
     this.swapPassedCooldown += 1;
 
     // Fetch current pool state and compare to Jupiter aggregate
@@ -108,6 +112,7 @@ export class PoolImbalanceDetector {
     const { tokenIn, tokenOut, imbalancePct, tradeAmountLamports } = imbalance;
 
     if (imbalancePct < this.config.ammMinImbalancePct) {
+      this.bumpRejectReason('imbalance_below_threshold');
       logger.debug('Imbalance below threshold', { pool: poolAddress.slice(0, 8), pct: imbalancePct.toFixed(2) });
       return;
     }
@@ -120,11 +125,17 @@ export class PoolImbalanceDetector {
 
     // Get Jupiter quote for the corrective trade
     const quote = await this.getJupiterQuote(tokenIn, tokenOut, tradeAmountLamports);
-    if (!quote) return;
+    if (!quote) {
+      this.bumpRejectReason('quote_unavailable');
+      return;
+    }
 
     const expectedOut = parseInt(quote.outAmount);
     const grossProfit = expectedOut - tradeAmountLamports;
-    if (grossProfit <= 0) return;
+    if (grossProfit <= 0) {
+      this.bumpRejectReason('gross_profit_non_positive');
+      return;
+    }
 
     const opp: Opportunity = {
       id: uuidv4(),
@@ -149,7 +160,10 @@ export class PoolImbalanceDetector {
 
     // Fee check
     const fees = this.feeSimulator.simulate(opp);
-    if (!fees.isProfitable) return;
+    if (!fees.isProfitable) {
+      this.bumpRejectReason('net_profit_non_positive_after_fees');
+      return;
+    }
 
     opp.feeLamports = fees.totalFeeLamports;
     opp.estimatedProfitLamports = fees.netProfitLamports;
@@ -297,12 +311,18 @@ export class PoolImbalanceDetector {
       seen: this.swapSeen,
       passedCooldown: this.swapPassedCooldown,
       cooldownMs: this.cooldownMs,
+      rejected: this.rejectReasons,
       windowSec: Math.round((now - this.lastSwapSummaryTs) / 1000),
     });
 
     this.swapSeen = 0;
     this.swapPassedCooldown = 0;
+    this.rejectReasons = {};
     this.lastSwapSummaryTs = now;
+  }
+
+  private bumpRejectReason(reason: string): void {
+    this.rejectReasons[reason] = (this.rejectReasons[reason] || 0) + 1;
   }
 
   private async execute(opp: Opportunity): Promise<ExecutionResult> {
