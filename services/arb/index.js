@@ -59,7 +59,7 @@ const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 const MIN_BBQ_REQUIRED = Number(process.env.MIN_BBQ_REQUIRED || 1000);
 const PAPER = String(process.env.PAPER || "true").toLowerCase() === "true";
 const MAX_TRADES_PER_HOUR = Number(process.env.MAX_TRADES_PER_HOUR || 6);
-const MINT_COOLDOWN_MS = Number(process.env.MINT_COOLDOWN_MS || 180000);
+const MINT_COOLDOWN_MS = Math.max(0, Number(process.env.MINT_COOLDOWN_MS || 0));
 const MAX_CONSECUTIVE_FAILS = Number(process.env.MAX_CONSECUTIVE_FAILS || 10);
 const DAILY_LOSS_LIMIT_USD = Number(process.env.DAILY_LOSS_LIMIT_USD || 5);
 const DAILY_PROFIT_TARGET_USD = Number(process.env.DAILY_PROFIT_TARGET_USD || 0);
@@ -98,9 +98,11 @@ async function riskAuthorize({ mint, symbol, spendUsd, netUsd, edgePct }, connec
     return { ok: false, reason: `HALT: consecutiveFails=${gov.consecutiveFails} >= ${MAX_CONSECUTIVE_FAILS}` };
   }
 
-  const cdUntil = gov.mintCooldownUntil.get(mint) || 0;
-  if (now < cdUntil) {
-    return { ok: false, reason: `Cooldown active for mint (wait ${Math.ceil((cdUntil - now) / 1000)}s)` };
+  if (MINT_COOLDOWN_MS > 0) {
+    const cdUntil = gov.mintCooldownUntil.get(mint) || 0;
+    if (now < cdUntil) {
+      return { ok: false, reason: `Cooldown active for mint (wait ${Math.ceil((cdUntil - now) / 1000)}s)` };
+    }
   }
 
   if (gov.tradesThisHour >= MAX_TRADES_PER_HOUR) {
@@ -159,7 +161,9 @@ function morkRouteResearch(payload) {
 function recordTradeAttempt({ mint }) {
   rotateGovernorWindows();
   gov.tradesThisHour += 1;
-  gov.mintCooldownUntil.set(mint, Date.now() + MINT_COOLDOWN_MS);
+  if (MINT_COOLDOWN_MS > 0) {
+    gov.mintCooldownUntil.set(mint, Date.now() + MINT_COOLDOWN_MS);
+  }
 }
 
 function recordTradeResult({ ok, realizedPnlUsd }) {
@@ -602,7 +606,7 @@ async function printBalances(connection, walletPubkey) {
 }
 
 const SLIPPAGE_BPS = Number(process.env.SLIPPAGE_BPS || 50);
-const EXECUTION_BUFFER_USD = Number(process.env.EXECUTION_BUFFER_USD || 0.03);
+const EXECUTION_BUFFER_USD = Number(process.env.EXECUTION_BUFFER_USD || 0);
 function getEffectiveMaxTradeUsdc() {
   const configuredMaxTrade = Number(process.env.MAX_TRADE_USDC || 0);
   return configuredMaxTrade > 0 ? configuredMaxTrade : (PAPER ? DEFAULT_PAPER_MAX_TRADE_USDC : 0);
@@ -625,7 +629,7 @@ async function scanMarketA(m) {
   if (!maxTrade || maxTrade <= 0) return null;
 
   const TX_COST_USD = Number(process.env.TX_COST_USD || 0.01);
-  const MIN_NET = Number(process.env.MIN_NET_PROFIT_USD || 0.02);
+  const MIN_NET = Number(process.env.MIN_NET_PROFIT_USD || 0);
 
   const spendUsd = Math.min(Number(m.probeUsd || 5), maxTrade);
   const inUsdcUnits = BigInt(Math.floor(spendUsd * 1e6));
@@ -657,7 +661,7 @@ async function scanMarketA(m) {
   const net = gross - TX_COST_USD;
   const edgePct = (gross / spendUsd) * 100;
 
-  const good = net >= MIN_NET && edgePct >= MIN_EDGE_PCT;
+  const good = net > MIN_NET && edgePct >= MIN_EDGE_PCT;
 
   return {
     good,
@@ -819,10 +823,10 @@ async function scanMarket(m) {
   const approxUsdProfit = (endTok - startTok) * approxPriceUsd;
 
   const TX_COST_USD = Number(process.env.TX_COST_USD || 0.01);
-  const MIN_NET_PROFIT_USD = Number(process.env.MIN_NET_PROFIT_USD || 0.02);
+  const MIN_NET_PROFIT_USD = Number(process.env.MIN_NET_PROFIT_USD || 0);
 
   const netUsdProfit = approxUsdProfit - TX_COST_USD;
-  const good = netUsdProfit > MIN_NET_PROFIT_USD && edgePct > MIN_EDGE_PCT;
+  const good = netUsdProfit > MIN_NET_PROFIT_USD && edgePct >= MIN_EDGE_PCT;
 
   return { good, edgePct, usdNotional, approxUsdProfit, netUsdProfit };
 }
@@ -855,7 +859,7 @@ async function executeRouteA(m, scan) {
     }
 
     const TX_COST_USD = Number(process.env.TX_COST_USD || 0.01);
-    const MIN_NET = Number(process.env.MIN_NET_PROFIT_USD || 0.01);
+    const MIN_NET = Number(process.env.MIN_NET_PROFIT_USD || 0);
 
     // optional pre-exec gate using the scan estimate
     const scanNet = Number(scan?.netUsdProfit);
