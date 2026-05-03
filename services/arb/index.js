@@ -57,7 +57,17 @@ const CANDIDATE_THRESHOLD = Number(process.env.CANDIDATE_THRESHOLD || 3);       
 const candidateHits = new Map(); // mint -> [timestamps]
 const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 const MIN_BBQ_REQUIRED = Number(process.env.MIN_BBQ_REQUIRED || 1000);
-const PAPER = String(process.env.PAPER || "true").toLowerCase() === "true";
+
+function parseEnvBool(value, fallback) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return fallback;
+  const normalized = raw.replace(/^(["'])?(.*)\1$/, "$2").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+const PAPER = parseEnvBool(process.env.PAPER, !ARMED);
 const MAX_TRADES_PER_HOUR = Number(process.env.MAX_TRADES_PER_HOUR || 6);
 const MINT_COOLDOWN_MS = Math.max(0, Number(process.env.MINT_COOLDOWN_MS || 0));
 const MAX_CONSECUTIVE_FAILS = Number(process.env.MAX_CONSECUTIVE_FAILS || 10);
