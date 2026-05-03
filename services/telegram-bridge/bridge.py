@@ -419,7 +419,8 @@ def main():
                     first_name = (from_user.get("first_name") or "").strip()
                     last_name = (from_user.get("last_name") or "").strip()
                     display_name = " ".join(part for part in [first_name, last_name] if part).strip()
-                    handle = username or (f"tg-user-{user_id}" if user_id else "user")
+                    base_handle = username or (f"user-{user_id}" if user_id else "user")
+                    handle = f"tg:{chat_id}:{base_handle}"
 
                     # Ignore bot messages (including ourselves)
                     if from_user.get("is_bot"):
