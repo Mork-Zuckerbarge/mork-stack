@@ -513,6 +513,23 @@ app.post("/wallet/refresh", async (_req, res) => {
   }
 });
 
+const MORK_APP_URL = (process.env.MORK_APP_URL ?? "http://127.0.0.1:3000").replace(/\/+$/, "");
+
+async function forwardToAppPlanner(): Promise<void> {
+  try {
+    const res = await fetch(`${MORK_APP_URL}/planner/tick`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      console.warn(`[plannerTick] mork-app planner returned ${res.status}`);
+    }
+  } catch (e: unknown) {
+    console.warn(`[plannerTick] could not reach mork-app planner: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 async function plannerTick() {
   const now = new Date();
   await prisma.memory.create({
@@ -524,6 +541,8 @@ async function plannerTick() {
       source: "system",
     },
   });
+  // Forward to mork-app autonomous trading planner (fire-and-forget)
+  forwardToAppPlanner().catch(() => {});
 }
 
 app.post("/planner/tick", async (_req, res) => {

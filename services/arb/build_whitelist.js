@@ -1,6 +1,7 @@
 require("dotenv").config();
-const fetch = require("node-fetch");
+const nodeFetch = require("node-fetch");
 const fs = require("fs");
+const fetch = typeof nodeFetch === "function" ? nodeFetch : nodeFetch.default;
 
 // ---- constants ----
 const QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote"; // works for you (200 OK)
