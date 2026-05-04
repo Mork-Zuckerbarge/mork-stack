@@ -544,9 +544,9 @@ RSS_FEEDS = {
             {"url": "https://cointelegraph.com/rss", "name": "CoinTelegraph"},
             {"url": "https://cryptonews.com/news/feed/", "name": "CryptoNews"},
             {"url": "https://decrypt.co/feed", "name": "Decrypt"},
+            {"url": "https://www.coindesk.com/arc/outboundfeeds/rss/", "name": "CoinDesk"},
             {"url": "https://news.bitcoin.com/feed/", "name": "Bitcoin.com"},
-            {"url": "https://coindesk.com/arc/outboundfeeds/rss/", "name": "CoinDesk"},
-            {"url": "https://bitcoinmagazine.com/.rss/full/", "name": "Bitcoin Magazine"},
+                        {"url": "https://bitcoinmagazine.com/.rss/full/", "name": "Bitcoin Magazine"},
             {"url": "https://cryptopotato.com/feed/", "name": "CryptoPotato"},
             {"url": "https://ambcrypto.com/feed/", "name": "AMBCrypto"},
             {"url": "https://newsbtc.com/feed/", "name": "NewsBTC"},
@@ -569,7 +569,9 @@ RSS_FEEDS = {
             {"url": "https://openai.com/news/rss.xml", "name": "OpenAI Blog"},
             {"url": "https://aws.amazon.com/blogs/machine-learning/feed/", "name": "AWS ML Blog"},
             {"url": "https://techcommunity.microsoft.com/t5/ai-machine-learning-blog/rss", "name": "Microsoft AI Blog"},
-            {"url": "https://engineering.fb.com/feed/", "name": "Meta Engineering Blog"}
+            {"url": "https://engineering.fb.com/feed/", "name": "Meta Engineering Blog"},
+            {"url": "https://ai.googleblog.com/feeds/posts/default", "name": "Google AI Blog"},
+            {"url": "https://www.marktechpost.com/feed/", "name": "MarkTechPost"}
         ]
     },
     "tech": {
@@ -584,6 +586,8 @@ RSS_FEEDS = {
         "secondary": [
             {"name": "Tom's Hardware", "url": "https://www.tomshardware.com/feeds/all"},
             {"name": "The Next Web", "url": "https://thenextweb.com/feed"},
+            {"name": "VentureBeat", "url": "https://venturebeat.com/feed/"},
+            {"name": "Hacker News Front Page", "url": "https://hnrss.org/frontpage"},
         ]
 },
 
@@ -3291,6 +3295,80 @@ class TwitterBot:
                     delete_button = gr.Button("Delete Character", variant="secondary")
                     delete_status = gr.Textbox(label="Delete Status", interactive=False)
                 
+            # Feed Configuration section
+            with gr.Accordion("📰 Feed Configuration", open=True):
+                gr.Markdown("Configure which RSS feeds to use for each subject")
+
+                # --- Subject picker now includes whatever is in RSS_FEEDS (e.g., crypto, ai, tech) ---
+                with gr.Row():
+                    feed_subject = gr.Dropdown(
+                        label="Subject",
+                        choices=list(RSS_FEEDS.keys()),
+                        value="crypto",
+                        interactive=True,
+                        show_label=True,
+                        container=True,
+                        scale=1
+                    )
+
+                # --- Helpers to refresh the checkbox groups for the selected subject ---
+                def update_feed_checkboxes(subject):
+                    print(f"\nUpdating feed checkboxes for subject: {subject}")
+                    feed_config = self.feed_config.get(subject, {})
+                    primary_feeds = RSS_FEEDS[subject]["primary"]
+                    secondary_feeds = RSS_FEEDS[subject]["secondary"]
+
+                    primary_choices = [f"{feed['name']} ({feed['url']})" for feed in primary_feeds]
+                    primary_values = [feed_config.get("primary", {}).get(feed["url"], True) for feed in primary_feeds]
+                    secondary_choices = [f"{feed['name']} ({feed['url']})" for feed in secondary_feeds]
+                    secondary_values = [feed_config.get("secondary", {}).get(feed["url"], True) for feed in secondary_feeds]
+
+                    print(f"Primary feeds: {len(primary_choices)} choices, {len(primary_values)} values")
+                    print(f"Secondary feeds: {len(secondary_choices)} choices, {len(secondary_values)} values")
+
+                    return [
+                        gr.update(choices=primary_choices, value=[choice for i, choice in enumerate(primary_choices) if primary_values[i]]),
+                        gr.update(choices=secondary_choices, value=[choice for i, choice in enumerate(secondary_choices) if secondary_values[i]])
+                    ]
+
+                with gr.Column():
+                    gr.Markdown("### Primary Sources")
+                    primary_feeds = gr.CheckboxGroup(
+                        label="Primary Sources",
+                        choices=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["primary"]],
+                        value=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["primary"]],
+                        interactive=True
+                    )
+
+                    gr.Markdown("### Secondary Sources")
+                    secondary_feeds = gr.CheckboxGroup(
+                        label="Secondary Sources",
+                        choices=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["secondary"]],
+                        value=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["secondary"]],
+                        interactive=True
+                    )
+
+                with gr.Row():
+                    save_feeds_btn = gr.Button("Save Feed Configuration", variant="primary")
+                    save_feeds_status = gr.Textbox(label="Status", interactive=False)
+
+                # Wire subject dropdown to checkbox refresh
+                feed_subject.change(
+                    update_feed_checkboxes,
+                    inputs=[feed_subject],
+                    outputs=[primary_feeds, secondary_feeds]
+                )
+
+                save_feeds_btn.click(
+                    self.save_feed_selection,
+                    inputs=[feed_subject, primary_feeds, secondary_feeds],
+                    outputs=[save_feeds_status]
+                )
+
+                # Initialize feed checkboxes for default subject
+                feed_subject.value = "crypto"
+                update_feed_checkboxes("crypto")
+
             # Control Center section
             with gr.Accordion("🎮 Control Center", open=True, elem_classes=["compact-section"]):
                 gr.Markdown("Generate and post tweets using your AI characters")
@@ -3304,7 +3382,7 @@ class TwitterBot:
                             interactive=bool(self.characters)
                         )
                         subject_dropdown = gr.Dropdown(
-                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All)", "__surprise_all__")],
+                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All Feeds)", "__surprise_all__")],
                             value="crypto",
                             label="Select Subject",
                             interactive=True
@@ -3318,8 +3396,8 @@ class TwitterBot:
                         scheduler_status = gr.Markdown("Scheduler: NOT RUNNING")
                         with gr.Row():
                             target_x = gr.Checkbox(label="X", value=self.publish_targets.get("x", True), interactive=True)
-                            target_tg = gr.Checkbox(label="TG", value=self.publish_targets.get("telegram", False), interactive=True)
-                            target_fb = gr.Checkbox(label="FB", value=self.publish_targets.get("facebook", False), interactive=True)
+                            target_tg = gr.Checkbox(label="Telegram", value=self.publish_targets.get("telegram", False), interactive=True)
+                            target_fb = gr.Checkbox(label="Facebook", value=self.publish_targets.get("facebook", False), interactive=True)
                             target_ig = gr.Checkbox(label="Instagram", value=self.publish_targets.get("instagram", False), interactive=True)
                             target_reddit = gr.Checkbox(label="Reddit", value=self.publish_targets.get("reddit", False), interactive=True)
                         with gr.Row():
@@ -3520,82 +3598,6 @@ class TwitterBot:
                         control_character, character_dropdown]
             )
             
-            # Feed Configuration section
-            with gr.Accordion("📰 Feed Configuration", open=True):
-                gr.Markdown("Configure which RSS feeds to use for each subject")
-
-                # --- Subject picker now includes whatever is in RSS_FEEDS (e.g., crypto, ai, tech) ---
-                with gr.Row():
-                    feed_subject = gr.Dropdown(
-                        label="Subject",
-                        choices=list(RSS_FEEDS.keys()),
-                        value="crypto",
-                        interactive=True,
-                        show_label=True,
-                        container=True,
-                        scale=1
-                    )
-
-                # --- Helpers to refresh the checkbox groups for the selected subject ---
-                def update_feed_checkboxes(subject):
-                    print(f"\nUpdating feed checkboxes for subject: {subject}")
-                    feed_config = self.feed_config.get(subject, {})
-                    primary_feeds = RSS_FEEDS[subject]["primary"]
-                    secondary_feeds = RSS_FEEDS[subject]["secondary"]
-
-                    primary_choices = [f"{feed['name']} ({feed['url']})" for feed in primary_feeds]
-                    primary_values = [feed_config.get("primary", {}).get(feed["url"], True) for feed in primary_feeds]
-                    secondary_choices = [f"{feed['name']} ({feed['url']})" for feed in secondary_feeds]
-                    secondary_values = [feed_config.get("secondary", {}).get(feed["url"], True) for feed in secondary_feeds]
-
-                    print(f"Primary feeds: {len(primary_choices)} choices, {len(primary_values)} values")
-                    print(f"Secondary feeds: {len(secondary_choices)} choices, {len(secondary_values)} values")
-
-                    return [
-                        gr.update(choices=primary_choices, value=[choice for i, choice in enumerate(primary_choices) if primary_values[i]]),
-                        gr.update(choices=secondary_choices, value=[choice for i, choice in enumerate(secondary_choices) if secondary_values[i]])
-                    ]
-
-                with gr.Column():
-                    gr.Markdown("### Primary Sources")
-                    primary_feeds = gr.CheckboxGroup(
-                        label="Primary Sources",
-                        choices=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["primary"]],
-                        value=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["primary"]],
-                        interactive=True
-                    )
-
-                    gr.Markdown("### Secondary Sources")
-                    secondary_feeds = gr.CheckboxGroup(
-                        label="Secondary Sources",
-                        choices=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["secondary"]],
-                        value=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["secondary"]],
-                        interactive=True
-                    )
-
-                with gr.Row():
-                    save_feeds_btn = gr.Button("Save Feed Configuration", variant="primary")
-                    # New: random-any-category button
-                    surprise_all_btn = gr.Button("🎲 Surprise me (All Feeds)")
-                    save_feeds_status = gr.Textbox(label="Status", interactive=False)
-
-                # Wire subject dropdown to checkbox refresh
-                feed_subject.change(
-                    update_feed_checkboxes,
-                    inputs=[feed_subject],
-                    outputs=[primary_feeds, secondary_feeds]
-                )
-
-                save_feeds_btn.click(
-                    self.save_feed_selection,
-                    inputs=[feed_subject, primary_feeds, secondary_feeds],
-                    outputs=[save_feeds_status]
-                )
-
-                # Initialize feed checkboxes for default subject
-                feed_subject.value = "crypto"
-                update_feed_checkboxes("crypto")
-
             # Simple helpers that already existed
             def get_story(subject):
                 story = self.get_new_story(subject)
@@ -3611,8 +3613,6 @@ class TwitterBot:
             new_story_btn.click(get_story, inputs=[subject_dropdown], outputs=[current_topic])
             tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
 
-            # NEW: connect the Surprise me (All Feeds) button to fill current_topic
-            surprise_all_btn.click(lambda: self.get_random_story_all(), outputs=[current_topic])
 
             # Connect checkbox handlers
             def update_news_feed(value):
