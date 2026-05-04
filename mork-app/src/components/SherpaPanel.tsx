@@ -42,6 +42,7 @@ export default function SherpaPanel() {
     void fetchMemes();
   }, []);
 
+
   async function fetchMemes() {
     try {
       const res = await fetch("/api/sherpa/memes");
@@ -161,6 +162,7 @@ export default function SherpaPanel() {
       {loadedSrc !== resolvedSrc ? (
         <p className="mt-2 text-xs text-white/50">Waiting for frame response… if this persists, use “Open tab” to verify Sherpa is running.</p>
       ) : null}
+
 
       <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-3">
         <div className="mb-2 text-sm font-semibold">Meme Drop Zone</div>
