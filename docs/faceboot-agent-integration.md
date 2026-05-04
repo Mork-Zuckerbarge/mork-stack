@@ -1,5 +1,7 @@
 # Faceboot Agent Integration
 
+Store long-lived credentials in **Settings → Faceboot Agent Token** (saved to `FACEBOOT_AGENT_TOKEN` in `.env.local`) so Faceboot auth stays in the same credentials area as other social/API tokens.
+
 ## Login + post
 
 ```ts

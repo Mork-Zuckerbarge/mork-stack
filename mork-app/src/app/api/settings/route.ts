@@ -8,6 +8,7 @@ type SettingsPayload = {
   walletAddress: string;
   solanaRpc: string;
   telegramBotToken: string;
+  facebootAgentToken: string;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   ollamaHost: string;
@@ -18,6 +19,7 @@ const DEFAULT_SETTINGS: SettingsPayload = {
   walletAddress: "",
   solanaRpc: "https://api.mainnet-beta.solana.com",
   telegramBotToken: "",
+  facebootAgentToken: "",
   elevenLabsApiKey: "",
   elevenLabsVoiceId: "",
   ollamaHost: "http://127.0.0.1:11434",
@@ -28,6 +30,7 @@ const SETTINGS_TO_ENV: Array<[keyof SettingsPayload, string]> = [
   ["walletAddress", "MORK_WALLET"],
   ["solanaRpc", "SOLANA_RPC"],
   ["telegramBotToken", "TELEGRAM_BOT_TOKEN"],
+  ["facebootAgentToken", "FACEBOOT_AGENT_TOKEN"],
   ["elevenLabsApiKey", "ELEVENLABS_API_KEY"],
   ["elevenLabsVoiceId", "ELEVENLABS_VOICE_ID"],
   ["ollamaHost", "OLLAMA_HOST"],

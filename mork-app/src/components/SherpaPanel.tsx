@@ -44,11 +44,6 @@ export default function SherpaPanel() {
     void fetchMemes();
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const storedToken = window.localStorage.getItem("faceboot.agent-token.v1") || "";
-    setFacebootTokenInput(storedToken);
-  }, []);
 
   async function fetchMemes() {
     try {
@@ -181,6 +176,7 @@ export default function SherpaPanel() {
       {loadedSrc !== resolvedSrc ? (
         <p className="mt-2 text-xs text-white/50">Waiting for frame response… if this persists, use “Open tab” to verify Sherpa is running.</p>
       ) : null}
+
 
       <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-3">
         <div className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-500/5 p-3">
