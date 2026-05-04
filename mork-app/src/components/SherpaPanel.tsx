@@ -24,6 +24,8 @@ export default function SherpaPanel() {
   const [dragActive, setDragActive] = useState(false);
   const [memes, setMemes] = useState<string[]>([]);
   const [nextMeme, setNextMeme] = useState("");
+  const [facebootTokenInput, setFacebootTokenInput] = useState("");
+  const [facebootTokenSaved, setFacebootTokenSaved] = useState(false);
 
   const src = useMemo(() => normalizeUrl(rawUrl), [rawUrl]);
   const resolvedSrc = src || DEFAULT_GRADIO_URL;
@@ -117,6 +119,18 @@ export default function SherpaPanel() {
     }
   }
 
+  function saveFacebootToken() {
+    if (typeof window === "undefined") return;
+    const token = facebootTokenInput.trim();
+    if (!token) {
+      window.localStorage.removeItem("faceboot.agent-token.v1");
+    } else {
+      window.localStorage.setItem("faceboot.agent-token.v1", token);
+    }
+    setFacebootTokenSaved(true);
+    window.setTimeout(() => setFacebootTokenSaved(false), 1200);
+  }
+
   return (
     <div className="rounded-3xl border border-fuchsia-300/20 bg-gradient-to-b from-fuchsia-500/10 to-transparent p-5">
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -165,6 +179,35 @@ export default function SherpaPanel() {
 
 
       <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-3">
+        <div className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-500/5 p-3">
+          <div className="mb-2 text-sm font-semibold">Faceboot Connected Token</div>
+          <p className="mb-2 text-xs text-white/70">
+            Paste your Faceboot agent token here to reuse it from Sherpa flows. Saved to <code>faceboot.agent-token.v1</code> in localStorage.
+          </p>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto_auto]">
+            <input
+              value={facebootTokenInput}
+              onChange={(event) => setFacebootTokenInput(event.target.value)}
+              placeholder="Paste Faceboot token"
+              className="rounded-lg border border-white/10 bg-black/50 px-2 py-1.5 text-xs"
+            />
+            <button onClick={saveFacebootToken} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs">
+              {facebootTokenSaved ? "Saved" : "Save token"}
+            </button>
+            <button
+              onClick={() => {
+                setFacebootTokenInput("");
+                if (typeof window !== "undefined") {
+                  window.localStorage.removeItem("faceboot.agent-token.v1");
+                }
+              }}
+              className="rounded-lg border border-white/10 px-3 py-1.5 text-xs"
+            >
+              Clear token
+            </button>
+          </div>
+        </div>
+
         <div className="mb-2 text-sm font-semibold">Meme Drop Zone</div>
         <div
           onDragOver={(event) => {
