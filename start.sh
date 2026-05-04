@@ -170,6 +170,15 @@ if [[ -d "$ARB_DIR" ]]; then
     npm --prefix "$ARB_DIR" install
   fi
 
+  if [[ ! -f "$ARB_DIR/whitelist.json" ]]; then
+    if [[ -f "$ARB_DIR/whitelist.example.json" ]]; then
+      cp "$ARB_DIR/whitelist.example.json" "$ARB_DIR/whitelist.json"
+      log "Seeded arb whitelist from whitelist.example.json (run build_whitelist.js to expand it)"
+    else
+      warn "No whitelist.json and no whitelist.example.json found; planner allowlist may be empty"
+    fi
+  fi
+
   log "Starting arb service"
   (
     cd "$ARB_DIR"
