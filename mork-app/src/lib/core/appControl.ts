@@ -77,6 +77,7 @@ const AUTO_START_ON_BOOT = process.env.MORK_AUTO_START_ON_BOOT !== "0";
 const STARTUP_ALLOWLIST_LIMIT = 500;
 const FALLBACK_TOKEN_CSV =
   "https://raw.githubusercontent.com/igneous-labs/jup-token-list/main/validated-tokens.csv";
+const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 
 const state: AppControlState = {
   arb: {
@@ -432,10 +433,9 @@ async function ensureStateLoaded() {
   if (state.controls.executionAuthority.mintAllowlist.length === 0) {
     const startupMints = readWhitelistMints(STARTUP_ALLOWLIST_LIMIT);
     const fallbackMints = startupMints.length > 0 ? startupMints : await fetchFallbackMints(STARTUP_ALLOWLIST_LIMIT);
-    if (fallbackMints.length > 0) {
-      state.controls.executionAuthority.mintAllowlist = fallbackMints;
-      await persistState();
-    }
+    const finalMints = fallbackMints.length > 0 ? fallbackMints : [BBQ_MINT];
+    state.controls.executionAuthority.mintAllowlist = finalMints;
+    await persistState();
   }
 
   hasLoadedPersistedState = true;
