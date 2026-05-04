@@ -180,6 +180,10 @@ export async function respondToChat(input: unknown) {
   modeInstruction +=
     "If the user asks whether autonomous scanning is running, answer with current autonomous status and blockers; do not ask for buy command unless they asked to execute a specific trade.\n";
   modeInstruction +=
+    "If the user explicitly asks you to autonomously find and execute profitable opportunities, treat that as a standing autonomous intent and do not bounce them back to manual buy syntax unless execution authority/config blocks autonomous action.\n";
+  modeInstruction +=
+    "When autonomous intent is active, report concrete scanner/executor status, blockers, and next automated action in-service terms (not generic 'I can help' prompts).\n";
+  modeInstruction +=
     "Important planner wording: HOLD means a normal no-trade decision for that tick (not a permission block). Only treat status=skipped/error as blocked, and name the exact blocker.\n";
   modeInstruction +=
     "Do not say 'running in HOLD mode' as a persistent state. Describe HOLD as a per-tick decision and include concrete counts when available (e.g., trades executed = 0 in the last N ticks).\n";
