@@ -84,7 +84,7 @@ export async function setRuntimeFlag(key: RuntimeFlagKey, value: boolean) {
 }
 
 export async function setRuntimePersonaMode(
-  channel: "app" | "telegram" | "x",
+  channel: "app" | "telegram" | "x" | "faceboot",
   mode: string
 ) {
   await setPersonaMode(channel, mode);
@@ -92,7 +92,7 @@ export async function setRuntimePersonaMode(
 }
 
 export async function setRuntimePersonaGuidelines(
-  channel: "app" | "telegram" | "x",
+  channel: "app" | "telegram" | "x" | "faceboot",
   guidelines: string
 ) {
   await setPersonaGuidelines(channel, guidelines);

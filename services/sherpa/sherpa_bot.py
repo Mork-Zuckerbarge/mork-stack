@@ -771,6 +771,7 @@ class TwitterBot:
             "facebook": False,
             "instagram": False,
             "reddit": False,
+            "faceboot": False,
         }
 
         if not os.path.exists("memes"):
@@ -2088,6 +2089,9 @@ class TwitterBot:
             if self.publish_targets.get("instagram", False):
                 self.send_to_instagram(tweet_text)
                 posted_anywhere = True
+            if self.publish_targets.get("faceboot", False):
+                self.send_to_faceboot(tweet_text)
+                posted_anywhere = True
 
             return posted_anywhere
         except tweepy.TooManyRequests as e:
@@ -2096,6 +2100,29 @@ class TwitterBot:
         except Exception as e:
             print(f"Error sending tweet: {e}")
             return False
+
+    def send_to_faceboot(self, text):
+        """Post content to Faceboot using an agent token + API endpoint."""
+        try:
+            token = (self.credentials.get("faceboot_agent_token") or "").strip()
+            api_url = (self.credentials.get("faceboot_api_url") or os.getenv("FACEBOOT_API_URL") or "").strip()
+            if not token:
+                print("⚠️ Faceboot skipped: missing faceboot_agent_token")
+                return False
+            if not api_url:
+                print("⚠️ Faceboot skipped: set FACEBOOT_API_URL or faceboot_api_url credential.")
+                return False
+            res = requests.post(
+                api_url,
+                json={"token": token, "text": text},
+                timeout=20,
+            )
+            print("📨 Faceboot status:", res.status_code, res.text[:220])
+            return 200 <= res.status_code < 300
+        except Exception as e:
+            print(f"❌ Faceboot post failed: {e}")
+            return False
+
 
     def send_main_tweet(self):
         """Send a main scheduled tweet."""
@@ -3456,6 +3483,7 @@ class TwitterBot:
                             target_fb = gr.Checkbox(label="Facebook", value=self.publish_targets.get("facebook", False), interactive=True)
                             target_ig = gr.Checkbox(label="Instagram", value=self.publish_targets.get("instagram", False), interactive=True)
                             target_reddit = gr.Checkbox(label="Reddit", value=self.publish_targets.get("reddit", False), interactive=True)
+                            target_faceboot = gr.Checkbox(label="Faceboot", value=self.publish_targets.get("faceboot", False), interactive=True)
                         with gr.Row():
                             use_news = gr.Checkbox(value=True, label="Use News Feed", interactive=True)
                             use_memes = gr.Checkbox(value=self.use_memes, label="Use Memes", interactive=True)
@@ -3497,13 +3525,14 @@ class TwitterBot:
                     self.subject = subject
                     return gr.update()  # no UI change -> no network calls
 
-                def _set_publish_targets(x, tg, fb, ig, reddit):
+                def _set_publish_targets(x, tg, fb, ig, reddit, faceboot):
                     self.publish_targets = {
                         "x": bool(x),
                         "telegram": bool(tg),
                         "facebook": bool(fb),
                         "instagram": bool(ig),
                         "reddit": bool(reddit),
+                        "faceboot": bool(faceboot),
                     }
                     return "Destination toggles updated."
 
@@ -3612,10 +3641,10 @@ class TwitterBot:
                     inputs=[scheduler_enabled, character_dropdown, subject_dropdown],
                     outputs=[tweet_status, scheduler_status, current_topic]
                 )
-                for toggle in [target_x, target_tg, target_fb, target_ig, target_reddit]:
+                for toggle in [target_x, target_tg, target_fb, target_ig, target_reddit, target_faceboot]:
                     toggle.change(
                         _set_publish_targets,
-                        inputs=[target_x, target_tg, target_fb, target_ig, target_reddit],
+                        inputs=[target_x, target_tg, target_fb, target_ig, target_reddit, target_faceboot],
                         outputs=[tweet_status]
                     )
             
@@ -3691,46 +3720,6 @@ class TwitterBot:
             use_memes.change(update_memes, inputs=[use_memes], outputs=[use_memes])
             meme_frequency.change(update_meme_frequency, inputs=[meme_frequency], outputs=[meme_frequency])
 
-            with gr.Accordion("🖼️ Meme Drop Zone", open=True, elem_classes=["compact-section"]):
-                gr.Markdown("Drag and drop memes here to upload into `services/sherpa/memes`.")
-                meme_uploader = gr.Files(label="Pick files", file_count="multiple", file_types=["image"], type="filepath")
-                meme_upload_status = gr.Textbox(label="Upload Status", interactive=False)
-                meme_selector = gr.Dropdown(label="Select meme for a one-off post hint", choices=[], value=None, interactive=True)
-                meme_hint = gr.Textbox(label="Single-post hint", interactive=False)
-                copy_hint_btn = gr.Button("Copy single-post hint")
-
-                def _list_memes():
-                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
-                    os.makedirs(meme_dir, exist_ok=True)
-                    return sorted([f for f in os.listdir(meme_dir) if f.lower().endswith(tuple(SUPPORTED_MEME_FORMATS))])
-
-                def _upload_memes(filepaths):
-                    if not filepaths:
-                        memes = _list_memes()
-                        return "No files uploaded.", gr.update(choices=memes, value=(memes[0] if memes else None))
-                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
-                    os.makedirs(meme_dir, exist_ok=True)
-                    saved = []
-                    for src in filepaths:
-                        if not src:
-                            continue
-                        name = os.path.basename(src)
-                        shutil.copy2(src, os.path.join(meme_dir, name))
-                        saved.append(name)
-                    memes = _list_memes()
-                    msg = f"Uploaded {len(saved)} meme(s): {', '.join(saved)}" if saved else "No valid files uploaded."
-                    return msg, gr.update(choices=memes, value=(saved[0] if saved else (memes[0] if memes else None)))
-
-                def _build_single_post_hint(meme_name):
-                    if not meme_name:
-                        return "Select a meme first."
-                    return f"Use meme file: {meme_name}"
-
-                meme_uploader.change(_upload_memes, inputs=[meme_uploader], outputs=[meme_upload_status, meme_selector])
-                copy_hint_btn.click(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
-                meme_selector.change(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
-                memes_initial = _list_memes()
-                meme_selector.value = memes_initial[0] if memes_initial else None
 
             return interface
 
