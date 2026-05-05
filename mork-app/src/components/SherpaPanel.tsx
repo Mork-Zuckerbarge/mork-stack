@@ -162,21 +162,6 @@ export default function SherpaPanel() {
         </div>
       ) : null}
 
-      <iframe
-        key={src}
-        src={resolvedSrc}
-        title="Sherpa Gradio"
-        className="h-[640px] w-full rounded-2xl border border-white/10 bg-black/30"
-        onLoad={() => {
-          setLoadedSrc(resolvedSrc);
-          setIframeError("");
-        }}
-        onError={() => setIframeError(`Unable to reach Sherpa at ${resolvedSrc}.`)}
-      />
-      {loadedSrc !== resolvedSrc ? (
-        <p className="mt-2 text-xs text-white/50">Waiting for frame response… if this persists, use “Open tab” to verify Sherpa is running.</p>
-      ) : null}
-
 
       <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-3">
         <div className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-500/5 p-3">
@@ -256,6 +241,22 @@ export default function SherpaPanel() {
 
         {uploadMessage ? <p className="mt-2 text-xs text-white/70">{uploadMessage}</p> : null}
       </div>
+
+
+      <iframe
+        key={src}
+        src={resolvedSrc}
+        title="Sherpa Gradio"
+        className="h-[640px] w-full rounded-2xl border border-white/10 bg-black/30"
+        onLoad={() => {
+          setLoadedSrc(resolvedSrc);
+          setIframeError("");
+        }}
+        onError={() => setIframeError(`Unable to reach Sherpa at ${resolvedSrc}.`)}
+      />
+      {loadedSrc !== resolvedSrc ? (
+        <p className="mt-2 text-xs text-white/50">Waiting for frame response… if this persists, use “Open tab” to verify Sherpa is running.</p>
+      ) : null}
     </div>
   );
 }
