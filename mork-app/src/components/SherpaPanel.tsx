@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 const DEFAULT_GRADIO_URL = process.env.NEXT_PUBLIC_SHERPA_GRADIO_URL || "http://127.0.0.1:7860";
 
@@ -17,25 +17,13 @@ export default function SherpaPanel() {
     return window.localStorage.getItem("mork.sherpa.gradio.url") || DEFAULT_GRADIO_URL;
   });
   const [saved, setSaved] = useState(false);
-  const [iframeError, setIframeError] = useState("");
   const [loadedSrc, setLoadedSrc] = useState("");
 
   const src = useMemo(() => normalizeUrl(rawUrl), [rawUrl]);
   const resolvedSrc = src || DEFAULT_GRADIO_URL;
 
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      if (loadedSrc !== resolvedSrc) {
-        setIframeError(`Sherpa did not load inside the frame from ${resolvedSrc}.`);
-      }
-    }, 5000);
-
-    return () => window.clearTimeout(timeout);
-  }, [loadedSrc, resolvedSrc]);
-
   function saveUrl() {
     if (!src) return;
-    setIframeError("");
     window.localStorage.setItem("mork.sherpa.gradio.url", src);
     setRawUrl(src);
     setSaved(true);
@@ -50,7 +38,6 @@ export default function SherpaPanel() {
           <input
             value={rawUrl}
             onChange={(event) => {
-              setIframeError("");
               setRawUrl(event.target.value);
             }}
             placeholder="http://127.0.0.1:7860"
@@ -64,14 +51,6 @@ export default function SherpaPanel() {
           </a>
         </div>
       </div>
-      {iframeError ? (
-        <div className="mb-3 rounded-xl border border-fuchsia-300/30 bg-fuchsia-500/10 px-3 py-2 text-xs text-fuchsia-100">
-          <div>{iframeError}</div>
-          <div className="mt-1 text-fuchsia-50/90">
-            Use the repo-root <code>./start.sh</code> flow first, then point this panel to the Sherpa host:port if you run Sherpa externally.
-          </div>
-        </div>
-      ) : null}
 
       <iframe
         key={src}
@@ -80,9 +59,7 @@ export default function SherpaPanel() {
         className="h-[640px] w-full rounded-2xl border border-white/10 bg-black/30"
         onLoad={() => {
           setLoadedSrc(resolvedSrc);
-          setIframeError("");
         }}
-        onError={() => setIframeError(`Unable to reach Sherpa at ${resolvedSrc}.`)}
       />
       {loadedSrc !== resolvedSrc ? (
         <p className="mt-2 text-xs text-white/50">Waiting for frame response… if this persists, use “Open tab” to verify Sherpa is running.</p>
