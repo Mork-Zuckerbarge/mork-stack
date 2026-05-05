@@ -2,6 +2,7 @@ import os
 import json
 import time
 import re
+import shutil
 import random
 import threading
 import queue
@@ -3052,11 +3053,22 @@ class TwitterBot:
                         interactive=True,
                         value=self.credentials.get('instagram_image_url', '')
                     )
+                with gr.Row():
+                    faceboot_agent_token = gr.Textbox(
+                        label="Faceboot Connected Token",
+                        type="password",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('faceboot_agent_token', '')
+                    )
+                gr.Markdown("Paste your Faceboot agent token here to reuse it from Sherpa flows. Saved to `faceboot.agent-token.v1` in localStorage.")
 
                 def save_creds(
                     key, api_key, api_secret, access_token, access_secret, telegram_token, telegram_chat, bearer_token,
                     reddit_cid, reddit_csecret, reddit_user, reddit_pass, reddit_sr, reddit_agent,
-                    fb_page_id, fb_page_token, ig_user_id, ig_token, ig_image_url
+                    fb_page_id, fb_page_token, ig_user_id, ig_token, ig_image_url, faceboot_token
                 ):
 
                     print("\nSaving credentials...")
@@ -3086,6 +3098,7 @@ class TwitterBot:
                         'instagram_user_id': ig_user_id,
                         'instagram_access_token': ig_token,
                         'instagram_image_url': ig_image_url,
+                        'faceboot_agent_token': faceboot_token,
                     }
                     
                     if self.save_credentials(credentials):
@@ -3112,7 +3125,8 @@ class TwitterBot:
                             gr.update(value=fb_page_token),
                             gr.update(value=ig_user_id),
                             gr.update(value=ig_token),
-                            gr.update(value=ig_image_url))
+                            gr.update(value=ig_image_url),
+                            gr.update(value=faceboot_token))
 
                     else:
                         print("Failed to save credentials")
@@ -3135,7 +3149,8 @@ class TwitterBot:
                             gr.update(value=self.credentials.get('facebook_page_access_token', '')),
                             gr.update(value=self.credentials.get('instagram_user_id', '')),
                             gr.update(value=self.credentials.get('instagram_access_token', '')),
-                            gr.update(value=self.credentials.get('instagram_image_url', '')))
+                            gr.update(value=self.credentials.get('instagram_image_url', '')),
+                            gr.update(value=self.credentials.get('faceboot_agent_token', '')))
                 
                 with gr.Row():
                     save_button = gr.Button("Save Credentials", variant="primary")
@@ -3148,14 +3163,14 @@ class TwitterBot:
                     twitter_access_token, twitter_access_token_secret,
                     telegram_bot_token, telegram_chat_id, bearer_token,
                     reddit_client_id, reddit_client_secret, reddit_username, reddit_password, reddit_subreddit, reddit_user_agent,
-                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url
+                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url, faceboot_agent_token
                 ],
                 outputs=[
                     save_status, openai_key, twitter_api_key, twitter_api_secret,
                     twitter_access_token, twitter_access_token_secret,
                     telegram_bot_token, telegram_chat_id, bearer_token,
                     reddit_client_id, reddit_client_secret, reddit_username, reddit_password, reddit_subreddit, reddit_user_agent,
-                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url
+                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url, faceboot_agent_token
                 ]
             )
 
@@ -3630,6 +3645,47 @@ class TwitterBot:
             use_news.change(update_news_feed, inputs=[use_news], outputs=[use_news])
             use_memes.change(update_memes, inputs=[use_memes], outputs=[use_memes])
             meme_frequency.change(update_meme_frequency, inputs=[meme_frequency], outputs=[meme_frequency])
+
+            with gr.Accordion("🖼️ Meme Drop Zone", open=True, elem_classes=["compact-section"]):
+                gr.Markdown("Drag and drop memes here to upload into `services/sherpa/memes`.")
+                meme_uploader = gr.Files(label="Pick files", file_count="multiple", file_types=["image"], type="filepath")
+                meme_upload_status = gr.Textbox(label="Upload Status", interactive=False)
+                meme_selector = gr.Dropdown(label="Select meme for a one-off post hint", choices=[], value=None, interactive=True)
+                meme_hint = gr.Textbox(label="Single-post hint", interactive=False)
+                copy_hint_btn = gr.Button("Copy single-post hint")
+
+                def _list_memes():
+                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
+                    os.makedirs(meme_dir, exist_ok=True)
+                    return sorted([f for f in os.listdir(meme_dir) if f.lower().endswith(tuple(SUPPORTED_MEME_FORMATS))])
+
+                def _upload_memes(filepaths):
+                    if not filepaths:
+                        memes = _list_memes()
+                        return "No files uploaded.", gr.update(choices=memes, value=(memes[0] if memes else None))
+                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
+                    os.makedirs(meme_dir, exist_ok=True)
+                    saved = []
+                    for src in filepaths:
+                        if not src:
+                            continue
+                        name = os.path.basename(src)
+                        shutil.copy2(src, os.path.join(meme_dir, name))
+                        saved.append(name)
+                    memes = _list_memes()
+                    msg = f"Uploaded {len(saved)} meme(s): {', '.join(saved)}" if saved else "No valid files uploaded."
+                    return msg, gr.update(choices=memes, value=(saved[0] if saved else (memes[0] if memes else None)))
+
+                def _build_single_post_hint(meme_name):
+                    if not meme_name:
+                        return "Select a meme first."
+                    return f"Use meme file: {meme_name}"
+
+                meme_uploader.change(_upload_memes, inputs=[meme_uploader], outputs=[meme_upload_status, meme_selector])
+                copy_hint_btn.click(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
+                meme_selector.change(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
+                memes_initial = _list_memes()
+                meme_selector.value = memes_initial[0] if memes_initial else None
 
             return interface
 
