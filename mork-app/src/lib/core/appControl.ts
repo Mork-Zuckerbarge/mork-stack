@@ -23,9 +23,11 @@ export type AppControlState = {
     appPersonaMode: string;
     telegramPersonaMode: string;
     xPersonaMode: string;
+    facebootPersonaMode: string;
     appPersonaGuidelines: string;
     telegramPersonaGuidelines: string;
     xPersonaGuidelines: string;
+    facebootPersonaGuidelines: string;
     selectedOllamaModel: string;
     startupCompleted: boolean;
     executionAuthority: {
@@ -97,9 +99,11 @@ const state: AppControlState = {
     appPersonaMode: "code-first",
     telegramPersonaMode: "ceo-helpful",
     xPersonaMode: "cynical-banter",
+    facebootPersonaMode: "community-hype",
     appPersonaGuidelines: "",
     telegramPersonaGuidelines: "",
     xPersonaGuidelines: "",
+    facebootPersonaGuidelines: "",
     selectedOllamaModel: process.env.OLLAMA_MODEL || "llama3.2:3b",
     startupCompleted: false,
     executionAuthority: {
@@ -276,6 +280,9 @@ function applyPersistedState(raw: unknown) {
     if (typeof controls.xPersonaMode === "string") {
       state.controls.xPersonaMode = controls.xPersonaMode;
     }
+    if (typeof controls.facebootPersonaMode === "string") {
+      state.controls.facebootPersonaMode = controls.facebootPersonaMode;
+    }
     if (typeof controls.appPersonaGuidelines === "string") {
       state.controls.appPersonaGuidelines = controls.appPersonaGuidelines;
     }
@@ -284,6 +291,9 @@ function applyPersistedState(raw: unknown) {
     }
     if (typeof controls.xPersonaGuidelines === "string") {
       state.controls.xPersonaGuidelines = controls.xPersonaGuidelines;
+    }
+    if (typeof controls.facebootPersonaGuidelines === "string") {
+      state.controls.facebootPersonaGuidelines = controls.facebootPersonaGuidelines;
     }
     if (typeof controls.selectedOllamaModel === "string") {
       state.controls.selectedOllamaModel = controls.selectedOllamaModel;
@@ -563,25 +573,27 @@ export async function isChannelEnabled(channel: string) {
 }
 
 export async function setPersonaMode(
-  channel: "app" | "telegram" | "x",
+  channel: "app" | "telegram" | "x" | "faceboot",
   mode: string
 ) {
   await ensureStateLoaded();
   if (channel === "app") state.controls.appPersonaMode = mode;
   if (channel === "telegram") state.controls.telegramPersonaMode = mode;
   if (channel === "x") state.controls.xPersonaMode = mode;
+  if (channel === "faceboot") state.controls.facebootPersonaMode = mode;
   await persistState();
   return structuredClone(state.controls);
 }
 
 export async function setPersonaGuidelines(
-  channel: "app" | "telegram" | "x",
+  channel: "app" | "telegram" | "x" | "faceboot",
   guidelines: string
 ) {
   await ensureStateLoaded();
   if (channel === "app") state.controls.appPersonaGuidelines = guidelines;
   if (channel === "telegram") state.controls.telegramPersonaGuidelines = guidelines;
   if (channel === "x") state.controls.xPersonaGuidelines = guidelines;
+  if (channel === "faceboot") state.controls.facebootPersonaGuidelines = guidelines;
   await persistState();
   return structuredClone(state.controls);
 }

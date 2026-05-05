@@ -17,9 +17,11 @@ type AppControlState = {
     appPersonaMode: string;
     telegramPersonaMode: string;
     xPersonaMode: string;
+    facebootPersonaMode: string;
     appPersonaGuidelines: string;
     telegramPersonaGuidelines: string;
     xPersonaGuidelines: string;
+    facebootPersonaGuidelines: string;
     selectedOllamaModel: string;
     startupCompleted: boolean;
     executionAuthority: {
@@ -61,6 +63,7 @@ const personaModes = {
   app: ["code-first", "operator", "teacher"],
   telegram: ["ceo-helpful", "supportive", "briefing"],
   x: ["cynical-banter", "poetic", "market-snark"],
+  faceboot: ["meme-chaos", "storyteller", "community-hype"],
 };
 
 const STYLE_SETUP_IMAGE_TARGET = 7;
@@ -410,6 +413,16 @@ export default function AppControlPanel() {
               busy={busy}
               onModeChange={(mode) => act("persona.mode.set", { channel: "x", mode })}
               onGuidelinesSave={(guidelines) => act("persona.guidelines.set", { channel: "x", guidelines })}
+            />
+            <PersonaEditor
+              key={`faceboot-${state.controls.facebootPersonaMode}-${state.controls.facebootPersonaGuidelines}`}
+              title="Faceboot Persona"
+              mode={state.controls.facebootPersonaMode}
+              modeOptions={personaModes.faceboot}
+              guidelines={state.controls.facebootPersonaGuidelines}
+              busy={busy}
+              onModeChange={(mode) => act("persona.mode.set", { channel: "faceboot", mode })}
+              onGuidelinesSave={(guidelines) => act("persona.guidelines.set", { channel: "faceboot", guidelines })}
             />
           </div>
 

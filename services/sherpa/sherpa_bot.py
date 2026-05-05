@@ -771,6 +771,7 @@ class TwitterBot:
             "facebook": False,
             "instagram": False,
             "reddit": False,
+            "faceboot": False,
         }
 
         if not os.path.exists("memes"):
@@ -2088,6 +2089,9 @@ class TwitterBot:
             if self.publish_targets.get("instagram", False):
                 self.send_to_instagram(tweet_text)
                 posted_anywhere = True
+            if self.publish_targets.get("faceboot", False):
+                self.send_to_faceboot(tweet_text)
+                posted_anywhere = True
 
             return posted_anywhere
         except tweepy.TooManyRequests as e:
@@ -2096,6 +2100,29 @@ class TwitterBot:
         except Exception as e:
             print(f"Error sending tweet: {e}")
             return False
+
+    def send_to_faceboot(self, text):
+        """Post content to Faceboot using an agent token + API endpoint."""
+        try:
+            token = (self.credentials.get("faceboot_agent_token") or "").strip()
+            api_url = (self.credentials.get("faceboot_api_url") or os.getenv("FACEBOOT_API_URL") or "").strip()
+            if not token:
+                print("⚠️ Faceboot skipped: missing faceboot_agent_token")
+                return False
+            if not api_url:
+                print("⚠️ Faceboot skipped: set FACEBOOT_API_URL or faceboot_api_url credential.")
+                return False
+            res = requests.post(
+                api_url,
+                json={"token": token, "text": text},
+                timeout=20,
+            )
+            print("📨 Faceboot status:", res.status_code, res.text[:220])
+            return 200 <= res.status_code < 300
+        except Exception as e:
+            print(f"❌ Faceboot post failed: {e}")
+            return False
+
 
     def send_main_tweet(self):
         """Send a main scheduled tweet."""
@@ -3456,6 +3483,7 @@ class TwitterBot:
                             target_fb = gr.Checkbox(label="Facebook", value=self.publish_targets.get("facebook", False), interactive=True)
                             target_ig = gr.Checkbox(label="Instagram", value=self.publish_targets.get("instagram", False), interactive=True)
                             target_reddit = gr.Checkbox(label="Reddit", value=self.publish_targets.get("reddit", False), interactive=True)
+                            target_faceboot = gr.Checkbox(label="Faceboot", value=self.publish_targets.get("faceboot", False), interactive=True)
                         with gr.Row():
                             use_news = gr.Checkbox(value=True, label="Use News Feed", interactive=True)
                             use_memes = gr.Checkbox(value=self.use_memes, label="Use Memes", interactive=True)
@@ -3497,13 +3525,14 @@ class TwitterBot:
                     self.subject = subject
                     return gr.update()  # no UI change -> no network calls
 
-                def _set_publish_targets(x, tg, fb, ig, reddit):
+                def _set_publish_targets(x, tg, fb, ig, reddit, faceboot):
                     self.publish_targets = {
                         "x": bool(x),
                         "telegram": bool(tg),
                         "facebook": bool(fb),
                         "instagram": bool(ig),
                         "reddit": bool(reddit),
+                        "faceboot": bool(faceboot),
                     }
                     return "Destination toggles updated."
 
@@ -3612,10 +3641,10 @@ class TwitterBot:
                     inputs=[scheduler_enabled, character_dropdown, subject_dropdown],
                     outputs=[tweet_status, scheduler_status, current_topic]
                 )
-                for toggle in [target_x, target_tg, target_fb, target_ig, target_reddit]:
+                for toggle in [target_x, target_tg, target_fb, target_ig, target_reddit, target_faceboot]:
                     toggle.change(
                         _set_publish_targets,
-                        inputs=[target_x, target_tg, target_fb, target_ig, target_reddit],
+                        inputs=[target_x, target_tg, target_fb, target_ig, target_reddit, target_faceboot],
                         outputs=[tweet_status]
                     )
             

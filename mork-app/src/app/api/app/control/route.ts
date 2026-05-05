@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
       const channel = body?.channel;
       const mode = body?.mode;
       if (
-        (channel !== "app" && channel !== "telegram" && channel !== "x") ||
+        (channel !== "app" && channel !== "telegram" && channel !== "x" && channel !== "faceboot") ||
         typeof mode !== "string"
       ) {
         return NextResponse.json(
@@ -164,7 +164,7 @@ export async function POST(req: NextRequest) {
       const channel = body?.channel;
       const guidelines = body?.guidelines;
       if (
-        (channel !== "app" && channel !== "telegram" && channel !== "x") ||
+        (channel !== "app" && channel !== "telegram" && channel !== "x" && channel !== "faceboot") ||
         typeof guidelines !== "string"
       ) {
         return NextResponse.json(
