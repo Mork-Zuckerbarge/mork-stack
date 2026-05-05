@@ -2,6 +2,7 @@ import os
 import json
 import time
 import re
+import shutil
 import random
 import threading
 import queue
@@ -544,9 +545,9 @@ RSS_FEEDS = {
             {"url": "https://cointelegraph.com/rss", "name": "CoinTelegraph"},
             {"url": "https://cryptonews.com/news/feed/", "name": "CryptoNews"},
             {"url": "https://decrypt.co/feed", "name": "Decrypt"},
+            {"url": "https://www.coindesk.com/arc/outboundfeeds/rss/", "name": "CoinDesk"},
             {"url": "https://news.bitcoin.com/feed/", "name": "Bitcoin.com"},
-            {"url": "https://coindesk.com/arc/outboundfeeds/rss/", "name": "CoinDesk"},
-            {"url": "https://bitcoinmagazine.com/.rss/full/", "name": "Bitcoin Magazine"},
+                        {"url": "https://bitcoinmagazine.com/.rss/full/", "name": "Bitcoin Magazine"},
             {"url": "https://cryptopotato.com/feed/", "name": "CryptoPotato"},
             {"url": "https://ambcrypto.com/feed/", "name": "AMBCrypto"},
             {"url": "https://newsbtc.com/feed/", "name": "NewsBTC"},
@@ -569,7 +570,9 @@ RSS_FEEDS = {
             {"url": "https://openai.com/news/rss.xml", "name": "OpenAI Blog"},
             {"url": "https://aws.amazon.com/blogs/machine-learning/feed/", "name": "AWS ML Blog"},
             {"url": "https://techcommunity.microsoft.com/t5/ai-machine-learning-blog/rss", "name": "Microsoft AI Blog"},
-            {"url": "https://engineering.fb.com/feed/", "name": "Meta Engineering Blog"}
+            {"url": "https://engineering.fb.com/feed/", "name": "Meta Engineering Blog"},
+            {"url": "https://ai.googleblog.com/feeds/posts/default", "name": "Google AI Blog"},
+            {"url": "https://www.marktechpost.com/feed/", "name": "MarkTechPost"}
         ]
     },
     "tech": {
@@ -584,6 +587,8 @@ RSS_FEEDS = {
         "secondary": [
             {"name": "Tom's Hardware", "url": "https://www.tomshardware.com/feeds/all"},
             {"name": "The Next Web", "url": "https://thenextweb.com/feed"},
+            {"name": "VentureBeat", "url": "https://venturebeat.com/feed/"},
+            {"name": "Hacker News Front Page", "url": "https://hnrss.org/frontpage"},
         ]
 },
 
@@ -3048,11 +3053,22 @@ class TwitterBot:
                         interactive=True,
                         value=self.credentials.get('instagram_image_url', '')
                     )
+                with gr.Row():
+                    faceboot_agent_token = gr.Textbox(
+                        label="Faceboot Connected Token",
+                        type="password",
+                        show_label=True,
+                        container=True,
+                        scale=1,
+                        interactive=True,
+                        value=self.credentials.get('faceboot_agent_token', '')
+                    )
+                gr.Markdown("Paste your Faceboot agent token here to reuse it from Sherpa flows. Saved to `faceboot.agent-token.v1` in localStorage.")
 
                 def save_creds(
                     key, api_key, api_secret, access_token, access_secret, telegram_token, telegram_chat, bearer_token,
                     reddit_cid, reddit_csecret, reddit_user, reddit_pass, reddit_sr, reddit_agent,
-                    fb_page_id, fb_page_token, ig_user_id, ig_token, ig_image_url
+                    fb_page_id, fb_page_token, ig_user_id, ig_token, ig_image_url, faceboot_token
                 ):
 
                     print("\nSaving credentials...")
@@ -3082,6 +3098,7 @@ class TwitterBot:
                         'instagram_user_id': ig_user_id,
                         'instagram_access_token': ig_token,
                         'instagram_image_url': ig_image_url,
+                        'faceboot_agent_token': faceboot_token,
                     }
                     
                     if self.save_credentials(credentials):
@@ -3108,7 +3125,8 @@ class TwitterBot:
                             gr.update(value=fb_page_token),
                             gr.update(value=ig_user_id),
                             gr.update(value=ig_token),
-                            gr.update(value=ig_image_url))
+                            gr.update(value=ig_image_url),
+                            gr.update(value=faceboot_token))
 
                     else:
                         print("Failed to save credentials")
@@ -3131,7 +3149,8 @@ class TwitterBot:
                             gr.update(value=self.credentials.get('facebook_page_access_token', '')),
                             gr.update(value=self.credentials.get('instagram_user_id', '')),
                             gr.update(value=self.credentials.get('instagram_access_token', '')),
-                            gr.update(value=self.credentials.get('instagram_image_url', '')))
+                            gr.update(value=self.credentials.get('instagram_image_url', '')),
+                            gr.update(value=self.credentials.get('faceboot_agent_token', '')))
                 
                 with gr.Row():
                     save_button = gr.Button("Save Credentials", variant="primary")
@@ -3144,14 +3163,14 @@ class TwitterBot:
                     twitter_access_token, twitter_access_token_secret,
                     telegram_bot_token, telegram_chat_id, bearer_token,
                     reddit_client_id, reddit_client_secret, reddit_username, reddit_password, reddit_subreddit, reddit_user_agent,
-                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url
+                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url, faceboot_agent_token
                 ],
                 outputs=[
                     save_status, openai_key, twitter_api_key, twitter_api_secret,
                     twitter_access_token, twitter_access_token_secret,
                     telegram_bot_token, telegram_chat_id, bearer_token,
                     reddit_client_id, reddit_client_secret, reddit_username, reddit_password, reddit_subreddit, reddit_user_agent,
-                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url
+                    facebook_page_id, facebook_page_access_token, instagram_user_id, instagram_access_token, instagram_image_url, faceboot_agent_token
                 ]
             )
 
@@ -3291,6 +3310,121 @@ class TwitterBot:
                     delete_button = gr.Button("Delete Character", variant="secondary")
                     delete_status = gr.Textbox(label="Delete Status", interactive=False)
                 
+            # Feed Configuration section
+            with gr.Accordion("📰 Feed Configuration", open=True):
+                gr.Markdown("Configure which RSS feeds to use for each subject")
+
+                # --- Subject picker now includes whatever is in RSS_FEEDS (e.g., crypto, ai, tech) ---
+                with gr.Row():
+                    feed_subject = gr.Dropdown(
+                        label="Subject",
+                        choices=list(RSS_FEEDS.keys()),
+                        value="crypto",
+                        interactive=True,
+                        show_label=True,
+                        container=True,
+                        scale=1
+                    )
+
+                # --- Helpers to refresh the checkbox groups for the selected subject ---
+                def update_feed_checkboxes(subject):
+                    print(f"\nUpdating feed checkboxes for subject: {subject}")
+                    feed_config = self.feed_config.get(subject, {})
+                    primary_feeds = RSS_FEEDS[subject]["primary"]
+                    secondary_feeds = RSS_FEEDS[subject]["secondary"]
+
+                    primary_choices = [f"{feed['name']} ({feed['url']})" for feed in primary_feeds]
+                    primary_values = [feed_config.get("primary", {}).get(feed["url"], True) for feed in primary_feeds]
+                    secondary_choices = [f"{feed['name']} ({feed['url']})" for feed in secondary_feeds]
+                    secondary_values = [feed_config.get("secondary", {}).get(feed["url"], True) for feed in secondary_feeds]
+
+                    print(f"Primary feeds: {len(primary_choices)} choices, {len(primary_values)} values")
+                    print(f"Secondary feeds: {len(secondary_choices)} choices, {len(secondary_values)} values")
+
+                    return [
+                        gr.update(choices=primary_choices, value=[choice for i, choice in enumerate(primary_choices) if primary_values[i]]),
+                        gr.update(choices=secondary_choices, value=[choice for i, choice in enumerate(secondary_choices) if secondary_values[i]])
+                    ]
+
+                with gr.Column():
+                    gr.Markdown("### Primary Sources")
+                    primary_feeds = gr.CheckboxGroup(
+                        label="Primary Sources",
+                        choices=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["primary"]],
+                        value=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["primary"]],
+                        interactive=True
+                    )
+
+                    gr.Markdown("### Secondary Sources")
+                    secondary_feeds = gr.CheckboxGroup(
+                        label="Secondary Sources",
+                        choices=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["secondary"]],
+                        value=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["secondary"]],
+                        interactive=True
+                    )
+
+                with gr.Row():
+                    save_feeds_btn = gr.Button("Save Feed Configuration", variant="primary")
+                    save_feeds_status = gr.Textbox(label="Status", interactive=False)
+
+                # Wire subject dropdown to checkbox refresh
+                feed_subject.change(
+                    update_feed_checkboxes,
+                    inputs=[feed_subject],
+                    outputs=[primary_feeds, secondary_feeds]
+                )
+
+                save_feeds_btn.click(
+                    self.save_feed_selection,
+                    inputs=[feed_subject, primary_feeds, secondary_feeds],
+                    outputs=[save_feeds_status]
+                )
+
+                # Initialize feed checkboxes for default subject
+                feed_subject.value = "crypto"
+                update_feed_checkboxes("crypto")
+
+            with gr.Accordion("🖼️ Meme Drop Zone", open=True, elem_classes=["compact-section"]):
+                gr.Markdown("Drag and drop memes here to upload into `services/sherpa/memes`.")
+                meme_uploader = gr.Files(label="Pick files", file_count="multiple", file_types=["image"], type="filepath")
+                meme_upload_status = gr.Textbox(label="Upload Status", interactive=False)
+                meme_selector = gr.Dropdown(label="Select meme for a one-off post hint", choices=[], value=None, interactive=True)
+                meme_hint = gr.Textbox(label="Single-post hint", interactive=False)
+                copy_hint_btn = gr.Button("Copy single-post hint")
+
+                def _list_memes():
+                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
+                    os.makedirs(meme_dir, exist_ok=True)
+                    return sorted([f for f in os.listdir(meme_dir) if f.lower().endswith(tuple(SUPPORTED_MEME_FORMATS))])
+
+                def _upload_memes(filepaths):
+                    if not filepaths:
+                        memes = _list_memes()
+                        return "No files uploaded.", gr.update(choices=memes, value=(memes[0] if memes else None))
+                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
+                    os.makedirs(meme_dir, exist_ok=True)
+                    saved = []
+                    for src in filepaths:
+                        if not src:
+                            continue
+                        name = os.path.basename(src)
+                        shutil.copy2(src, os.path.join(meme_dir, name))
+                        saved.append(name)
+                    memes = _list_memes()
+                    msg = f"Uploaded {len(saved)} meme(s): {', '.join(saved)}" if saved else "No valid files uploaded."
+                    return msg, gr.update(choices=memes, value=(saved[0] if saved else (memes[0] if memes else None)))
+
+                def _build_single_post_hint(meme_name):
+                    if not meme_name:
+                        return "Select a meme first."
+                    return f"Use meme file: {meme_name}"
+
+                meme_uploader.change(_upload_memes, inputs=[meme_uploader], outputs=[meme_upload_status, meme_selector])
+                copy_hint_btn.click(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
+                meme_selector.change(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
+                memes_initial = _list_memes()
+                meme_selector.value = memes_initial[0] if memes_initial else None
+
             # Control Center section
             with gr.Accordion("🎮 Control Center", open=True, elem_classes=["compact-section"]):
                 gr.Markdown("Generate and post tweets using your AI characters")
@@ -3304,7 +3438,7 @@ class TwitterBot:
                             interactive=bool(self.characters)
                         )
                         subject_dropdown = gr.Dropdown(
-                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All)", "__surprise_all__")],
+                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All Feeds)", "__surprise_all__")],
                             value="crypto",
                             label="Select Subject",
                             interactive=True
@@ -3314,12 +3448,10 @@ class TwitterBot:
                             tweet_btn = gr.Button("Post Single Tweet")
                             pull_app_topic_btn = gr.Button("Pull App Topic")
                         tweet_status = gr.Textbox(label="Tweet Status", interactive=False)
-                        scheduler_enabled = gr.Checkbox(label="Begin Automation", value=False)
-                        scheduler_status = gr.Markdown("Scheduler: NOT RUNNING")
                         with gr.Row():
                             target_x = gr.Checkbox(label="X", value=self.publish_targets.get("x", True), interactive=True)
-                            target_tg = gr.Checkbox(label="TG", value=self.publish_targets.get("telegram", False), interactive=True)
-                            target_fb = gr.Checkbox(label="FB", value=self.publish_targets.get("facebook", False), interactive=True)
+                            target_tg = gr.Checkbox(label="Telegram", value=self.publish_targets.get("telegram", False), interactive=True)
+                            target_fb = gr.Checkbox(label="Facebook", value=self.publish_targets.get("facebook", False), interactive=True)
                             target_ig = gr.Checkbox(label="Instagram", value=self.publish_targets.get("instagram", False), interactive=True)
                             target_reddit = gr.Checkbox(label="Reddit", value=self.publish_targets.get("reddit", False), interactive=True)
                         with gr.Row():
@@ -3333,66 +3465,70 @@ class TwitterBot:
                             lines=10,
                             interactive=True
                         )
+                gr.Markdown("## 🚀 Begin Automation")
+                with gr.Row():
+                    scheduler_enabled = gr.Checkbox(label="Begin Automation", value=False, scale=2)
+                scheduler_status = gr.Markdown("Scheduler: NOT RUNNING")
 
-                    # ---------- Helpers ----------
-                    import random
+                # ---------- Helpers ----------
+                import random
 
-                    def get_story_dispatch(subject):
-                        if subject == "__surprise_all__":
-                            # Try subjects in random order; first successful story wins
-                            subjects = list(RSS_FEEDS.keys())  # e.g., ["crypto","ai","tech"]
-                            random.shuffle(subjects)
-                            for s in subjects:
-                                story = self.get_new_story(s)
-                                if story:
-                                    return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']} (source: {s})"
-                            return "No items found right now. Try again in a moment."
-                        # Normal per-subject path
-                        story = self.get_new_story(subject)
-                        if story:
-                            return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']}"
-                        return f"No items found for '{subject}' right now."
+                def get_story_dispatch(subject):
+                    if subject == "__surprise_all__":
+                        # Try subjects in random order; first successful story wins
+                        subjects = list(RSS_FEEDS.keys())  # e.g., ["crypto","ai","tech"]
+                        random.shuffle(subjects)
+                        for s in subjects:
+                            story = self.get_new_story(s)
+                            if story:
+                                return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']} (source: {s})"
+                        return "No items found right now. Try again in a moment."
+                    # Normal per-subject path
+                    story = self.get_new_story(subject)
+                    if story:
+                        return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']}"
+                    return f"No items found for '{subject}' right now."
 
-                    # IMPORTANT: Do NOT auto-fetch on selection.
-                    # Just update the bot's subject so the scheduler uses it later.
-                    def _update_subject(subject):
-                        self.subject = subject
-                        return gr.update()  # no UI change -> no network calls
+                # IMPORTANT: Do NOT auto-fetch on selection.
+                # Just update the bot's subject so the scheduler uses it later.
+                def _update_subject(subject):
+                    self.subject = subject
+                    return gr.update()  # no UI change -> no network calls
 
-                    def _set_publish_targets(x, tg, fb, ig, reddit):
-                        self.publish_targets = {
-                            "x": bool(x),
-                            "telegram": bool(tg),
-                            "facebook": bool(fb),
-                            "instagram": bool(ig),
-                            "reddit": bool(reddit),
-                        }
-                        return "Destination toggles updated."
+                def _set_publish_targets(x, tg, fb, ig, reddit):
+                    self.publish_targets = {
+                        "x": bool(x),
+                        "telegram": bool(tg),
+                        "facebook": bool(fb),
+                        "instagram": bool(ig),
+                        "reddit": bool(reddit),
+                    }
+                    return "Destination toggles updated."
 
-                    # Wire subject change ONLY to update the selected subject for the scheduler
-                    subject_dropdown.change(_update_subject, inputs=[subject_dropdown], outputs=[])
+                # Wire subject change ONLY to update the selected subject for the scheduler
+                subject_dropdown.change(_update_subject, inputs=[subject_dropdown], outputs=[])
 
-                    # Button wiring (manual fetch only when you click New Story)
-                    new_story_btn.click(get_story_dispatch, inputs=[subject_dropdown], outputs=[current_topic])
+                # Button wiring (manual fetch only when you click New Story)
+                new_story_btn.click(get_story_dispatch, inputs=[subject_dropdown], outputs=[current_topic])
 
-                    def load_app_topic():
-                        queue_file = os.path.join(os.path.dirname(__file__), "current_topic_from_app.txt")
-                        if not os.path.exists(queue_file):
-                            return "No queued topic from app found."
-                        try:
-                            with open(queue_file, "r", encoding="utf-8") as f:
-                                queued = f.read().strip()
-                            return queued or "Queued app topic file was empty."
-                        except Exception as e:
-                            return f"Failed to load queued app topic: {e}"
+                def load_app_topic():
+                    queue_file = os.path.join(os.path.dirname(__file__), "current_topic_from_app.txt")
+                    if not os.path.exists(queue_file):
+                        return "No queued topic from app found."
+                    try:
+                        with open(queue_file, "r", encoding="utf-8") as f:
+                            queued = f.read().strip()
+                        return queued or "Queued app topic file was empty."
+                    except Exception as e:
+                        return f"Failed to load queued app topic: {e}"
 
-                    pull_app_topic_btn.click(load_app_topic, outputs=[current_topic])
+                pull_app_topic_btn.click(load_app_topic, outputs=[current_topic])
 
-                    def send_tweet(character, topic):
-                        success = self.send_tweet(character, topic)
-                        return "Tweet sent successfully!" if success else "Failed to send tweet. Please try again."
+                def send_tweet(character, topic):
+                    success = self.send_tweet(character, topic)
+                    return "Tweet sent successfully!" if success else "Failed to send tweet. Please try again."
 
-                    tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
+                tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
 
                 def toggle_scheduler(enabled, character, subject):
                     if not character:
@@ -3520,82 +3656,6 @@ class TwitterBot:
                         control_character, character_dropdown]
             )
             
-            # Feed Configuration section
-            with gr.Accordion("📰 Feed Configuration", open=True):
-                gr.Markdown("Configure which RSS feeds to use for each subject")
-
-                # --- Subject picker now includes whatever is in RSS_FEEDS (e.g., crypto, ai, tech) ---
-                with gr.Row():
-                    feed_subject = gr.Dropdown(
-                        label="Subject",
-                        choices=list(RSS_FEEDS.keys()),
-                        value="crypto",
-                        interactive=True,
-                        show_label=True,
-                        container=True,
-                        scale=1
-                    )
-
-                # --- Helpers to refresh the checkbox groups for the selected subject ---
-                def update_feed_checkboxes(subject):
-                    print(f"\nUpdating feed checkboxes for subject: {subject}")
-                    feed_config = self.feed_config.get(subject, {})
-                    primary_feeds = RSS_FEEDS[subject]["primary"]
-                    secondary_feeds = RSS_FEEDS[subject]["secondary"]
-
-                    primary_choices = [f"{feed['name']} ({feed['url']})" for feed in primary_feeds]
-                    primary_values = [feed_config.get("primary", {}).get(feed["url"], True) for feed in primary_feeds]
-                    secondary_choices = [f"{feed['name']} ({feed['url']})" for feed in secondary_feeds]
-                    secondary_values = [feed_config.get("secondary", {}).get(feed["url"], True) for feed in secondary_feeds]
-
-                    print(f"Primary feeds: {len(primary_choices)} choices, {len(primary_values)} values")
-                    print(f"Secondary feeds: {len(secondary_choices)} choices, {len(secondary_values)} values")
-
-                    return [
-                        gr.update(choices=primary_choices, value=[choice for i, choice in enumerate(primary_choices) if primary_values[i]]),
-                        gr.update(choices=secondary_choices, value=[choice for i, choice in enumerate(secondary_choices) if secondary_values[i]])
-                    ]
-
-                with gr.Column():
-                    gr.Markdown("### Primary Sources")
-                    primary_feeds = gr.CheckboxGroup(
-                        label="Primary Sources",
-                        choices=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["primary"]],
-                        value=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["primary"]],
-                        interactive=True
-                    )
-
-                    gr.Markdown("### Secondary Sources")
-                    secondary_feeds = gr.CheckboxGroup(
-                        label="Secondary Sources",
-                        choices=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["secondary"]],
-                        value=[f"{feed['name']} ({feed['url']})" for feed in RSS_FEEDS["crypto"]["secondary"]],
-                        interactive=True
-                    )
-
-                with gr.Row():
-                    save_feeds_btn = gr.Button("Save Feed Configuration", variant="primary")
-                    # New: random-any-category button
-                    surprise_all_btn = gr.Button("🎲 Surprise me (All Feeds)")
-                    save_feeds_status = gr.Textbox(label="Status", interactive=False)
-
-                # Wire subject dropdown to checkbox refresh
-                feed_subject.change(
-                    update_feed_checkboxes,
-                    inputs=[feed_subject],
-                    outputs=[primary_feeds, secondary_feeds]
-                )
-
-                save_feeds_btn.click(
-                    self.save_feed_selection,
-                    inputs=[feed_subject, primary_feeds, secondary_feeds],
-                    outputs=[save_feeds_status]
-                )
-
-                # Initialize feed checkboxes for default subject
-                feed_subject.value = "crypto"
-                update_feed_checkboxes("crypto")
-
             # Simple helpers that already existed
             def get_story(subject):
                 story = self.get_new_story(subject)
@@ -3611,8 +3671,6 @@ class TwitterBot:
             new_story_btn.click(get_story, inputs=[subject_dropdown], outputs=[current_topic])
             tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
 
-            # NEW: connect the Surprise me (All Feeds) button to fill current_topic
-            surprise_all_btn.click(lambda: self.get_random_story_all(), outputs=[current_topic])
 
             # Connect checkbox handlers
             def update_news_feed(value):
