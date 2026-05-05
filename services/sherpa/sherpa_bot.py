@@ -3384,6 +3384,47 @@ class TwitterBot:
                 feed_subject.value = "crypto"
                 update_feed_checkboxes("crypto")
 
+            with gr.Accordion("🖼️ Meme Drop Zone", open=True, elem_classes=["compact-section"]):
+                gr.Markdown("Drag and drop memes here to upload into `services/sherpa/memes`.")
+                meme_uploader = gr.Files(label="Pick files", file_count="multiple", file_types=["image"], type="filepath")
+                meme_upload_status = gr.Textbox(label="Upload Status", interactive=False)
+                meme_selector = gr.Dropdown(label="Select meme for a one-off post hint", choices=[], value=None, interactive=True)
+                meme_hint = gr.Textbox(label="Single-post hint", interactive=False)
+                copy_hint_btn = gr.Button("Copy single-post hint")
+
+                def _list_memes():
+                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
+                    os.makedirs(meme_dir, exist_ok=True)
+                    return sorted([f for f in os.listdir(meme_dir) if f.lower().endswith(tuple(SUPPORTED_MEME_FORMATS))])
+
+                def _upload_memes(filepaths):
+                    if not filepaths:
+                        memes = _list_memes()
+                        return "No files uploaded.", gr.update(choices=memes, value=(memes[0] if memes else None))
+                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
+                    os.makedirs(meme_dir, exist_ok=True)
+                    saved = []
+                    for src in filepaths:
+                        if not src:
+                            continue
+                        name = os.path.basename(src)
+                        shutil.copy2(src, os.path.join(meme_dir, name))
+                        saved.append(name)
+                    memes = _list_memes()
+                    msg = f"Uploaded {len(saved)} meme(s): {', '.join(saved)}" if saved else "No valid files uploaded."
+                    return msg, gr.update(choices=memes, value=(saved[0] if saved else (memes[0] if memes else None)))
+
+                def _build_single_post_hint(meme_name):
+                    if not meme_name:
+                        return "Select a meme first."
+                    return f"Use meme file: {meme_name}"
+
+                meme_uploader.change(_upload_memes, inputs=[meme_uploader], outputs=[meme_upload_status, meme_selector])
+                copy_hint_btn.click(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
+                meme_selector.change(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
+                memes_initial = _list_memes()
+                meme_selector.value = memes_initial[0] if memes_initial else None
+
             # Control Center section
             with gr.Accordion("🎮 Control Center", open=True, elem_classes=["compact-section"]):
                 gr.Markdown("Generate and post tweets using your AI characters")
@@ -3407,8 +3448,6 @@ class TwitterBot:
                             tweet_btn = gr.Button("Post Single Tweet")
                             pull_app_topic_btn = gr.Button("Pull App Topic")
                         tweet_status = gr.Textbox(label="Tweet Status", interactive=False)
-                        scheduler_enabled = gr.Checkbox(label="Begin Automation", value=False)
-                        scheduler_status = gr.Markdown("Scheduler: NOT RUNNING")
                         with gr.Row():
                             target_x = gr.Checkbox(label="X", value=self.publish_targets.get("x", True), interactive=True)
                             target_tg = gr.Checkbox(label="Telegram", value=self.publish_targets.get("telegram", False), interactive=True)
@@ -3426,66 +3465,70 @@ class TwitterBot:
                             lines=10,
                             interactive=True
                         )
+                gr.Markdown("## 🚀 Begin Automation")
+                with gr.Row():
+                    scheduler_enabled = gr.Checkbox(label="Begin Automation", value=False, scale=2)
+                scheduler_status = gr.Markdown("Scheduler: NOT RUNNING")
 
-                    # ---------- Helpers ----------
-                    import random
+                # ---------- Helpers ----------
+                import random
 
-                    def get_story_dispatch(subject):
-                        if subject == "__surprise_all__":
-                            # Try subjects in random order; first successful story wins
-                            subjects = list(RSS_FEEDS.keys())  # e.g., ["crypto","ai","tech"]
-                            random.shuffle(subjects)
-                            for s in subjects:
-                                story = self.get_new_story(s)
-                                if story:
-                                    return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']} (source: {s})"
-                            return "No items found right now. Try again in a moment."
-                        # Normal per-subject path
-                        story = self.get_new_story(subject)
-                        if story:
-                            return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']}"
-                        return f"No items found for '{subject}' right now."
+                def get_story_dispatch(subject):
+                    if subject == "__surprise_all__":
+                        # Try subjects in random order; first successful story wins
+                        subjects = list(RSS_FEEDS.keys())  # e.g., ["crypto","ai","tech"]
+                        random.shuffle(subjects)
+                        for s in subjects:
+                            story = self.get_new_story(s)
+                            if story:
+                                return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']} (source: {s})"
+                        return "No items found right now. Try again in a moment."
+                    # Normal per-subject path
+                    story = self.get_new_story(subject)
+                    if story:
+                        return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']}"
+                    return f"No items found for '{subject}' right now."
 
-                    # IMPORTANT: Do NOT auto-fetch on selection.
-                    # Just update the bot's subject so the scheduler uses it later.
-                    def _update_subject(subject):
-                        self.subject = subject
-                        return gr.update()  # no UI change -> no network calls
+                # IMPORTANT: Do NOT auto-fetch on selection.
+                # Just update the bot's subject so the scheduler uses it later.
+                def _update_subject(subject):
+                    self.subject = subject
+                    return gr.update()  # no UI change -> no network calls
 
-                    def _set_publish_targets(x, tg, fb, ig, reddit):
-                        self.publish_targets = {
-                            "x": bool(x),
-                            "telegram": bool(tg),
-                            "facebook": bool(fb),
-                            "instagram": bool(ig),
-                            "reddit": bool(reddit),
-                        }
-                        return "Destination toggles updated."
+                def _set_publish_targets(x, tg, fb, ig, reddit):
+                    self.publish_targets = {
+                        "x": bool(x),
+                        "telegram": bool(tg),
+                        "facebook": bool(fb),
+                        "instagram": bool(ig),
+                        "reddit": bool(reddit),
+                    }
+                    return "Destination toggles updated."
 
-                    # Wire subject change ONLY to update the selected subject for the scheduler
-                    subject_dropdown.change(_update_subject, inputs=[subject_dropdown], outputs=[])
+                # Wire subject change ONLY to update the selected subject for the scheduler
+                subject_dropdown.change(_update_subject, inputs=[subject_dropdown], outputs=[])
 
-                    # Button wiring (manual fetch only when you click New Story)
-                    new_story_btn.click(get_story_dispatch, inputs=[subject_dropdown], outputs=[current_topic])
+                # Button wiring (manual fetch only when you click New Story)
+                new_story_btn.click(get_story_dispatch, inputs=[subject_dropdown], outputs=[current_topic])
 
-                    def load_app_topic():
-                        queue_file = os.path.join(os.path.dirname(__file__), "current_topic_from_app.txt")
-                        if not os.path.exists(queue_file):
-                            return "No queued topic from app found."
-                        try:
-                            with open(queue_file, "r", encoding="utf-8") as f:
-                                queued = f.read().strip()
-                            return queued or "Queued app topic file was empty."
-                        except Exception as e:
-                            return f"Failed to load queued app topic: {e}"
+                def load_app_topic():
+                    queue_file = os.path.join(os.path.dirname(__file__), "current_topic_from_app.txt")
+                    if not os.path.exists(queue_file):
+                        return "No queued topic from app found."
+                    try:
+                        with open(queue_file, "r", encoding="utf-8") as f:
+                            queued = f.read().strip()
+                        return queued or "Queued app topic file was empty."
+                    except Exception as e:
+                        return f"Failed to load queued app topic: {e}"
 
-                    pull_app_topic_btn.click(load_app_topic, outputs=[current_topic])
+                pull_app_topic_btn.click(load_app_topic, outputs=[current_topic])
 
-                    def send_tweet(character, topic):
-                        success = self.send_tweet(character, topic)
-                        return "Tweet sent successfully!" if success else "Failed to send tweet. Please try again."
+                def send_tweet(character, topic):
+                    success = self.send_tweet(character, topic)
+                    return "Tweet sent successfully!" if success else "Failed to send tweet. Please try again."
 
-                    tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
+                tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
 
                 def toggle_scheduler(enabled, character, subject):
                     if not character:
