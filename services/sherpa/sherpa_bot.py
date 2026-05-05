@@ -3689,6 +3689,47 @@ class TwitterBot:
             use_memes.change(update_memes, inputs=[use_memes], outputs=[use_memes])
             meme_frequency.change(update_meme_frequency, inputs=[meme_frequency], outputs=[meme_frequency])
 
+            with gr.Accordion("🖼️ Meme Drop Zone", open=True, elem_classes=["compact-section"]):
+                gr.Markdown("Drag and drop memes here to upload into `services/sherpa/memes`.")
+                meme_uploader = gr.Files(label="Pick files", file_count="multiple", file_types=["image"], type="filepath")
+                meme_upload_status = gr.Textbox(label="Upload Status", interactive=False)
+                meme_selector = gr.Dropdown(label="Select meme for a one-off post hint", choices=[], value=None, interactive=True)
+                meme_hint = gr.Textbox(label="Single-post hint", interactive=False)
+                copy_hint_btn = gr.Button("Copy single-post hint")
+
+                def _list_memes():
+                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
+                    os.makedirs(meme_dir, exist_ok=True)
+                    return sorted([f for f in os.listdir(meme_dir) if f.lower().endswith(tuple(SUPPORTED_MEME_FORMATS))])
+
+                def _upload_memes(filepaths):
+                    if not filepaths:
+                        memes = _list_memes()
+                        return "No files uploaded.", gr.update(choices=memes, value=(memes[0] if memes else None))
+                    meme_dir = os.path.join(os.path.dirname(__file__), "memes")
+                    os.makedirs(meme_dir, exist_ok=True)
+                    saved = []
+                    for src in filepaths:
+                        if not src:
+                            continue
+                        name = os.path.basename(src)
+                        shutil.copy2(src, os.path.join(meme_dir, name))
+                        saved.append(name)
+                    memes = _list_memes()
+                    msg = f"Uploaded {len(saved)} meme(s): {', '.join(saved)}" if saved else "No valid files uploaded."
+                    return msg, gr.update(choices=memes, value=(saved[0] if saved else (memes[0] if memes else None)))
+
+                def _build_single_post_hint(meme_name):
+                    if not meme_name:
+                        return "Select a meme first."
+                    return f"Use meme file: {meme_name}"
+
+                meme_uploader.change(_upload_memes, inputs=[meme_uploader], outputs=[meme_upload_status, meme_selector])
+                copy_hint_btn.click(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
+                meme_selector.change(_build_single_post_hint, inputs=[meme_selector], outputs=[meme_hint])
+                memes_initial = _list_memes()
+                meme_selector.value = memes_initial[0] if memes_initial else None
+
             return interface
 
     def start_bot(self):
