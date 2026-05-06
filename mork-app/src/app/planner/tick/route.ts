@@ -46,7 +46,7 @@ async function pickBestMint(allowlist: string[]): Promise<string | null> {
 }
 
 async function buildDecisionContext(): Promise<string> {
-  const [recentSignals, walletMem, latestReflection] = await Promise.all([
+  const [recentSignals, walletMem, latestReflection, topPolicies] = await Promise.all([
     prisma.memory.findMany({
       where: { OR: [{ source: "arb" }, { source: "arb-bot" }, { source: "trade" }] },
       orderBy: { createdAt: "desc" },
@@ -54,7 +54,26 @@ async function buildDecisionContext(): Promise<string> {
     }),
     prisma.memory.findFirst({ where: { source: "wallet" }, orderBy: { createdAt: "desc" } }),
     prisma.memory.findFirst({ where: { type: "reflection" }, orderBy: { createdAt: "desc" } }),
+    prisma.arbPolicy.findMany({
+      take: 5,
+      orderBy: { updatedAt: "desc" },
+      select: { mint: true, policy: true },
+    }),
   ]);
+
+
+  const policySignalLines = topPolicies
+    .map((row) => {
+      const policy = row.policy as Record<string, unknown>;
+      const stats = (policy?.stats as Record<string, unknown> | undefined) ?? {};
+      const score = Number(stats.score ?? 0);
+      const ok = Number(stats.ok ?? 0);
+      const fail = Number(stats.fail ?? 0);
+      const blacklistedUntil = Number(policy?.tempBlacklistUntilMs ?? 0);
+      const blacklisted = Number.isFinite(blacklistedUntil) && blacklistedUntil > Date.now();
+      return `- mint=${row.mint} score=${score.toFixed(4)} ok=${ok} fail=${fail} blacklisted=${blacklisted}`;
+    })
+    .filter(Boolean);
 
   const parts: string[] = [];
   if (walletMem) parts.push(`WALLET STATE:\n${String(walletMem.content).slice(0, 240)}`);
@@ -62,6 +81,9 @@ async function buildDecisionContext(): Promise<string> {
     parts.push(`RECENT ARB / TRADE SIGNALS:\n` + recentSignals.map((m) => `- ${String(m.content).slice(0, 180)}`).join("\n"));
   } else {
     parts.push("RECENT ARB SIGNALS: none logged yet");
+  }
+  if (policySignalLines.length) {
+    parts.push(`ARB POLICY SNAPSHOT:\n${policySignalLines.join("\n")}`);
   }
   if (latestReflection) parts.push(`LATEST REFLECTION:\n${String(latestReflection.content).slice(0, 240)}`);
   return parts.join("\n\n");
