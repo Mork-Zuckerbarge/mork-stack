@@ -105,22 +105,28 @@ async function riskAuthorize({ mint, symbol, spendUsd, netUsd, edgePct }, connec
   const now = Date.now();
 
   if (gov.consecutiveFails >= MAX_CONSECUTIVE_FAILS) {
-    return { ok: false, reason: `HALT: consecutiveFails=${gov.consecutiveFails} >= ${MAX_CONSECUTIVE_FAILS}` };
+    return { ok: false, reason: `HALT: consecutiveFails=${gov.consecutiveFails} >= limit=${MAX_CONSECUTIVE_FAILS}` };
   }
 
   if (MINT_COOLDOWN_MS > 0) {
     const cdUntil = gov.mintCooldownUntil.get(mint) || 0;
     if (now < cdUntil) {
-      return { ok: false, reason: `Cooldown active for mint (wait ${Math.ceil((cdUntil - now) / 1000)}s)` };
+      return {
+        ok: false,
+        reason: `Cooldown active for mint=${mint || "unknown"} (wait=${Math.ceil((cdUntil - now) / 1000)}s, cooldownMs=${MINT_COOLDOWN_MS})`,
+      };
     }
   }
 
   if (gov.tradesThisHour >= MAX_TRADES_PER_HOUR) {
-    return { ok: false, reason: `Rate limit: tradesThisHour=${gov.tradesThisHour} >= ${MAX_TRADES_PER_HOUR}` };
+    return { ok: false, reason: `Rate limit: tradesThisHour=${gov.tradesThisHour} >= maxTradesPerHour=${MAX_TRADES_PER_HOUR}` };
   }
 
   if (gov.pnlTodayUsd <= -Math.abs(DAILY_LOSS_LIMIT_USD)) {
-    return { ok: false, reason: `Daily loss limit hit: pnlTodayUsd=${gov.pnlTodayUsd.toFixed(4)} <= -${Math.abs(DAILY_LOSS_LIMIT_USD)}` };
+    return {
+      ok: false,
+      reason: `Daily loss limit hit: pnlTodayUsd=${gov.pnlTodayUsd.toFixed(4)} <= -dailyLossLimitUsd=${Math.abs(DAILY_LOSS_LIMIT_USD)}`,
+    };
   }
 
   if (DAILY_PROFIT_TARGET_USD > 0 && gov.pnlTodayUsd >= DAILY_PROFIT_TARGET_USD) {
@@ -129,7 +135,7 @@ async function riskAuthorize({ mint, symbol, spendUsd, netUsd, edgePct }, connec
 
   const sol = (await connection.getBalance(walletPubkey)) / 1e9;
   if (sol < MIN_SOL_FOR_FEES) {
-    return { ok: false, reason: `Not enough SOL for fees: SOL=${sol.toFixed(4)} < ${MIN_SOL_FOR_FEES}` };
+    return { ok: false, reason: `Not enough SOL for fees: sol=${sol.toFixed(4)} < minSolForFees=${MIN_SOL_FOR_FEES}` };
   }
 
   return { ok: true };
@@ -636,7 +642,12 @@ function filterTokens(tokens) {
 
 async function scanMarketA(m) {
   const maxTrade = getEffectiveMaxTradeUsdc();
-  if (!maxTrade || maxTrade <= 0) return null;
+  if (!maxTrade || maxTrade <= 0) {
+    console.log(
+      `⛔ Scan skipped (max trade gate): effectiveMaxTradeUsdc=${maxTrade} (MAX_TRADE_USDC=${process.env.MAX_TRADE_USDC || "unset"}, PAPER=${PAPER}, DEFAULT_PAPER_MAX_TRADE_USDC=${DEFAULT_PAPER_MAX_TRADE_USDC})`
+    );
+    return null;
+  }
 
   const TX_COST_USD = Number(process.env.TX_COST_USD || 0.01);
   const MIN_NET = Number(process.env.MIN_NET_PROFIT_USD || 0);
@@ -860,7 +871,10 @@ async function executeRouteA(m, scan) {
 
     const maxTrade = getEffectiveMaxTradeUsdc();
     if (!maxTrade || maxTrade <= 0) {
-      return { ok: false, reason: `MAX_TRADE_USDC is 0 or invalid (${process.env.MAX_TRADE_USDC})` };
+      return {
+        ok: false,
+        reason: `Max trade gate blocked execution: effectiveMaxTradeUsdc=${maxTrade} (MAX_TRADE_USDC=${process.env.MAX_TRADE_USDC || "unset"}, PAPER=${PAPER}, DEFAULT_PAPER_MAX_TRADE_USDC=${DEFAULT_PAPER_MAX_TRADE_USDC})`,
+      };
     }
 
     spendUsd = Math.min(usdcBal, maxTrade);
@@ -878,7 +892,7 @@ async function executeRouteA(m, scan) {
       if (scanNet < need) {
         return {
           ok: false,
-          reason: `Pre-exec gate: scan net too small (scan≈$${scanNet.toFixed(4)}, need≥$${need.toFixed(4)})`,
+          reason: `Pre-exec profitability gate: scanNetUsd≈$${scanNet.toFixed(4)} < requiredUsd≈$${need.toFixed(4)} (minNetUsd=${MIN_NET.toFixed(4)} + executionBufferUsd=${Number(EXECUTION_BUFFER_USD || 0).toFixed(4)})`,
         };
       }
     }
@@ -904,7 +918,7 @@ async function executeRouteA(m, scan) {
     if (net < MIN_NET) {
       return {
         ok: false,
-        reason: `Net profit too small after fresh quote (net≈$${net.toFixed(4)}, min=$${MIN_NET.toFixed(4)})`,
+        reason: `Execution profitability gate: freshNetUsd≈$${net.toFixed(4)} < minNetUsd=$${MIN_NET.toFixed(4)} (txCostUsd=${TX_COST_USD.toFixed(4)}, edgePct=${edgePct.toFixed(4)})`,
       };
     }
 
