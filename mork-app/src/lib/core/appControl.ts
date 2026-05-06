@@ -239,6 +239,11 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function sanitizeExecutionAllowlist(values: Array<string | null | undefined>): string[] {
+  const normalized = normalizeMintList(values, STARTUP_ALLOWLIST_LIMIT);
+  return normalized.length > 0 ? normalized : [BBQ_MINT];
+}
+
 function applyPersistedState(raw: unknown) {
   if (!isObjectRecord(raw)) return;
 
@@ -317,7 +322,7 @@ function applyPersistedState(raw: unknown) {
         Array.isArray(executionAuthority.mintAllowlist) &&
         executionAuthority.mintAllowlist.every((value) => typeof value === "string")
       ) {
-        state.controls.executionAuthority.mintAllowlist = executionAuthority.mintAllowlist;
+        state.controls.executionAuthority.mintAllowlist = sanitizeExecutionAllowlist(executionAuthority.mintAllowlist);
       }
       if (typeof executionAuthority.cooldownMinutes === "number") {
         state.controls.executionAuthority.cooldownMinutes = executionAuthority.cooldownMinutes;
@@ -444,7 +449,7 @@ async function ensureStateLoaded() {
     const startupMints = readWhitelistMints(STARTUP_ALLOWLIST_LIMIT);
     const fallbackMints = startupMints.length > 0 ? startupMints : await fetchFallbackMints(STARTUP_ALLOWLIST_LIMIT);
     const finalMints = fallbackMints.length > 0 ? fallbackMints : [BBQ_MINT];
-    state.controls.executionAuthority.mintAllowlist = finalMints;
+    state.controls.executionAuthority.mintAllowlist = sanitizeExecutionAllowlist(finalMints);
     await persistState();
   }
 
@@ -622,7 +627,7 @@ export async function setExecutionAuthority(input: {
   state.controls.executionAuthority = {
     mode: input.mode,
     maxTradeUsd: input.maxTradeUsd,
-    mintAllowlist: input.mintAllowlist,
+    mintAllowlist: sanitizeExecutionAllowlist(input.mintAllowlist),
     cooldownMinutes: input.cooldownMinutes,
   };
   await persistState();
