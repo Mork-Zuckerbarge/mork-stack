@@ -97,10 +97,9 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<{
     `Decision rules:\n` +
     `- If there are positive arb signals, healthy wallet, and no recent loss streak: respond TRADE $<amount>\n` +
     `- If signals are absent, wallet is low, or recent trades failed: respond HOLD\n` +
-    `- Amount must be between $1 and $${maxTradeUsd}.\n\n` +
-    `Respond with exactly ONE line:\n` +
-    `TRADE $5\n` +
-    `or\n` +
+    `- Amount can be any positive USD value up to $${maxTradeUsd}.\n\n` +
+    `Respond with exactly ONE line in one of these formats:\n` +
+    `TRADE $<amount>\n` +
     `HOLD`;
 
   let raw = "";
@@ -110,7 +109,7 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<{
   const firstLine = (raw.trim().split("\n")[0] ?? "").trim();
   const tradeMatch = firstLine.match(/^TRADE\s+\$?(\d+(?:\.\d+)?)/i);
   if (tradeMatch) {
-    const usd = Math.min(Math.max(Number(tradeMatch[1]), 0.5), maxTradeUsd);
+    const usd = Math.min(Math.max(Number(tradeMatch[1]), 0), maxTradeUsd);
     if (Number.isFinite(usd) && usd > 0) return { go: true, usd, reason: firstLine };
   }
   return { go: false, usd: 0, reason: firstLine || "HOLD" };
