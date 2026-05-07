@@ -8,6 +8,7 @@ const QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote"; // works for you (200
 const TOKENS_CSV_URL =
   "https://raw.githubusercontent.com/igneous-labs/jup-token-list/main/validated-tokens.csv";
 const TOKENS_CSV_CACHE = "tokens_validated.csv";
+const RESEARCH_FILE = process.env.WHITELIST_RESEARCH_FILE || "whitelist.research.json";
 
 const USDC = {
   mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -159,15 +160,61 @@ async function loadValidatedTokens() {
   return tokens;
 }
 
+
+function loadResearchCandidates(file) {
+  const absolutePath = require("path").isAbsolute(file) ? file : require("path").join(__dirname, file);
+  if (!fs.existsSync(absolutePath)) return [];
+
+  try {
+    const raw = fs.readFileSync(absolutePath, "utf8");
+    const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === "object" && Array.isArray(parsed.candidates)
+        ? parsed.candidates
+        : [];
+
+    return items
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const symbol = String(item.symbol || "").trim();
+        const mint = String(item.mint || item.address || "").trim();
+        const decimals = Number(item.decimals);
+        if (!symbol || !mint || !Number.isFinite(decimals)) return null;
+        if (mint === USDC.mint) return null;
+        return { name: String(item.name || "").trim(), symbol, mint, decimals };
+      })
+      .filter(Boolean);
+  } catch (err) {
+    console.warn(`Unable to parse research candidates from ${absolutePath}: ${String(err?.message || err)}`);
+    return [];
+  }
+}
+
+function mergeUniqueTokens(primary, secondary) {
+  const out = [];
+  const seen = new Set();
+  for (const list of [primary, secondary]) {
+    for (const t of list) {
+      if (!t || !t.mint || seen.has(t.mint)) continue;
+      seen.add(t.mint);
+      out.push(t);
+    }
+  }
+  return out;
+}
 async function main() {
-  const TARGET = 500;
+  const TARGET = Number(process.env.WHITELIST_TARGET || 1000);
   const OUTFILE = "whitelist.json";
 
   await sanityCheck();
 
   console.log("Loading validated token list...");
   const tokens = await loadValidatedTokens();
+  const researchTokens = loadResearchCandidates(RESEARCH_FILE);
+  const prioritizedTokens = mergeUniqueTokens(researchTokens, tokens);
   console.log(`Validated tokens loaded: ${tokens.length}`);
+  console.log(`Research candidates loaded: ${researchTokens.length}`);
 
   console.log(`Building whitelist (target=${TARGET}) using Jupiter quotes...`);
 
@@ -175,13 +222,13 @@ async function main() {
   const bad = new Set();
   let attempts = 0;
 
-  for (const t of tokens) {
+  for (const t of prioritizedTokens) {
     if (whitelist.length >= TARGET) break;
     if (bad.has(t.mint)) continue;
 
     attempts++;
     if (attempts % 50 === 0) {
-      console.log(`attempted ${attempts}/${tokens.length} | whitelisted ${whitelist.length}/${TARGET}`);
+      console.log(`attempted ${attempts}/${prioritizedTokens.length} | whitelisted ${whitelist.length}/${TARGET}`);
     }
 
     try {

@@ -1,0 +1,9 @@
+{
+  "updatedAt": "2026-05-07",
+  "notes": "Curated high-liquidity candidates discovered by internal agent research. build_whitelist.js prioritizes these first and then expands to WHITELIST_TARGET.",
+  "candidates": [
+    { "symbol": "SOL", "name": "Solana", "mint": "So11111111111111111111111111111111111111112", "decimals": 9 },
+    { "symbol": "JUP", "name": "Jupiter", "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", "decimals": 6 },
+    { "symbol": "WIF", "name": "dogwifhat", "mint": "EKpQGSJtjMFqKZJ6Jk5k7fWL7S3m7zJmM2A6w6hR2CwL", "decimals": 6 }
+  ]
+}
