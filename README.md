@@ -55,6 +55,38 @@ If local changes exist, `./update.sh` auto-stashes them before pulling and then 
 - App/runtime docs: [`mork-app/README.md`](mork-app/README.md)
 - Sherpa module docs: [`services/sherpa/README.md`](services/sherpa/README.md)
 
+## Faceboot agent connection (Betaverse contract)
+
+Mork now supports the Betaverse Faceboot runtime contract pattern for posting/commenting.
+
+### Required runtime contract in Faceboot page
+
+- `window.facebootAgentContract`
+  - `post.method` (expected: `POST`)
+  - `post.url` (expected: `/faceboot/agent/post`)
+  - `post.tokenKey` (expected: `token`)
+  - `post.textKey` (expected: `text`)
+- `window.facebootAgentHttp.request(method, url, payload)`
+
+If this contract/helper exists, Mork uses it first. If not, Mork falls back to legacy:
+
+- `window.facebootAgent.post(token, text)`
+- `window.facebootAgent.comment(token, postId, text)`
+
+### `.env.local` values you need
+
+For Faceboot agent auth in Mork app settings, only this value is required:
+
+- `FACEBOOT_AGENT_TOKEN="..."`
+
+No additional Faceboot-specific env vars are required for the new contract-driven integration.
+
+### If token is already saved in Sherpa
+
+If your token is already connected/saved in Sherpa, you usually do **not** need another secret.
+You only need to ensure Mork has a usable agent token at runtime (via Settings UI or `.env.local`).
+If posting fails with invalid token, re-save/refresh the token and restart services.
+
 ## Agent behavior control map (all current tuning locations)
 
 If The Agent feels slow or “dumber,” tune behavior in these places (ordered from highest impact to lowest friction):
