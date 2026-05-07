@@ -14,7 +14,7 @@ type LogScope = "arb" | "core" | "sherpa" | "telegram" | "all";
 export default function ArbLogFeed() {
   const [logs, setLogs] = useState<ArbLog[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [pollMs, setPollMs] = useState(15000);
+  const pollMs = 60000;
   const [scope, setScope] = useState<LogScope>("arb");
 
   const loadLogs = useCallback(async () => {
@@ -51,26 +51,7 @@ export default function ArbLogFeed() {
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-semibold">Service Logs Feed</h3>
         <div className="flex items-center gap-2">
-          <select
-            value={scope}
-            onChange={(e) => setScope(e.target.value as LogScope)}
-            className="rounded-lg border border-white/20 bg-black/35 px-2 py-1 text-xs"
-          >
-            <option value="arb">Arb + Sol MEV</option>
-            <option value="core">Core</option>
-            <option value="sherpa">Sherpa</option>
-            <option value="telegram">Telegram bridge</option>
-            <option value="all">All services</option>
-          </select>
-          <select
-            value={pollMs}
-            onChange={(e) => setPollMs(Number(e.target.value))}
-            className="rounded-lg border border-white/20 bg-black/35 px-2 py-1 text-xs"
-          >
-            <option value={15000}>15s poll</option>
-            <option value={30000}>30s poll</option>
-            <option value={60000}>60s poll</option>
-          </select>
+          <span className="text-xs text-white/70">Refresh: 60s</span>
           <button className="rounded-lg border border-white/20 px-2 py-1 text-xs" onClick={loadLogs}>
             Refresh
           </button>
