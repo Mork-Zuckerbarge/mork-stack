@@ -13,8 +13,30 @@ type FacebootAgentBridge = {
   comment?: (token: string, postId: string, text: string) => Promise<unknown>;
 };
 
+type FacebootAgentContract = {
+  post?: {
+    method?: string;
+    url?: string;
+    tokenKey?: string;
+    textKey?: string;
+  };
+  comment?: {
+    method?: string;
+    url?: string;
+    tokenKey?: string;
+    postIdKey?: string;
+    textKey?: string;
+  };
+};
+
+type FacebootAgentHttp = {
+  request?: (method: string, url: string, payload: Record<string, unknown>) => Promise<unknown>;
+};
+
 type FacebootWindow = Window & {
   facebootAgent?: FacebootAgentBridge;
+  facebootAgentContract?: FacebootAgentContract;
+  facebootAgentHttp?: FacebootAgentHttp;
 };
 
 function getAgentBridge(): FacebootAgentBridge {
@@ -28,6 +50,40 @@ function getAgentBridge(): FacebootAgentBridge {
   }
 
   return bridge;
+}
+
+function getContractConfig(
+  kind: "post" | "comment",
+): { method: string; url: string; tokenKey: string; textKey: string; postIdKey?: string } | null {
+  if (typeof window === "undefined") return null;
+  const contract = (window as FacebootWindow).facebootAgentContract;
+  if (!contract) return null;
+
+  const entry = contract[kind];
+  if (!entry?.method || !entry.url) return null;
+
+  const method = entry.method.toUpperCase();
+  const tokenKey = entry.tokenKey || "token";
+  const textKey = entry.textKey || "text";
+
+  if (kind === "comment") {
+    return { method, url: entry.url, tokenKey, textKey, postIdKey: entry.postIdKey || "postId" };
+  }
+
+  return { method, url: entry.url, tokenKey, textKey };
+}
+
+async function requestViaAgentHttp(method: string, url: string, payload: Record<string, unknown>): Promise<unknown> {
+  if (typeof window === "undefined") {
+    throw new FacebootAgentError("Faceboot agent HTTP APIs are only available in the browser.", "NOT_IN_BROWSER");
+  }
+
+  const http = (window as FacebootWindow).facebootAgentHttp;
+  if (!http?.request) {
+    throw new FacebootAgentError("window.facebootAgentHttp.request is not available.", "MISSING_AGENT_HTTP");
+  }
+
+  return http.request(method, url, payload);
 }
 
 export function getSavedFacebootToken(): string | null {
@@ -63,17 +119,25 @@ export async function loginFacebootAgent(email: string, password: string): Promi
 }
 
 export async function postToFaceboot(text: string, token?: string): Promise<unknown> {
-  const bridge = getAgentBridge();
-  if (!bridge.post) {
-    throw new FacebootAgentError("Faceboot agent post API is unavailable.", "POST_NOT_SUPPORTED");
-  }
-
   const resolvedToken = token ?? getSavedFacebootToken();
   if (!resolvedToken) {
     throw new FacebootAgentError("No active Faceboot account logged in.", "NO_TOKEN");
   }
 
   try {
+    const contract = getContractConfig("post");
+    if (contract) {
+      return await requestViaAgentHttp(contract.method, contract.url, {
+        [contract.tokenKey]: resolvedToken,
+        [contract.textKey]: text,
+      });
+    }
+
+    const bridge = getAgentBridge();
+    if (!bridge.post) {
+      throw new FacebootAgentError("Faceboot agent post API is unavailable.", "POST_NOT_SUPPORTED");
+    }
+
     return await bridge.post(resolvedToken, text);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Faceboot post failed.";
@@ -107,20 +171,29 @@ export function postToFacebootViaMessage(text: string, token?: string) {
 }
 
 export async function commentOnFaceboot(postId: string, text: string, token?: string): Promise<unknown> {
-  const bridge = getAgentBridge();
-  if (!bridge.comment) {
-    throw new FacebootAgentError(
-      "Faceboot agent comment API is unavailable. Add window.facebootAgent.comment(token, postId, text) in Faceboot.",
-      "COMMENT_NOT_SUPPORTED",
-    );
-  }
-
   const resolvedToken = token ?? getSavedFacebootToken();
   if (!resolvedToken) {
     throw new FacebootAgentError("No active Faceboot account logged in.", "NO_TOKEN");
   }
 
   try {
+    const contract = getContractConfig("comment");
+    if (contract && contract.postIdKey) {
+      return await requestViaAgentHttp(contract.method, contract.url, {
+        [contract.tokenKey]: resolvedToken,
+        [contract.postIdKey]: postId,
+        [contract.textKey]: text,
+      });
+    }
+
+    const bridge = getAgentBridge();
+    if (!bridge.comment) {
+      throw new FacebootAgentError(
+        "Faceboot agent comment API is unavailable. Add window.facebootAgent.comment(token, postId, text) in Faceboot.",
+        "COMMENT_NOT_SUPPORTED",
+      );
+    }
+
     return await bridge.comment(resolvedToken, postId, text);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Faceboot comment failed.";
