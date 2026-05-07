@@ -36,6 +36,8 @@ export class ArbScanner {
   private jitoClient: JitoClient;
   private scanning = false;
   private scanIntervalMs = 500; // scan every 500ms
+  private dynamicUniverseMints: string[] = [];
+  private dynamicUniverseLastFetchedAt = 0;
 
   constructor(
     config: AgentConfig,
@@ -54,7 +56,10 @@ export class ArbScanner {
   start(): void {
     if (this.scanning) return;
     this.scanning = true;
-    logger.info('ArbScanner started', { tokens: this.config.arbTokenMints.length });
+    logger.info('ArbScanner started', {
+      configuredTokens: this.config.arbTokenMints.length,
+      openUniverse: this.config.arbTokenMints.includes('ALL') || this.config.arbTokenMints.includes('*'),
+    });
     this.scanLoop();
   }
 
@@ -75,11 +80,34 @@ export class ArbScanner {
   }
 
   private async scanAllTokens(): Promise<void> {
-    const scans = this.config.arbTokenMints
+    const mintsToScan = await this.getScanMints();
+    const scans = mintsToScan
       .filter((mint: string) => mint !== SOL_MINT)
       .map((mint: string) => this.scanCircularRoute(mint));
 
     await Promise.allSettled(scans);
+  }
+
+  private async getScanMints(): Promise<string[]> {
+    const openUniverse = this.config.arbTokenMints.includes('ALL') || this.config.arbTokenMints.includes('*');
+    if (!openUniverse) {
+      return this.config.arbTokenMints;
+    }
+
+    const now = Date.now();
+    const universeCacheMs = 5 * 60_000;
+    if (this.dynamicUniverseMints.length > 0 && (now - this.dynamicUniverseLastFetchedAt) < universeCacheMs) {
+      return this.dynamicUniverseMints;
+    }
+
+    const discovered = await this.fetchTradableMints();
+    if (discovered.length > 0) {
+      this.dynamicUniverseMints = discovered;
+      this.dynamicUniverseLastFetchedAt = now;
+      logger.debug('Refreshed open token universe', { tradableCount: discovered.length });
+    }
+
+    return this.dynamicUniverseMints;
   }
 
   /**
@@ -204,6 +232,20 @@ export class ArbScanner {
   }
 
   // ── Jupiter API calls ────────────────────────────────────────────────────
+
+
+  private async fetchTradableMints(): Promise<string[]> {
+    try {
+      const res = await axios.get('https://token.jup.ag/all', { timeout: 5000 });
+      const tokens = Array.isArray(res.data) ? res.data : [];
+      return tokens
+        .map((t: { address?: string }) => t.address)
+        .filter((mint: string | undefined): mint is string => Boolean(mint));
+    } catch (err) {
+      logger.warn('Failed to fetch Jupiter token universe', { err });
+      return this.dynamicUniverseMints;
+    }
+  }
 
   private async getQuote(
     inputMint: string,
