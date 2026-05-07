@@ -921,9 +921,9 @@ function ExecutionControls({
 }) {
   const [mode, setMode] = useState<ExecutionMode>(execution?.mode ?? "user_only");
   const [maxTradeUsd, setMaxTradeUsd] = useState(String(execution?.maxTradeUsd ?? 50));
-  const [cooldownMinutes, setCooldownMinutes] = useState(String(execution?.cooldownMinutes ?? 15));
-  const [allowlist, setAllowlist] = useState(execution?.mintAllowlist.join(",") ?? "");
+  const [allowlist, setAllowlist] = useState(execution?.mintAllowlist.join(",") ?? "ALL");
   const [allowlistLoadStatus, setAllowlistLoadStatus] = useState("");
+  const [allowlistPreset, setAllowlistPreset] = useState<"top1000" | "all">("all");
   const [minImbalancePct, setMinImbalancePct] = useState(String(strategyEngines?.poolImbalance.minImbalancePct ?? 5));
   const [poolsWatched] = useState<PoolWatchMode>(strategyEngines?.poolImbalance.poolsWatched ?? "all_available");
   const [jitoBundleEnabled, setJitoBundleEnabled] = useState(strategyEngines?.poolImbalance.useJitoBundle ?? true);
@@ -940,7 +940,7 @@ function ExecutionControls({
   const loadTopAllowlist = useCallback(async () => {
     setAllowlistLoadStatus("");
     try {
-      const res = await fetch("/api/arb/allowlist?limit=500", { cache: "no-store" });
+      const res = await fetch(`/api/arb/allowlist?mode=${allowlistPreset}`, { cache: "no-store" });
       const data = (await res.json()) as { ok?: boolean; count?: number; mints?: string[] };
       if (!res.ok || !data.ok || !Array.isArray(data.mints)) {
         setAllowlistLoadStatus("Unable to load whitelist.json");
@@ -948,19 +948,21 @@ function ExecutionControls({
       }
 
       setAllowlist(data.mints.join(","));
-      setAllowlistLoadStatus(`Loaded top ${data.count ?? data.mints.length} mints from whitelist.json`);
+      if (allowlistPreset === "all") {
+        setAllowlistLoadStatus("Loaded ALL token mode");
+      } else {
+        setAllowlistLoadStatus(`Loaded top ${data.count ?? data.mints.length} mints from whitelist.json`);
+      }
     } catch {
       setAllowlistLoadStatus("Unable to load whitelist.json");
     }
-  }, []);
+  }, [allowlistPreset]);
 
   useEffect(() => {
     if (!execution) return;
     if (execution.mintAllowlist.length > 0) return;
-    const id = window.setTimeout(() => {
-      void loadTopAllowlist();
-    }, 0);
-    return () => window.clearTimeout(id);
+    setAllowlist("ALL");
+    setAllowlistLoadStatus("Defaulted to ALL tokens");
   }, [execution, loadTopAllowlist]);
 
   return (
@@ -987,17 +989,25 @@ function ExecutionControls({
           <input value={maxTradeUsd} onChange={(e) => setMaxTradeUsd(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <label className="text-white/70">Mint allowlist (comma separated)</label>
           <input value={allowlist} onChange={(e) => setAllowlist(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <label className="text-white/70">Allowlist preset</label>
+          <select
+            value={allowlistPreset}
+            onChange={(e) => setAllowlistPreset(e.target.value as "top1000" | "all")}
+            disabled={arbPaused}
+            className="rounded-lg border border-white/10 bg-black/40 px-2 py-1"
+          >
+            <option value="all">All</option>
+            <option value="top1000">Top 1000</option>
+          </select>
           <button
             type="button"
             onClick={loadTopAllowlist}
             disabled={arbPaused}
             className="rounded-lg border border-cyan-300/30 bg-cyan-200/10 px-2 py-1 text-left"
           >
-            Load top-500 allowlist from automation/whitelist.json
+            Load selected allowlist preset
           </button>
           {allowlistLoadStatus ? <p className="text-[11px] text-white/60">{allowlistLoadStatus}</p> : null}
-          <label className="text-white/70">Cooldown (minutes)</label>
-          <input value={cooldownMinutes} onChange={(e) => setCooldownMinutes(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <div className="mt-1 rounded-xl border border-white/15 bg-black/30 p-2 text-white/80">
             <div className="mb-2 font-medium text-white/90">Strategy engines</div>
             <div className="space-y-2">
@@ -1095,7 +1105,7 @@ function ExecutionControls({
               onSave({
                 mode,
                 maxTradeUsd: Number(maxTradeUsd) || 0,
-                cooldownMinutes: Number(cooldownMinutes) || 0,
+                cooldownMinutes: execution.cooldownMinutes,
                 mintAllowlist: allowlist.split(",").map((item) => item.trim()).filter(Boolean),
               })
             }

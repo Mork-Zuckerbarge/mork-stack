@@ -364,12 +364,41 @@ async function resolveSellAllQuantity(inputMint: string): Promise<number> {
   return raw;
 }
 
-async function enforceTradeAuthority() {
+async function enforceTradeAuthority(usdNotional: number) {
   const control = await getAppControlState();
   const authority = control.controls.executionAuthority;
 
   if (authority.mode === "emergency_stop") {
     return { ok: false, status: 403, error: "Trading disabled: emergency_stop mode is active." } as const;
+  }
+
+  if (!Number.isFinite(usdNotional) || usdNotional <= 0) {
+    return { ok: false, status: 400, error: "Trade blocked: invalid trade notional for risk checks." } as const;
+  }
+
+  if (usdNotional > authority.maxTradeUsd) {
+    return {
+      ok: false,
+      status: 403,
+      error: `Trade blocked: $${usdNotional.toFixed(2)} exceeds maxTradeUsd $${authority.maxTradeUsd.toFixed(2)}.`,
+    } as const;
+  }
+
+  const lastTradeFact = await prisma.memoryFact.findUnique({ where: { key: LAST_TRADE_FACT_KEY } });
+  if (authority.cooldownMinutes > 0 && lastTradeFact?.value) {
+    const lastTs = Date.parse(lastTradeFact.value);
+    if (Number.isFinite(lastTs)) {
+      const elapsedMs = Date.now() - lastTs;
+      const requiredMs = authority.cooldownMinutes * 60_000;
+      if (elapsedMs < requiredMs) {
+        const waitSec = Math.ceil((requiredMs - elapsedMs) / 1000);
+        return {
+          ok: false,
+          status: 429,
+          error: `Trade blocked: cooldown active. Retry in ${waitSec}s.`,
+        } as const;
+      }
+    }
   }
 
   return { ok: true, status: 200 } as const;

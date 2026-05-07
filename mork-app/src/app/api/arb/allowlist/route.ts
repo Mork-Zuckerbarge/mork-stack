@@ -58,7 +58,7 @@ function normalizeMintList(values: Array<string | null | undefined>, limit: numb
   return out;
 }
 
-function readWhitelistMints(limit = 500): string[] {
+function readWhitelistMints(limit = 1000): string[] {
   const whitelistPath = path.resolve(process.cwd(), "../services/arb/whitelist.json");
   if (!fs.existsSync(whitelistPath)) return [];
 
@@ -95,7 +95,7 @@ function readWhitelistMints(limit = 500): string[] {
   }
 }
 
-async function fetchTopTokenMints(limit = 500): Promise<string[]> {
+async function fetchTopTokenMints(limit = 1000): Promise<string[]> {
   try {
     const response = await fetch(FALLBACK_TOKEN_CSV, {
       headers: { accept: "text/plain" },
@@ -120,7 +120,13 @@ async function fetchTopTokenMints(limit = 500): Promise<string[]> {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? 500), 1), 1000);
+  const mode = (searchParams.get("mode") ?? "top1000").toLowerCase();
+
+  if (mode === "all") {
+    return NextResponse.json({ ok: true, count: 1, mints: ["ALL"] });
+  }
+
+  const limit = 1000;
   const whitelistMints = readWhitelistMints(limit);
   const mints = whitelistMints.length > 0 ? whitelistMints : await fetchTopTokenMints(limit);
 
