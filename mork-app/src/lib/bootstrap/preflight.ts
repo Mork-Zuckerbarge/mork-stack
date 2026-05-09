@@ -5,7 +5,15 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 
 export type PreflightCheck = {
-  key: "ollama_reachable" | "model_available" | "wallet_configured" | "sherpa_bootstrap";
+  key:
+    | "ollama_reachable"
+    | "model_available"
+    | "wallet_configured"
+    | "sherpa_bootstrap"
+    | "mork_core_health"
+    | "mork_core_chat_v2"
+    | "mork_core_compose"
+    | "mork_core_prisma_query";
   ok: boolean;
   message: string;
   action?: string;
@@ -50,6 +58,59 @@ async function hasSherpaVenv() {
   } catch {
     return false;
   }
+}
+
+async function probeCore(baseUrl: string) {
+  const core = baseUrl.replace(/\/+$/, "");
+  const { signal, clear } = withTimeout(5000);
+  try {
+    const healthRes = await fetch(`${core}/health`, { signal, cache: "no-store" });
+    const healthOk = healthRes.ok;
+
+    const chatRes = await fetch(`${core}/chat/respond_v2`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        channel: "system",
+        handle: "preflight",
+        message: "Reply with one short sentence.",
+        maxChars: 120,
+      }),
+      signal,
+      cache: "no-store",
+    });
+    const chatOk = chatRes.ok;
+
+    const composeRes = await fetch(`${core}/x/compose`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "observation", maxChars: 140 }),
+      signal,
+      cache: "no-store",
+    });
+    const composeOk = composeRes.ok;
+
+    const prismaRes = await fetch(`${core}/memory/query?limit=1`, { signal, cache: "no-store" });
+    const prismaOk = prismaRes.ok;
+
+    return { healthOk, chatOk, composeOk, prismaOk };
+  } finally {
+    clear();
+  }
+}
+
+function getCoreCandidates(configuredUrl: string): string[] {
+  const cleaned = (configuredUrl || "").trim().replace(/\/+$/, "");
+  const candidates = [
+    cleaned,
+    process.env.MORK_CORE_SERVICE_FALLBACK_URL || "http://mork-core:8790",
+    "http://127.0.0.1:8790",
+    "http://localhost:8790",
+    "http://host.docker.internal:8790",
+  ]
+    .map((v) => (v || "").trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+  return [...new Set(candidates)];
 }
 
 export async function getPreflightStatus(): Promise<PreflightStatus> {
@@ -134,6 +195,70 @@ export async function getPreflightStatus(): Promise<PreflightStatus> {
       ? undefined
       : "Install python3-venv, then re-run ./setup.sh from repo root. Sherpa powers X posting/replies and uses RSS + memories/reflections. If you do not need Sherpa locally, set MORK_SETUP_SKIP_SHERPA=1.",
   });
+
+  const configuredCoreUrl = process.env.MORK_CORE_URL || "http://127.0.0.1:8790";
+  const coreCandidates = getCoreCandidates(configuredCoreUrl);
+  let coreUrl = configuredCoreUrl;
+  let core: Awaited<ReturnType<typeof probeCore>> | null = null;
+  let lastError = "fetch failed";
+  for (const candidate of coreCandidates) {
+    try {
+      const next = await probeCore(candidate);
+      coreUrl = candidate;
+      core = next;
+      break;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "fetch failed";
+    }
+  }
+  if (core) {
+    checks.push({
+      key: "mork_core_health",
+      ok: core.healthOk,
+      message: core.healthOk ? `Mork Core health reachable at ${coreUrl}` : `Mork Core health failed at ${coreUrl}`,
+      action: core.healthOk ? undefined : "Start mork-core and verify MORK_CORE_URL in mork-app/.env.local.",
+    });
+    checks.push({
+      key: "mork_core_chat_v2",
+      ok: core.chatOk,
+      message: core.chatOk ? "Mork Core /chat/respond_v2 responding" : "Mork Core /chat/respond_v2 failed",
+      action: core.chatOk ? undefined : "Verify Ollama/model availability in mork-core and check logs for chat endpoint errors.",
+    });
+    checks.push({
+      key: "mork_core_compose",
+      ok: core.composeOk,
+      message: core.composeOk ? "Mork Core /x/compose responding" : "Mork Core /x/compose failed",
+      action: core.composeOk ? undefined : "Check mork-core compose path and model settings.",
+    });
+    checks.push({
+      key: "mork_core_prisma_query",
+      ok: core.prismaOk,
+      message: core.prismaOk ? "Mork Core Prisma memory query responding" : "Mork Core Prisma memory query failed",
+      action: core.prismaOk ? undefined : "Check mork-core DATABASE_URL / Prisma migration status.",
+    });
+  } else {
+    checks.push({
+      key: "mork_core_health",
+      ok: false,
+      message: `Mork Core checks unreachable. Tried: ${coreCandidates.join(", ")} (${lastError})`,
+      action: "Start mork-core and verify networking/DNS (127.0.0.1, localhost, mork-core, or host.docker.internal).",
+    });
+    checks.push({
+      key: "mork_core_chat_v2",
+      ok: false,
+      message: "Mork Core /chat/respond_v2 check skipped (core unreachable)",
+    });
+    checks.push({
+      key: "mork_core_compose",
+      ok: false,
+      message: "Mork Core /x/compose check skipped (core unreachable)",
+    });
+    checks.push({
+      key: "mork_core_prisma_query",
+      ok: false,
+      message: "Mork Core Prisma query check skipped (core unreachable)",
+    });
+  }
 
   return {
     ok: checks.every((check) => check.ok),

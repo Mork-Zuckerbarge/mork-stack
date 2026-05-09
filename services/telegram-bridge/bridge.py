@@ -183,9 +183,10 @@ def build_candidate_targets() -> list[tuple[str, str]]:
         if target not in targets:
             targets.append(target)
 
-    # Prefer mork-core for /chat/respond.
+    # Prefer mork-core chat endpoints first (v2 has richer memory/reflection handling).
     if normalized:
         add_target(CORE_URL, normalized)
+    add_target(CORE_URL, "/chat/respond_v2")
     add_target(CORE_URL, "/chat/respond")
 
     # Fallback to app API surface if core is unavailable.
