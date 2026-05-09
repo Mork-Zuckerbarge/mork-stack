@@ -958,12 +958,8 @@ function ExecutionControls({
     }
   }, [allowlistPreset]);
 
-  useEffect(() => {
-    if (!execution) return;
-    if (execution.mintAllowlist.length > 0) return;
-    setAllowlist("ALL");
-    setAllowlistLoadStatus("Defaulted to ALL tokens");
-  }, [execution, loadTopAllowlist]);
+  const allowlistInputValue =
+    allowlist || (execution && execution.mintAllowlist.length === 0 ? "ALL" : allowlist);
 
   return (
     <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
@@ -988,7 +984,7 @@ function ExecutionControls({
           <label className="text-white/70">Max trade (USD)</label>
           <input value={maxTradeUsd} onChange={(e) => setMaxTradeUsd(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <label className="text-white/70">Mint allowlist (comma separated)</label>
-          <input value={allowlist} onChange={(e) => setAllowlist(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
+          <input value={allowlistInputValue} onChange={(e) => setAllowlist(e.target.value)} disabled={arbPaused} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1" />
           <label className="text-white/70">Allowlist preset</label>
           <select
             value={allowlistPreset}
