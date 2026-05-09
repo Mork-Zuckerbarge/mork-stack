@@ -99,6 +99,20 @@ async function probeCore(baseUrl: string) {
   }
 }
 
+function getCoreCandidates(configuredUrl: string): string[] {
+  const cleaned = (configuredUrl || "").trim().replace(/\/+$/, "");
+  const candidates = [
+    cleaned,
+    process.env.MORK_CORE_SERVICE_FALLBACK_URL || "http://mork-core:8790",
+    "http://127.0.0.1:8790",
+    "http://localhost:8790",
+    "http://host.docker.internal:8790",
+  ]
+    .map((v) => (v || "").trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+  return [...new Set(candidates)];
+}
+
 export async function getPreflightStatus(): Promise<PreflightStatus> {
   const checks: PreflightCheck[] = [];
   const requestedOllamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
@@ -182,9 +196,22 @@ export async function getPreflightStatus(): Promise<PreflightStatus> {
       : "Install python3-venv, then re-run ./setup.sh from repo root. Sherpa powers X posting/replies and uses RSS + memories/reflections. If you do not need Sherpa locally, set MORK_SETUP_SKIP_SHERPA=1.",
   });
 
-  const coreUrl = process.env.MORK_CORE_URL || "http://127.0.0.1:8790";
-  try {
-    const core = await probeCore(coreUrl);
+  const configuredCoreUrl = process.env.MORK_CORE_URL || "http://127.0.0.1:8790";
+  const coreCandidates = getCoreCandidates(configuredCoreUrl);
+  let coreUrl = configuredCoreUrl;
+  let core: Awaited<ReturnType<typeof probeCore>> | null = null;
+  let lastError = "fetch failed";
+  for (const candidate of coreCandidates) {
+    try {
+      const next = await probeCore(candidate);
+      coreUrl = candidate;
+      core = next;
+      break;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "fetch failed";
+    }
+  }
+  if (core) {
     checks.push({
       key: "mork_core_health",
       ok: core.healthOk,
@@ -209,13 +236,12 @@ export async function getPreflightStatus(): Promise<PreflightStatus> {
       message: core.prismaOk ? "Mork Core Prisma memory query responding" : "Mork Core Prisma memory query failed",
       action: core.prismaOk ? undefined : "Check mork-core DATABASE_URL / Prisma migration status.",
     });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "unknown error";
+  } else {
     checks.push({
       key: "mork_core_health",
       ok: false,
-      message: `Mork Core checks unreachable at ${coreUrl} (${reason})`,
-      action: "Start mork-core and verify networking/DNS (127.0.0.1 vs container host).",
+      message: `Mork Core checks unreachable. Tried: ${coreCandidates.join(", ")} (${lastError})`,
+      action: "Start mork-core and verify networking/DNS (127.0.0.1, localhost, mork-core, or host.docker.internal).",
     });
     checks.push({
       key: "mork_core_chat_v2",
