@@ -45,10 +45,40 @@ async function pickBestMint(allowlist: string[]): Promise<string | null> {
   return sorted[0]?.[0] ?? null;
 }
 
-async function buildDecisionContext(): Promise<string> {
+
+async function hasPositivePolicySignal(allowlist: string[]): Promise<boolean> {
+  const now = Date.now();
+  const policies = await prisma.arbPolicy.findMany({ where: { mint: { in: allowlist } } });
+  for (const row of policies) {
+    const policy = row.policy as Record<string, unknown>;
+    const blacklistTs = Number(policy?.tempBlacklistUntilMs ?? 0);
+    if (blacklistTs > now) continue;
+    const stats = (policy?.stats as Record<string, unknown> | undefined) ?? {};
+    const score = Number(stats.score ?? 0);
+    const ok = Number(stats.ok ?? 0);
+    const fail = Number(stats.fail ?? 0);
+    if (Number.isFinite(score) && score > 0 && ok >= fail) return true;
+  }
+  return false;
+}
+
+type PlannerContext = { text: string; signalCount: number; feedCount: number; policyCount: number };
+
+async function buildDecisionContext(): Promise<PlannerContext> {
   const [recentSignals, recentFeed, walletMem, latestReflection, topPolicies, latestPlannerState] = await Promise.all([
     prisma.memory.findMany({
-      where: { OR: [{ source: "arb" }, { source: "arb-bot" }, { source: "trade" }] },
+      where: {
+        OR: [
+          { source: "arb" },
+          { source: "arb-bot" },
+          { source: "trade" },
+          { source: "sol-mev-bot" },
+          { source: "mev" },
+          { content: { contains: "pumpfun" } },
+          { content: { contains: "pool imbalance" } },
+          { content: { contains: "mev" } },
+        ],
+      },
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
@@ -107,10 +137,12 @@ async function buildDecisionContext(): Promise<string> {
     parts.push(`LATEST PLANNER STATE:\n${String(latestPlannerState.content).slice(0, 200)}`);
   }
   if (latestReflection) parts.push(`LATEST REFLECTION:\n${String(latestReflection.content).slice(0, 240)}`);
-  return parts.join("\n\n");
+  return { text: parts.join("\n\n"), signalCount: recentSignals.length, feedCount: recentFeed.length, policyCount: topPolicies.length };
 }
 
-async function getTradeDecision(context: string, maxTradeUsd: number): Promise<{ go: boolean; usd: number; reason: string }> {
+type PlannerDecision = { go: boolean; usd: number; reason: string; reasonCode: "model_trade" | "model_hold" | "model_error" | "model_invalid" };
+
+async function getTradeDecision(context: string, maxTradeUsd: number): Promise<PlannerDecision> {
   const prompt =
     `You are the autonomous trading engine for Mork Zuckerbarge.\n` +
     `Max trade allowed this cycle: $${maxTradeUsd} USD.\n\n` +
@@ -125,15 +157,16 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<{
 
   let raw = "";
   try { raw = await ollama(prompt, "default"); }
-  catch { return { go: false, usd: 0, reason: "ollama_error" }; }
+  catch { return { go: false, usd: 0, reason: "ollama_error", reasonCode: "model_error" }; }
 
   const firstLine = (raw.trim().split("\n")[0] ?? "").trim();
   const tradeMatch = firstLine.match(/^TRADE\s+\$?(\d+(?:\.\d+)?)/i);
   if (tradeMatch) {
     const usd = Math.min(Math.max(Number(tradeMatch[1]), 0), maxTradeUsd);
-    if (Number.isFinite(usd) && usd > 0) return { go: true, usd, reason: firstLine };
+    if (Number.isFinite(usd) && usd > 0) return { go: true, usd, reason: firstLine, reasonCode: "model_trade" };
   }
-  return { go: false, usd: 0, reason: firstLine || "HOLD" };
+  if (/^HOLD$/i.test(firstLine)) return { go: false, usd: 0, reason: "HOLD", reasonCode: "model_hold" };
+  return { go: false, usd: 0, reason: firstLine || "HOLD", reasonCode: "model_invalid" };
 }
 
 export async function POST() {
@@ -173,13 +206,23 @@ export async function POST() {
   }
 
   const context = await buildDecisionContext();
-  const decision = await getTradeDecision(context, authority.maxTradeUsd);
+  const baseDecision = await getTradeDecision(context.text, authority.maxTradeUsd);
+  const decision = { ...baseDecision };
+  let fallbackApplied = false;
+
+  if (!decision.go) {
+    const positiveSignal = await hasPositivePolicySignal(allowlist);
+    if (!positiveSignal) return NextResponse.json({ ok: true, status: "hold", reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied: false, positiveSignal: false, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount } } });
+    decision.go = true;
+    decision.usd = Math.max(1, Math.min(authority.maxTradeUsd, Math.max(1, authority.maxTradeUsd * 0.35)));
+    decision.reason = `${decision.reason || "HOLD"} -> fallback_probe_trade_on_positive_policy_signal`;
+    fallbackApplied = true;
+  }
+
 
   await prisma.memory.create({
     data: { type: "reflection", content: `Autonomous planner tick decision: ${decision.reason}`, entities: ["planner:decision"], importance: 0.55, source: "system" },
   });
-
-  if (!decision.go) return NextResponse.json({ ok: true, status: "hold", reason: decision.reason });
 
   const outputMint = await pickBestMint(allowlist);
   if (!outputMint) {
@@ -209,5 +252,5 @@ export async function POST() {
     update: { value: new Date().toISOString(), source: "agent", weight: 8 },
   });
 
-  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", usd: decision.usd, amountSol, outputMint, signature: swapJson.signature ?? null, reason: decision.reason });
+  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", usd: decision.usd, amountSol, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount } } });
 }
