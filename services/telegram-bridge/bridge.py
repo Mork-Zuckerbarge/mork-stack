@@ -188,7 +188,10 @@ def build_candidate_targets() -> list[tuple[str, str]]:
     # Prefer mork-core chat endpoints first (v2 has richer memory/reflection handling),
     # but avoid known 404 spam when CORE_URL points to the Next app surface (:3000).
     if normalized:
-        add_target(CORE_URL, normalized)
+        if core_is_app_surface and normalized in ("/chat/respond", "/chat/respond_v2"):
+            add_target(CORE_URL, "/api/chat/respond")
+        else:
+            add_target(CORE_URL, normalized)
     if core_is_app_surface:
         add_target(CORE_URL, "/api/chat/respond")
     else:

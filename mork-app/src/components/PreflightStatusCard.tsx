@@ -18,9 +18,13 @@ export default function PreflightStatusCard() {
   const [state, setState] = useState<PreflightState | null>(null);
 
   async function load() {
-    const res = await fetch("/api/preflight", { cache: "no-store" });
-    const data = (await res.json()) as PreflightState;
-    setState(data);
+    try {
+      const res = await fetch("/api/preflight", { cache: "no-store" });
+      const data = (await res.json()) as PreflightState;
+      setState(data);
+    } catch {
+      setState(null);
+    }
   }
 
   useEffect(() => {
