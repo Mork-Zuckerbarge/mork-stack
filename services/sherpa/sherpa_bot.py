@@ -788,6 +788,9 @@ class TwitterBot:
         print(f"[init] Characters: {sorted(list(self.characters.keys()))}")
 
         self.feed_config = self.load_feed_config()
+        # Keep legacy behavior: if Telegram credentials exist, default Telegram forwarding ON.
+        if self.credentials.get("telegram_bot_token") and self.credentials.get("telegram_chat_id"):
+            self.publish_targets["telegram"] = True
         print(f"[init] Characters: {sorted(list(self.characters.keys()))}")
 
         # Initialize OpenAI client ONLY if enabled
@@ -2164,6 +2167,7 @@ class TwitterBot:
         # Collect candidates (mentions + replies)
         candidates = []
         seen_ids = set()
+        conversation_context = {}
 
         try:
             # ---- A) Mentions (tweets that @mention you)
@@ -2178,9 +2182,10 @@ class TwitterBot:
                     candidates.append(("mention", t))
 
             # ---- B) Replies to your recent tweets (even without @tag)
-            my_recent = client.get_users_tweets(self.mork_id, max_results=5)
+            my_recent = client.get_users_tweets(self.mork_id, max_results=5, tweet_fields=["created_at", "conversation_id"])
             if my_recent and my_recent.data:
                 for my_tweet in my_recent.data:
+                    conversation_context[str(my_tweet.id)] = getattr(my_tweet, "text", "") or ""
                     q = f"conversation_id:{my_tweet.id} is:reply -from:{username}"
                     replies = client.search_recent_tweets(
                         query=q,
@@ -2236,6 +2241,14 @@ class TwitterBot:
 
             try:
                 inbound_text = getattr(tweet, "text", "") or ""
+                parent_context = conversation_context.get(str(getattr(tweet, "conversation_id", "")), "")
+                relationship = update_relationship(
+                    str(getattr(tweet, "author_id", "") or ""),
+                    "",
+                    inbound_text,
+                    engagement_score=0.0,
+                )
+                rel_topics = ", ".join((relationship.get("topics") or [])[:5]) or "none yet"
 
                 prompt = (
                     "You are replying to a user on X.\n"
@@ -2244,6 +2257,8 @@ class TwitterBot:
                     "Respond naturally and helpfully in 1–4 sentences.\n"
                     "No hashtags, no emojis, no URLs.\n"
                     "If you refer to what they said, paraphrase at a high level without reusing phrases.\n\n"
+                    f"YOUR ORIGINAL TWEET (context):\n{parent_context}\n\n"
+                    f"RELATIONSHIP MEMORY SNAPSHOT:\n- interactions: {relationship.get('interactions', 0)}\n- trust: {float(relationship.get('trust', 0.0)):.2f}\n- recurring topics: {rel_topics}\n\n"
                     f"INCOMING (for context only; DO NOT quote):\n{inbound_text}\n"
                 )
 
@@ -3475,7 +3490,7 @@ class TwitterBot:
                             interactive=bool(self.characters)
                         )
                         subject_dropdown = gr.Dropdown(
-                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All Feeds)", "__surprise_all__")],
+                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🖋️ Reflection (no feed)", "__reflection__"), ("🎲 Surprise me (All Feeds)", "__surprise_all__")],
                             value="crypto",
                             label="Select Subject",
                             interactive=True
@@ -3512,7 +3527,20 @@ class TwitterBot:
                 import random
 
                 def get_story_dispatch(subject):
+                    if subject == "__reflection__":
+                        reflection = core_compose_payload({"kind": "reflection", "maxChars": 260}, timeout=10) or ""
+                        reflection = (reflection or "").strip()
+                        return reflection or "A small reflection on literature and art, written with care."
                     if subject == "__surprise_all__":
+                        # Include direct reflection mode in surprise rotation.
+                        surprise_modes = ["__reflection__"] + list(RSS_FEEDS.keys())
+                        random.shuffle(surprise_modes)
+                        for mode in surprise_modes:
+                            if mode == "__reflection__":
+                                reflection = core_compose_payload({"kind": "reflection", "maxChars": 260}, timeout=10) or ""
+                                reflection = (reflection or "").strip()
+                                if reflection:
+                                    return reflection
                         # Try subjects in random order; first successful story wins
                         subjects = list(RSS_FEEDS.keys())  # e.g., ["crypto","ai","tech"]
                         random.shuffle(subjects)
