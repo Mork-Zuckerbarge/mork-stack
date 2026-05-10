@@ -57,7 +57,7 @@ async function buildDecisionContext(): Promise<string> {
         OR: [
           { source: "sherpa" },
           { content: { contains: "[feed/" } },
-          { entities: { has: "feed" } },
+          { content: { contains: "feed" } },
         ],
       },
       orderBy: { createdAt: "desc" },
@@ -71,7 +71,7 @@ async function buildDecisionContext(): Promise<string> {
       select: { mint: true, policy: true },
     }),
     prisma.memory.findFirst({
-      where: { OR: [{ entities: { has: "planner:skip" } }, { entities: { has: "planner:decision" } }] },
+      where: { OR: [{ content: { contains: "planner tick skipped" } }, { content: { contains: "planner tick decision" } }] },
       orderBy: { createdAt: "desc" },
     }),
   ]);
