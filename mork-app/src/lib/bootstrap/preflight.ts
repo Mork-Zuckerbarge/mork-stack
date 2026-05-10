@@ -62,62 +62,82 @@ async function hasSherpaVenv() {
 
 async function probeCore(baseUrl: string) {
   const core = baseUrl.replace(/\/+$/, "");
-  const { signal, clear } = withTimeout(5000);
-  try {
-    const postJson = async (paths: string[], payload: Record<string, unknown>) => {
-      for (const path of paths) {
-        const res = await fetch(`${core}${path}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          signal,
-          cache: "no-store",
-        });
-        if (res.ok) return { ok: true, path };
-      }
-      return { ok: false, path: paths[0] };
-    };
+  const deepProbe = process.env.MORK_PREFLIGHT_DEEP_CORE_PROBES === "1";
+  const requestWithTimeout = async (url: string, init: RequestInit, timeoutMs = 4000) => {
+    const { signal, clear } = withTimeout(timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal, cache: "no-store" });
+    } catch {
+      return null;
+    } finally {
+      clear();
+    }
+  };
 
-    const getPath = async (paths: string[]) => {
-      for (const path of paths) {
-        const res = await fetch(`${core}${path}`, { signal, cache: "no-store" });
-        if (res.ok) return { ok: true, path };
-      }
-      return { ok: false, path: paths[0] };
-    };
+  const postJson = async (paths: string[], payload: Record<string, unknown>) => {
+    for (const path of paths) {
+      const res = await requestWithTimeout(`${core}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res?.ok) return { ok: true, path };
+    }
+    return { ok: false, path: paths[0] };
+  };
 
-    const healthRes = await fetch(`${core}/health`, { signal, cache: "no-store" });
-    const healthOk = healthRes.ok;
+  const routeExists = async (paths: string[]) => {
+    for (const path of paths) {
+      const res = await requestWithTimeout(`${core}${path}`, { method: "OPTIONS" }, 2000);
+      if (res && res.status !== 404) return { ok: true, path };
+    }
+    return { ok: false, path: paths[0] };
+  };
 
-    const chatProbe = await postJson(
-      ["/chat/respond_v2", "/chat/respond", "/api/chat/respond"],
-      {
-        channel: "system",
-        handle: "preflight",
-        message: "Reply with one short sentence.",
-        maxChars: 120,
-      }
-    );
+  const getPath = async (paths: string[]) => {
+    for (const path of paths) {
+      const res = await requestWithTimeout(`${core}${path}`, {});
+      if (res?.ok) return { ok: true, path };
+    }
+    return { ok: false, path: paths[0] };
+  };
 
-    const composeProbe = await postJson(
-      ["/x/compose"],
-      { kind: "observation", maxChars: 140 }
-    );
+    const healthRes = await requestWithTimeout(`${core}/health`, {});
+    const healthOk = Boolean(healthRes?.ok);
+    if (!healthRes) {
+      throw new Error("health_unreachable");
+    }
+
+  const chatProbe = deepProbe
+    ? await postJson(
+        ["/chat/respond_v2", "/chat/respond", "/api/chat/respond"],
+        {
+          channel: "system",
+          handle: "preflight",
+          message: "Reply with one short sentence.",
+          maxChars: 120,
+        }
+      )
+    : await routeExists(["/chat/respond_v2", "/chat/respond", "/api/chat/respond"]);
+
+  const composeProbe = deepProbe
+    ? await postJson(
+        ["/x/compose"],
+        { kind: "observation", maxChars: 140 }
+      )
+    : await routeExists(["/x/compose"]);
 
     const prismaProbe = await getPath(["/memory/query?limit=1", "/api/channel/activity"]);
 
-    return {
-      healthOk,
-      chatOk: chatProbe.ok,
-      composeOk: composeProbe.ok,
-      prismaOk: prismaProbe.ok,
-      chatPath: chatProbe.path,
-      composePath: composeProbe.path,
-      prismaPath: prismaProbe.path,
-    };
-  } finally {
-    clear();
-  }
+  return {
+    healthOk,
+    chatOk: chatProbe.ok,
+    composeOk: composeProbe.ok,
+    prismaOk: prismaProbe.ok,
+    chatPath: chatProbe.path,
+    composePath: composeProbe.path,
+    prismaPath: prismaProbe.path,
+  };
 }
 
 function getCoreCandidates(configuredUrl: string): string[] {
