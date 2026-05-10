@@ -64,17 +64,57 @@ async function probeCore(baseUrl: string) {
   const core = baseUrl.replace(/\/+$/, "");
   const { signal, clear } = withTimeout(5000);
   try {
+    const postJson = async (paths: string[], payload: Record<string, unknown>) => {
+      for (const path of paths) {
+        const res = await fetch(`${core}${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal,
+          cache: "no-store",
+        });
+        if (res.ok) return { ok: true, path };
+      }
+      return { ok: false, path: paths[0] };
+    };
+
+    const getPath = async (paths: string[]) => {
+      for (const path of paths) {
+        const res = await fetch(`${core}${path}`, { signal, cache: "no-store" });
+        if (res.ok) return { ok: true, path };
+      }
+      return { ok: false, path: paths[0] };
+    };
+
     const healthRes = await fetch(`${core}/health`, { signal, cache: "no-store" });
     const healthOk = healthRes.ok;
 
-    const chatRes = await fetch(`${core}/chat/respond_v2`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const chatProbe = await postJson(
+      ["/chat/respond_v2", "/chat/respond", "/api/chat/respond"],
+      {
         channel: "system",
         handle: "preflight",
         message: "Reply with one short sentence.",
         maxChars: 120,
+      }
+    );
+
+    const composeProbe = await postJson(
+      ["/x/compose"],
+      { kind: "observation", maxChars: 140 }
+    );
+
+    const prismaProbe = await getPath(["/memory/query?limit=1", "/api/channel/activity"]);
+
+    return {
+      healthOk,
+      chatOk: chatProbe.ok,
+      composeOk: composeProbe.ok,
+      prismaOk: prismaProbe.ok,
+      chatPath: chatProbe.path,
+      composePath: composeProbe.path,
+      prismaPath: prismaProbe.path,
+    };
       }),
       signal,
       cache: "no-store",
@@ -221,19 +261,19 @@ export async function getPreflightStatus(): Promise<PreflightStatus> {
     checks.push({
       key: "mork_core_chat_v2",
       ok: core.chatOk,
-      message: core.chatOk ? "Mork Core /chat/respond_v2 responding" : "Mork Core /chat/respond_v2 failed",
+      message: core.chatOk ? `Mork chat responding via ${core.chatPath}` : `Mork chat failed (${core.chatPath})`,
       action: core.chatOk ? undefined : "Verify Ollama/model availability in mork-core and check logs for chat endpoint errors.",
     });
     checks.push({
       key: "mork_core_compose",
       ok: core.composeOk,
-      message: core.composeOk ? "Mork Core /x/compose responding" : "Mork Core /x/compose failed",
+      message: core.composeOk ? `Mork compose responding via ${core.composePath}` : `Mork compose failed (${core.composePath})`,
       action: core.composeOk ? undefined : "Check mork-core compose path and model settings.",
     });
     checks.push({
       key: "mork_core_prisma_query",
       ok: core.prismaOk,
-      message: core.prismaOk ? "Mork Core Prisma memory query responding" : "Mork Core Prisma memory query failed",
+      message: core.prismaOk ? `Prisma-backed query responding via ${core.prismaPath}` : `Prisma-backed query failed (${core.prismaPath})`,
       action: core.prismaOk ? undefined : "Check mork-core DATABASE_URL / Prisma migration status.",
     });
   } else {
