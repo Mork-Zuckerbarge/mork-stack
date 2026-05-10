@@ -234,7 +234,7 @@ def core_reply(handle: str, message: str, user_id: int) -> dict:
         raise RuntimeError(f"chat upstream failed after targets={candidate_targets}: {' | '.join(errors)}")
 
     if not j.get("ok"):
-        return {"text": "My thoughts failed to compile. Try again in a moment.", "media": None}
+        raise RuntimeError(f"chat upstream returned ok=false: {j}")
     text = (j.get("reply") or j.get("response") or "").strip() or "…"
     media = j.get("media") if isinstance(j.get("media"), dict) else None
     return {"text": text, "media": media}

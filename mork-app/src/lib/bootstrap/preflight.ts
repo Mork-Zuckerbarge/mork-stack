@@ -253,6 +253,7 @@ export async function getPreflightStatus(): Promise<PreflightStatus> {
     }
   }
   if (core) {
+    const appSurfaceCore = coreUrl.replace(/\/+$/, "").endsWith(":3000");
     checks.push({
       key: "mork_core_health",
       ok: core.healthOk,
@@ -267,9 +268,17 @@ export async function getPreflightStatus(): Promise<PreflightStatus> {
     });
     checks.push({
       key: "mork_core_compose",
-      ok: core.composeOk,
-      message: core.composeOk ? `Mork compose responding via ${core.composePath}` : `Mork compose failed (${core.composePath})`,
-      action: core.composeOk ? undefined : "Check mork-core compose path and model settings.",
+      ok: appSurfaceCore ? true : core.composeOk,
+      message: appSurfaceCore
+        ? "Mork compose probe skipped on app-surface core URL (:3000)."
+        : core.composeOk
+          ? `Mork compose responding via ${core.composePath}`
+          : `Mork compose failed (${core.composePath})`,
+      action: appSurfaceCore
+        ? "If you want compose validation, set MORK_CORE_URL to direct mork-core (e.g. http://127.0.0.1:8790)."
+        : core.composeOk
+          ? undefined
+          : "Check mork-core compose path and model settings.",
     });
     checks.push({
       key: "mork_core_prisma_query",
