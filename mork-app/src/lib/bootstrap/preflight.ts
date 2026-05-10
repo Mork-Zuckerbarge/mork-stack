@@ -115,6 +115,25 @@ async function probeCore(baseUrl: string) {
       composePath: composeProbe.path,
       prismaPath: prismaProbe.path,
     };
+      }),
+      signal,
+      cache: "no-store",
+    });
+    const chatOk = chatRes.ok;
+
+    const composeRes = await fetch(`${core}/x/compose`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "observation", maxChars: 140 }),
+      signal,
+      cache: "no-store",
+    });
+    const composeOk = composeRes.ok;
+
+    const prismaRes = await fetch(`${core}/memory/query?limit=1`, { signal, cache: "no-store" });
+    const prismaOk = prismaRes.ok;
+
+    return { healthOk, chatOk, composeOk, prismaOk };
   } finally {
     clear();
   }
