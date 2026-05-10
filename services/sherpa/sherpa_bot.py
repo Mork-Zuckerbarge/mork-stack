@@ -2641,28 +2641,20 @@ class TwitterBot:
                 tid = draft["tweet_id"]
 
                 try:
-                    # generate fresh text now (cheaper than storing text that may expire)
-                    text = None
-                    if hasattr(self, "generate_persona_reply_from_tweet_id"):
-                        try:
-                            text = self.generate_persona_reply_from_tweet_id(tid)
-                        except Exception:
-                            text = None
-
-                    if not text:
-                        # Fallback: fetch tweet text to reply to
-                        tw_resp = requests.get(
-                            "https://api.twitter.com/2/tweets",
-                            headers=headers,
-                            params={"ids": tid, "tweet.fields": "text"},
-                            timeout=10
-                        )
-                        tw_json = tw_resp.json()
-                        tw_text = (tw_json.get("data") or [{}])[0].get("text", "")
-                        if not tw_text:
-                            i += 1
-                            continue
-                        text = _compose_reply(tw_text)
+                    # Always construct X replies through the LLM path.
+                    # Do not use legacy scripted/persona generators here.
+                    tw_resp = requests.get(
+                        "https://api.twitter.com/2/tweets",
+                        headers=headers,
+                        params={"ids": tid, "tweet.fields": "text"},
+                        timeout=10
+                    )
+                    tw_json = tw_resp.json()
+                    tw_text = (tw_json.get("data") or [{}])[0].get("text", "")
+                    if not tw_text:
+                        i += 1
+                        continue
+                    text = _compose_reply(tw_text)
 
                     self.twitter_client.create_tweet(text=text, in_reply_to_tweet_id=tid)
                     print(f"✅ Replied from backlog → {tid}")
