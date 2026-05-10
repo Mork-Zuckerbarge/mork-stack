@@ -45,6 +45,23 @@ async function pickBestMint(allowlist: string[]): Promise<string | null> {
   return sorted[0]?.[0] ?? null;
 }
 
+
+async function hasPositivePolicySignal(allowlist: string[]): Promise<boolean> {
+  const now = Date.now();
+  const policies = await prisma.arbPolicy.findMany({ where: { mint: { in: allowlist } } });
+  for (const row of policies) {
+    const policy = row.policy as Record<string, unknown>;
+    const blacklistTs = Number(policy?.tempBlacklistUntilMs ?? 0);
+    if (blacklistTs > now) continue;
+    const stats = (policy?.stats as Record<string, unknown> | undefined) ?? {};
+    const score = Number(stats.score ?? 0);
+    const ok = Number(stats.ok ?? 0);
+    const fail = Number(stats.fail ?? 0);
+    if (Number.isFinite(score) && score > 0 && ok >= fail) return true;
+  }
+  return false;
+}
+
 async function buildDecisionContext(): Promise<string> {
   const [recentSignals, recentFeed, walletMem, latestReflection, topPolicies, latestPlannerState] = await Promise.all([
     prisma.memory.findMany({
@@ -173,13 +190,21 @@ export async function POST() {
   }
 
   const context = await buildDecisionContext();
-  const decision = await getTradeDecision(context, authority.maxTradeUsd);
+  const baseDecision = await getTradeDecision(context, authority.maxTradeUsd);
+  const decision = { ...baseDecision };
+
+  if (!decision.go) {
+    const positiveSignal = await hasPositivePolicySignal(allowlist);
+    if (!positiveSignal) return NextResponse.json({ ok: true, status: "hold", reason: decision.reason });
+    decision.go = true;
+    decision.usd = Math.max(1, Math.min(authority.maxTradeUsd, Math.max(1, authority.maxTradeUsd * 0.35)));
+    decision.reason = `${decision.reason || "HOLD"} -> fallback_probe_trade_on_positive_policy_signal`;
+  }
+
 
   await prisma.memory.create({
     data: { type: "reflection", content: `Autonomous planner tick decision: ${decision.reason}`, entities: ["planner:decision"], importance: 0.55, source: "system" },
   });
-
-  if (!decision.go) return NextResponse.json({ ok: true, status: "hold", reason: decision.reason });
 
   const outputMint = await pickBestMint(allowlist);
   if (!outputMint) {
