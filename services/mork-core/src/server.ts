@@ -943,7 +943,7 @@ async function composeTweet(input: {
     .trim();
 
   if (!tweet) {
-    tweet = "Markets move. I observe. I adapt.";
+    throw new Error("composeTweet produced empty output");
   }
 
   return tweet.slice(0, maxChars);

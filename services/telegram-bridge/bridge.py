@@ -183,10 +183,20 @@ def build_candidate_targets() -> list[tuple[str, str]]:
         if target not in targets:
             targets.append(target)
 
-    # Prefer mork-core for /chat/respond.
+    core_is_app_surface = CORE_URL.rstrip("/").endswith(":3000") or CORE_URL.rstrip("/") == APP_URL.rstrip("/")
+
+    # Prefer mork-core chat endpoints first (v2 has richer memory/reflection handling),
+    # but avoid known 404 spam when CORE_URL points to the Next app surface (:3000).
     if normalized:
-        add_target(CORE_URL, normalized)
-    add_target(CORE_URL, "/chat/respond")
+        if core_is_app_surface and normalized in ("/chat/respond", "/chat/respond_v2"):
+            add_target(CORE_URL, "/api/chat/respond")
+        else:
+            add_target(CORE_URL, normalized)
+    if core_is_app_surface:
+        add_target(CORE_URL, "/api/chat/respond")
+    else:
+        add_target(CORE_URL, "/chat/respond_v2")
+        add_target(CORE_URL, "/chat/respond")
 
     # Fallback to app API surface if core is unavailable.
     if normalized.startswith("/api/"):
@@ -224,7 +234,7 @@ def core_reply(handle: str, message: str, user_id: int) -> dict:
         raise RuntimeError(f"chat upstream failed after targets={candidate_targets}: {' | '.join(errors)}")
 
     if not j.get("ok"):
-        return {"text": "My thoughts failed to compile. Try again in a moment.", "media": None}
+        raise RuntimeError(f"chat upstream returned ok=false: {j}")
     text = (j.get("reply") or j.get("response") or "").strip() or "…"
     media = j.get("media") if isinstance(j.get("media"), dict) else None
     return {"text": text, "media": media}

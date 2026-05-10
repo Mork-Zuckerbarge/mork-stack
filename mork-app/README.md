@@ -117,7 +117,15 @@ On app startup, the UI now reports clear actionable status for:
 - Ollama reachability,
 - selected model availability,
 - wallet configuration validity,
-- Sherpa (X bot) bootstrap readiness (`services/sherpa/.venv` present).
+- Sherpa (X bot) bootstrap readiness (`services/sherpa/.venv` present),
+- mork-core health/chat/compose/prisma probe status.
+
+Core probe host resolution order:
+1. `MORK_CORE_URL` (from `mork-app/.env.local`)
+2. `MORK_CORE_SERVICE_FALLBACK_URL` (default `http://mork-core:8790`)
+3. `http://127.0.0.1:8790`
+4. `http://localhost:8790`
+5. `http://host.docker.internal:8790`
 
 Runtime defaults:
 - Arb + Sherpa are auto-started on first app boot/load.

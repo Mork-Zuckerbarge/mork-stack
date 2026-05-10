@@ -2525,6 +2525,8 @@ class TwitterBot:
                     "Do not quote, copy, or restate the user's words.\n"
                     "No hashtags, no emojis, no URLs, no canned opener/closer.\n"
                     "Write 1-3 natural sentences that move the conversation forward.\n"
+                    "Avoid generic coaching language and avoid asking the same 'what outcome' style question.\n"
+                    "Use one specific observation or angle so each reply feels unique.\n"
                     "Reference ideas at a high level only.\n\n"
                     f"Context (do not quote): {tw}"
                 )
@@ -2625,11 +2627,25 @@ class TwitterBot:
                 if base:
                     return base
 
-                # Last-resort non-echo fallback (no source text)
-                return _wrap_280(
-                    "Good point. I see the direction you're pushing this—what outcome are you optimizing for right now?",
-                    260,
-                )
+                # Last-resort: still generate through core so we avoid scripted/static one-liners.
+                salvage = core_compose_payload(
+                    {
+                        "kind": "reflection",
+                        "text": f"Reply to this X mention with a unique, concrete take (no quotes): {text}",
+                        "maxChars": 260,
+                        "constraints": {
+                            "noQuoteUserText": True,
+                            "noHashtags": True,
+                            "noEmojis": True,
+                            "noUrls": True,
+                        },
+                    },
+                    timeout=9,
+                ) or ""
+                if salvage:
+                    return _strip_source_echo(_wrap_280(salvage, 260), text)
+
+                raise RuntimeError("LLM reply generation failed across local/core/openai/salvage paths")
 
 
             # 1) Try backlog first (tweet_ids we saved yesterday), keeping only <23h
@@ -2641,28 +2657,20 @@ class TwitterBot:
                 tid = draft["tweet_id"]
 
                 try:
-                    # generate fresh text now (cheaper than storing text that may expire)
-                    text = None
-                    if hasattr(self, "generate_persona_reply_from_tweet_id"):
-                        try:
-                            text = self.generate_persona_reply_from_tweet_id(tid)
-                        except Exception:
-                            text = None
-
-                    if not text:
-                        # Fallback: fetch tweet text to reply to
-                        tw_resp = requests.get(
-                            "https://api.twitter.com/2/tweets",
-                            headers=headers,
-                            params={"ids": tid, "tweet.fields": "text"},
-                            timeout=10
-                        )
-                        tw_json = tw_resp.json()
-                        tw_text = (tw_json.get("data") or [{}])[0].get("text", "")
-                        if not tw_text:
-                            i += 1
-                            continue
-                        text = _compose_reply(tw_text)
+                    # Always construct X replies through the LLM path.
+                    # Do not use legacy scripted/persona generators here.
+                    tw_resp = requests.get(
+                        "https://api.twitter.com/2/tweets",
+                        headers=headers,
+                        params={"ids": tid, "tweet.fields": "text"},
+                        timeout=10
+                    )
+                    tw_json = tw_resp.json()
+                    tw_text = (tw_json.get("data") or [{}])[0].get("text", "")
+                    if not tw_text:
+                        i += 1
+                        continue
+                    text = _compose_reply(tw_text)
 
                     self.twitter_client.create_tweet(text=text, in_reply_to_tweet_id=tid)
                     print(f"✅ Replied from backlog → {tid}")

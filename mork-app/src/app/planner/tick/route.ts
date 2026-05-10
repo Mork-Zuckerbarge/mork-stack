@@ -46,11 +46,22 @@ async function pickBestMint(allowlist: string[]): Promise<string | null> {
 }
 
 async function buildDecisionContext(): Promise<string> {
-  const [recentSignals, walletMem, latestReflection, topPolicies] = await Promise.all([
+  const [recentSignals, recentFeed, walletMem, latestReflection, topPolicies, latestPlannerState] = await Promise.all([
     prisma.memory.findMany({
       where: { OR: [{ source: "arb" }, { source: "arb-bot" }, { source: "trade" }] },
       orderBy: { createdAt: "desc" },
       take: 10,
+    }),
+    prisma.memory.findMany({
+      where: {
+        OR: [
+          { source: "sherpa" },
+          { content: { contains: "[feed/" } },
+          { content: { contains: "feed" } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      take: 6,
     }),
     prisma.memory.findFirst({ where: { source: "wallet" }, orderBy: { createdAt: "desc" } }),
     prisma.memory.findFirst({ where: { type: "reflection" }, orderBy: { createdAt: "desc" } }),
@@ -58,6 +69,10 @@ async function buildDecisionContext(): Promise<string> {
       take: 5,
       orderBy: { updatedAt: "desc" },
       select: { mint: true, policy: true },
+    }),
+    prisma.memory.findFirst({
+      where: { OR: [{ content: { contains: "planner tick skipped" } }, { content: { contains: "planner tick decision" } }] },
+      orderBy: { createdAt: "desc" },
     }),
   ]);
 
@@ -82,8 +97,14 @@ async function buildDecisionContext(): Promise<string> {
   } else {
     parts.push("RECENT ARB SIGNALS: none logged yet");
   }
+  if (recentFeed.length) {
+    parts.push(`RECENT FEED / NARRATIVE CONTEXT:\n` + recentFeed.map((m) => `- ${String(m.content).slice(0, 160)}`).join("\n"));
+  }
   if (policySignalLines.length) {
     parts.push(`ARB POLICY SNAPSHOT:\n${policySignalLines.join("\n")}`);
+  }
+  if (latestPlannerState) {
+    parts.push(`LATEST PLANNER STATE:\n${String(latestPlannerState.content).slice(0, 200)}`);
   }
   if (latestReflection) parts.push(`LATEST REFLECTION:\n${String(latestReflection.content).slice(0, 240)}`);
   return parts.join("\n\n");
