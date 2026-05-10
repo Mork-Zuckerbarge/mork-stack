@@ -3475,7 +3475,7 @@ class TwitterBot:
                             interactive=bool(self.characters)
                         )
                         subject_dropdown = gr.Dropdown(
-                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🎲 Surprise me (All Feeds)", "__surprise_all__")],
+                            choices=[("crypto", "crypto"), ("ai", "ai"), ("tech", "tech"), ("🖋️ Reflection (no feed)", "__reflection__"), ("🎲 Surprise me (All Feeds)", "__surprise_all__")],
                             value="crypto",
                             label="Select Subject",
                             interactive=True
@@ -3512,6 +3512,10 @@ class TwitterBot:
                 import random
 
                 def get_story_dispatch(subject):
+                    if subject == "__reflection__":
+                        reflection = core_compose_payload({"kind": "reflection", "maxChars": 260}, timeout=10) or ""
+                        reflection = (reflection or "").strip()
+                        return reflection or "A small reflection on literature and art, written with care."
                     if subject == "__surprise_all__":
                         # Try subjects in random order; first successful story wins
                         subjects = list(RSS_FEEDS.keys())  # e.g., ["crypto","ai","tech"]
