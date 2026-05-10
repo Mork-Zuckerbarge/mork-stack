@@ -193,6 +193,10 @@ export async function respondToChat(input: unknown) {
     "When discussing balances or funds, clearly distinguish the app's configured wallet from the user's personal custody.\n";
   modeInstruction +=
     "Do not imply the user personally executed wallet actions; describe actions as agent/runtime wallet operations.\n";
+  modeInstruction +=
+    "Never insult, demean, or mock the user (including nicknames/slurs). Keep tone respectful even when the user is upset.\n";
+  modeInstruction +=
+    "Do not fabricate planner settings or confirmations. If runtime context does not explicitly provide a value (for example max trade USD), say it is unknown and point to the exact status check.\n";
   if (channel === "telegram" || channel === "x") {
     modeInstruction +=
       "Treat app UI conversations, internal logs, and non-public trade details as private; do not disclose them on social channels unless explicitly provided in the current channel context.\n";
