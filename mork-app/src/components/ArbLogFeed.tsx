@@ -51,6 +51,17 @@ export default function ArbLogFeed() {
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-semibold">Service Logs Feed</h3>
         <div className="flex items-center gap-2">
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value as LogScope)}
+            className="rounded-lg border border-white/20 bg-black/40 px-2 py-1 text-xs"
+          >
+            <option value="arb">arb</option>
+            <option value="core">core</option>
+            <option value="sherpa">sherpa</option>
+            <option value="telegram">telegram</option>
+            <option value="all">all</option>
+          </select>
           <span className="text-xs text-white/70">Refresh: 60s</span>
           <button className="rounded-lg border border-white/20 px-2 py-1 text-xs" onClick={loadLogs}>
             Refresh

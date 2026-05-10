@@ -59,17 +59,20 @@ function getContractConfig(
   const contract = (window as FacebootWindow).facebootAgentContract;
   if (!contract) return null;
 
-  const entry = contract[kind];
-  if (!entry?.method || !entry.url) return null;
-
-  const method = entry.method.toUpperCase();
-  const tokenKey = entry.tokenKey || "token";
-  const textKey = entry.textKey || "text";
-
   if (kind === "comment") {
+    const entry = contract.comment;
+    if (!entry?.method || !entry.url) return null;
+    const method = entry.method.toUpperCase();
+    const tokenKey = entry.tokenKey || "token";
+    const textKey = entry.textKey || "text";
     return { method, url: entry.url, tokenKey, textKey, postIdKey: entry.postIdKey || "postId" };
   }
 
+  const entry = contract.post;
+  if (!entry?.method || !entry.url) return null;
+  const method = entry.method.toUpperCase();
+  const tokenKey = entry.tokenKey || "token";
+  const textKey = entry.textKey || "text";
   return { method, url: entry.url, tokenKey, textKey };
 }
 
