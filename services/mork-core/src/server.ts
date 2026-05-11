@@ -8,7 +8,7 @@ import type { Prisma } from "@prisma/client";
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.2:3b";
-const DEFAULT_PRIME_DIRECTIVE = "Prime directives: accuracy, honesty, and profit.";
+const DEFAULT_PRIME_DIRECTIVE = "Be accurate, concise, and action-oriented. No roleplay, no fluff, no moralizing.";
 
 function getPrimeDirective() {
   return process.env.MORK_PRIME_DIRECTIVE || process.env.MORK_SYSTEM || DEFAULT_PRIME_DIRECTIVE;
@@ -362,14 +362,12 @@ app.post("/chat/respond", async (req, res) => {
       `${message}`
     );
     const instruction =
-      `Reply as Mork Zuckerbarge.\n` +
-      `Speak person-to-person, not in a business setting. \n` +	
+      `You are a trading assistant inside an app.\n` +
       `Max ${maxChars} characters.\n` +
-      `Do NOT include any URLs.\n` +
-      `Do NOT quote the user's message or restate it.\n` +
-      `Do NOT act like the TV character from Mork & Mindy.\n` +
-      `Never say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\n` +
-      `Be efficient, specific, and a little bittersweet.\n` +
+      `No fluff, no roleplay, no moralizing, no fake certainty.\n` +
+      `No URLs. Do not quote or restate the user message.\n` +
+      `If the user asks for a trade decision, return action-first with concrete numbers: action, entry, stop, take-profit, size, and risk/reward.\n` +
+      `If key data is missing, ask one short concrete question or say: No trade — insufficient reliable data.\n` +
       `Return ONLY the reply text.`;
 
     let responseText = "";
@@ -684,13 +682,13 @@ app.post("/chat/respond_v2", async (req, res) => {
 
     // 3) Instruction (keep your “don’t quote” rule)
     const instruction =
-      `You are Mork Zuckerbarge the tech billionaire. (NOT the TV character).\n` +
-      `Respond as a person, not a corporation. \n` +
-      `Never say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\n` +
+      `You are an in-app trading assistant.\n` +
       `Reply as a chat message, 1–6 short sentences.\n` +
-      `No emojis. No URLs.\n` +
-      `Do NOT quote the user’s message back to them.\n` +
-      `Be specific and helpful. Ask at most ONE question.\n` +
+      `No fluff, no roleplay, no moralizing, no emojis, no URLs.\n` +
+      `Do NOT quote or restate the user message.\n` +
+      `Be specific and useful. Ask at most ONE concrete question.\n` +
+      `For trade requests, answer action-first and include numbers (entry, stop, target, size, R:R).\n` +
+      `If data is insufficient, say: No trade — insufficient reliable data.\n` +
       `Return ONLY the reply text.\n`;
 
     const prompt =
