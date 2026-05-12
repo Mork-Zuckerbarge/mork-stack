@@ -88,6 +88,7 @@ Update these in `mork-app/.env.local` (not `env.example`) on your local machine:
 - Chat media generation:
   - Images default to Pollinations (no extra setup in this repo).
   - Videos default to Pollinations `gen.pollinations.ai/image/{prompt}` with a video model when `MEDIA_VIDEO_ENDPOINT` is empty.
+  - Audio now defaults to Pollinations `gen.pollinations.ai/image/{prompt}?audio=true`.
   - `MEDIA_VIDEO_TOKEN` can be set to a Pollinations key if your account/rate limits require auth (the app sends this as both `Authorization: Bearer ...` and `?key=...` for compatibility with Pollinations auth modes).
   - Style conditioning references can be supplied through `MEDIA_STYLE_IMAGE_URLS` (comma-separated public URLs) and are applied to both image/video generation as Pollinations `image=` references.
   - The first-time setup now accepts 7 public style image URLs and persists them via `/api/app/style-pack` for automatic Pollinations conditioning.

@@ -3,7 +3,7 @@ import { respondToChat } from "@/lib/core/chat";
 import { getOrchestratorState, startRuntime, stopRuntime } from "@/lib/core/orchestrator";
 import { getAppControlState } from "@/lib/core/appControl";
 import { prisma } from "@/lib/core/prisma";
-import { generateImage, generateVideo } from "@/lib/core/media";
+import { generateAudio, generateImage, generateVideo } from "@/lib/core/media";
 import { getWalletBalancesForMints } from "@/lib/core/wallet";
 import { ensurePlannerAutopilotStarted } from "@/lib/core/plannerAutopilot";
 import { POST as runPlannerTickRoute } from "@/app/planner/tick/route";
@@ -15,7 +15,7 @@ type ChatChannel = "system" | "telegram" | "x";
 type RoutedCommand =
   | { type: "tweet"; text: string }
   | { type: "telegram"; text: string }
-  | { type: "media.generate"; mediaKind: "image" | "video"; prompt: string }
+  | { type: "media.generate"; mediaKind: "image" | "video" | "audio"; prompt: string }
   | { type: "media.share"; platform: "telegram" | "x" | "sherpa"; filename: string; caption: string }
   | { type: "trade"; quantity: number; inputSymbol: string; outputSymbol: string }
   | { type: "trade.sellAll"; inputSymbol: string; outputSymbol: string }
@@ -131,6 +131,11 @@ function parseCommand(message: string): RoutedCommand | null {
     firstLine.match(/^video\s*:\s*(.+)$/i);
   if (videoMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "video", prompt: videoMatch[1].trim() };
 
+  const audioMatch =
+    firstLine.match(/^(?:generate|create|make)\s+(?:an?\s+)?audio(?:\s*:\s*|\s+)(.+)$/i) ||
+    firstLine.match(/^audio\s*:\s*(.+)$/i);
+  if (audioMatch?.[1]?.trim()) return { type: "media.generate", mediaKind: "audio", prompt: audioMatch[1].trim() };
+
   const sendMediaMatch = firstLine.match(
     /^(?:send|load)\s+([a-z0-9._-]+)\s+to\s+(telegram|x|sherpa)(?:\s+with\s+caption\s*:\s*(.+))?\s*$/i
   );
@@ -224,6 +229,7 @@ function parseVibeMediaCommand(message: string): RoutedCommand | null {
   if (!trimmed || trimmed.endsWith("?")) return null;
 
   const hasVideoWord = /\b(video|clip|reel|animation)\b/i.test(trimmed);
+  const hasAudioWord = /\b(audio|song|music|voiceover|voice[- ]?over|soundtrack|podcast)\b/i.test(trimmed);
   const hasImageWord = /\b(image|photo|picture|pic|artwork|art)\b/i.test(trimmed);
   const requestCue =
     /\b(make|create|generate|render|craft|produce|show|give)\b/i.test(trimmed) ||
@@ -232,8 +238,8 @@ function parseVibeMediaCommand(message: string): RoutedCommand | null {
     /^i\s+(?:want|need)\b/i.test(trimmed) ||
     /^let'?s\b/i.test(trimmed);
 
-  if (!requestCue || (!hasVideoWord && !hasImageWord)) return null;
-  if (hasVideoWord && hasImageWord) return null;
+  if (!requestCue || (!hasVideoWord && !hasImageWord && !hasAudioWord)) return null;
+  if ([hasVideoWord, hasImageWord, hasAudioWord].filter(Boolean).length > 1) return null;
 
   const prompt = trimmed
     .replace(/^(?:can|could|would)\s+you\s+/i, "")
@@ -243,13 +249,13 @@ function parseVibeMediaCommand(message: string): RoutedCommand | null {
     .replace(/\b(?:make|create|generate|render|craft|produce|show|give)\b/gi, "")
     .replace(/\b(?:me|us)\b/gi, "")
     .replace(/\b(?:a|an|the)\b/gi, " ")
-    .replace(/\b(?:video|clip|reel|animation|image|photo|picture|pic|artwork|art)\b/gi, " ")
+    .replace(/\b(?:video|clip|reel|animation|audio|song|music|voiceover|voice[- ]?over|soundtrack|podcast|image|photo|picture|pic|artwork|art)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 
   return {
     type: "media.generate",
-    mediaKind: hasVideoWord ? "video" : "image",
+    mediaKind: hasVideoWord ? "video" : hasAudioWord ? "audio" : "image",
     prompt: prompt || trimmed,
   };
 }
@@ -399,7 +405,12 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     const prompt = command.prompt.trim();
     if (!prompt) return { ok: false, status: 400, error: "Media prompt is required." };
     try {
-      const generated = command.mediaKind === "image" ? await generateImage(prompt) : await generateVideo(prompt);
+      const generated =
+        command.mediaKind === "image"
+          ? await generateImage(prompt)
+          : command.mediaKind === "audio"
+          ? await generateAudio(prompt)
+          : await generateVideo(prompt);
       const downloadUrl = new URL(generated.url, req.url).toString();
       return {
         ok: true, routed: "media", command: "media.generate",

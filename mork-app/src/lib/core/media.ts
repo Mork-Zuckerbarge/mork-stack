@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { parseEnvStyleUrls, readStylePackUrls } from "@/lib/core/stylePack";
 
 export type GeneratedMedia = {
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   url: string;
   filename: string;
   mimeType: string;
@@ -60,6 +60,9 @@ function fileExtForMime(mimeType: string): string {
   if (mimeType.includes("gif")) return "gif";
   if (mimeType.includes("mp4")) return "mp4";
   if (mimeType.includes("webm")) return "webm";
+  if (mimeType.includes("mpeg")) return "mp3";
+  if (mimeType.includes("mp3")) return "mp3";
+  if (mimeType.includes("wav")) return "wav";
   return "bin";
 }
 
@@ -274,6 +277,34 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     kind: "video",
     prompt,
     provider: usePollinationsDefault ? "pollinations" : "custom-free-tier",
+    mimeType,
+    ...persisted,
+  };
+}
+
+export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
+  const seed = Math.floor(Math.random() * 1_000_000_000);
+  const endpoint = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}`);
+  endpoint.searchParams.set("audio", "true");
+  endpoint.searchParams.set("nologo", "true");
+  endpoint.searchParams.set("enhance", "true");
+  endpoint.searchParams.set("seed", String(seed));
+  const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
+  if (token) endpoint.searchParams.set("key", token);
+  const headers: HeadersInit = token ? { Authorization: `Bearer ${token}`, accept: "audio/mpeg" } : { accept: "audio/mpeg" };
+  const res = await fetch(endpoint.toString(), { method: "GET", headers, cache: "no-store" });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Audio generation failed (${res.status})${detail ? `: ${detail}` : ""}`);
+  }
+  const mimeType = (res.headers.get("content-type") || "audio/mpeg").toLowerCase();
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!bytes.length) throw new Error("Audio generation returned empty bytes");
+  const persisted = await persistBytes(bytes, prompt, mimeType);
+  return {
+    kind: "audio",
+    prompt,
+    provider: "pollinations",
     mimeType,
     ...persisted,
   };
