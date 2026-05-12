@@ -10,6 +10,7 @@ const LAST_PLANNER_TRADE_KEY = "__planner_last_trade_iso_v1__";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
+const AGENT_SWAP_MAX_SOL = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
 
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
@@ -234,6 +235,11 @@ export async function POST() {
   try { amountSol = await estimateSolForUsd(decision.usd); }
   catch { return NextResponse.json({ ok: false, status: "error", reason: "quote_failed" }); }
 
+  const maxSol = Number.isFinite(AGENT_SWAP_MAX_SOL) && AGENT_SWAP_MAX_SOL > 0 ? AGENT_SWAP_MAX_SOL : 0.25;
+  if (amountSol > maxSol) {
+    amountSol = maxSol;
+  }
+
   const swapReq = new Request("http://planner.internal/api/trade/swap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -252,5 +258,5 @@ export async function POST() {
     update: { value: new Date().toISOString(), source: "agent", weight: 8 },
   });
 
-  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", usd: decision.usd, amountSol, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount } } });
+  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", usd: decision.usd, amountSol, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount } } });
 }
