@@ -6,7 +6,7 @@ type ChatMessage = {
   role: "user" | "agent";
   content: string;
   media?: {
-    kind: "image" | "video";
+    kind: "image" | "video" | "audio";
     url: string;
     filename: string;
     provider?: string;
@@ -70,7 +70,7 @@ export default function ChatPanel() {
           media:
             data?.media && typeof data.media?.url === "string" && typeof data.media?.filename === "string"
               ? {
-                  kind: data.media.kind === "video" ? "video" : "image",
+                  kind: data.media.kind === "video" ? "video" : data.media.kind === "audio" ? "audio" : "image",
                   url: data.media.url,
                   filename: data.media.filename,
                   provider: data.media.provider,
@@ -125,8 +125,10 @@ export default function ChatPanel() {
                 {m.media.kind === "image" ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={m.media.url} alt={m.media.prompt || m.media.filename} className="max-h-80 rounded-xl border border-white/10" />
-                ) : (
+                ) : m.media.kind === "video" ? (
                   <video src={m.media.url} controls className="max-h-80 rounded-xl border border-white/10" />
+                ) : (
+                  <audio src={m.media.url} controls className="w-full" />
                 )}
                 <div className="flex flex-wrap gap-2 text-xs">
                   <a
@@ -169,6 +171,7 @@ export default function ChatPanel() {
           { label: "telegram:", value: "post to telegram:" },
           { label: "generate image:", value: "generate image:" },
           { label: "generate video:", value: "generate video:" },
+          { label: "generate audio:", value: "generate audio:" },
           { label: "trade qty", value: "trade 2 usdc for btc" },
         ].map((preset) => (
           <button
@@ -186,7 +189,7 @@ export default function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder="Try: trade 2 usdc for btc | generate image: ... | generate video ... | send <file> to telegram with caption: ..."
+          placeholder="Try: trade 2 usdc for btc | generate image: ... | generate video ... | generate audio: ... | send <file> to telegram with caption: ..."
           className="flex-1 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 outline-none"
         />
         <button

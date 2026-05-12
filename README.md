@@ -55,6 +55,39 @@ If local changes exist, `./update.sh` auto-stashes them before pulling and then 
 - App/runtime docs: [`mork-app/README.md`](mork-app/README.md)
 - Sherpa module docs: [`services/sherpa/README.md`](services/sherpa/README.md)
 
+## Enrichment connections (OpenAI + Pollinations)
+
+Yes — the stack already supports external enrichment providers and can actively use them at runtime:
+
+- **OpenAI connection (text enrichment + fallback generation):**
+  - Enabled via `USE_OPENAI=1` in `mork-app/.env.local`.
+  - Key supplied through Sherpa credentials (`openai_key`) or environment.
+  - Sherpa routes responses through local/core/OpenAI paths depending on availability and mode.
+
+- **Pollinations connection (media enrichment):**
+  - **Images:** `https://image.pollinations.ai/prompt/{prompt}`
+  - **Video (+ optional audio mode):** `https://gen.pollinations.ai/image/{prompt}` with media query/model controls
+  - The app’s media runtime supports style/reference conditioning and provider-aware fallbacks.
+
+### Recommended enrichment env settings
+
+In `mork-app/.env.local`:
+
+```bash
+# OpenAI text enrichment/fallback path (Sherpa)
+USE_OPENAI="1"
+
+# Pollinations media enrichment
+MEDIA_VIDEO_ENDPOINT=""            # empty => use Pollinations default
+MEDIA_VIDEO_MODEL="veo"            # or another supported Pollinations model
+MEDIA_VIDEO_TOKEN=""               # optional, if your Pollinations route requires a token
+MEDIA_STYLE_IMAGE_URLS="https://...png,https://...png"
+```
+
+Notes:
+- Keep this architecture in-process: enrichment is consumed by existing app services (no new microservices required).
+- If OpenAI is disabled (`USE_OPENAI=0`), local/core model paths continue to work.
+
 ## Faceboot agent connection (Betaverse contract)
 
 Mork now supports the Betaverse Faceboot runtime contract pattern for posting/commenting.
