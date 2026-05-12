@@ -5,6 +5,7 @@ import { z } from "zod";
 import cron from "node-cron";
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
+import { createTradeIntel } from "./tradeIntel";
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.2:3b";
@@ -342,7 +343,8 @@ app.post("/chat/respond", async (req, res) => {
       },
     });
     const prime = getPrimeDirective();
-    const edgeLines = await getEdgeLines(6);
+    const isTelegram = channel === "telegram";
+    const edgeLines = isTelegram ? [] : await getEdgeLines(6);
     const reflection = await getLatestReflection();
 
     const ctxParts: string[] = [];
@@ -356,18 +358,27 @@ app.post("/chat/respond", async (req, res) => {
     }
 
     if (reflection) ctxParts.push(`INNER MONOLOGUE:\n${reflection}`);
+    if (!isTelegram) {
+      const tradeIntel = createTradeIntel(message, edgeLines);
+      ctxParts.push(`TRADING INTEL (internal features/signal/policy):\n${tradeIntel}`);
+    }
 
     ctxParts.push(
       `USER MESSAGE (do not quote verbatim):\n` +
       `${message}`
     );
+    const telegramGuard = isTelegram
+      ? `For Telegram replies, do NOT mention internal app trade efforts, bot performance, PnL, trade counts, execution logs, or system operations. Focus only on market-facing analysis/setup.\n`
+      : "";
+
     const instruction =
       `You are a trading assistant inside an app.\n` +
       `Max ${maxChars} characters.\n` +
       `No fluff, no roleplay, no moralizing, no fake certainty.\n` +
       `No URLs. Do not quote or restate the user message.\n` +
+      telegramGuard +
       `If the user asks for a trade decision, return action-first with concrete numbers: action, entry, stop, take-profit, size, and risk/reward.\n` +
-      `If key data is missing, ask one short concrete question or say: No trade — insufficient reliable data.\n` +
+      `If key data is missing, still provide the best provisional setup with explicit assumptions and confidence, then ask one short concrete question.\n` +
       `Return ONLY the reply text.`;
 
     let responseText = "";
@@ -606,6 +617,7 @@ app.post("/arb/reflect", async (_req, res) => {
 app.post("/chat/respond_v2", async (req, res) => {
   try {
     const channel = String(req.body?.channel ?? "telegram").slice(0, 24);
+    const isTelegram = channel === "telegram";
     const handle = String(req.body?.handle ?? "").slice(0, 64);
     const message = String(req.body?.message ?? "").trim();
     const maxChars = Math.min(Math.max(Number(req.body?.maxChars ?? 700), 120), 1200);
@@ -680,15 +692,22 @@ app.post("/chat/respond_v2", async (req, res) => {
           "\n\n"
         : "";
 
+    const marketLines = recent.filter((m) => String(m.content || "").toLowerCase().includes("opportunity") || String(m.content || "").toLowerCase().includes("edge=")).map((m) => String(m.content));
+    const tradeIntel = createTradeIntel(message, marketLines);
+    const telegramGuard = isTelegram
+      ? `For Telegram replies, do NOT mention internal app trade efforts, bot performance, PnL, trade counts, execution logs, or system operations. Focus only on market-facing analysis/setup.\n`
+      : "";
+
     // 3) Instruction (keep your “don’t quote” rule)
     const instruction =
       `You are an in-app trading assistant.\n` +
       `Reply as a chat message, 1–6 short sentences.\n` +
       `No fluff, no roleplay, no moralizing, no emojis, no URLs.\n` +
       `Do NOT quote or restate the user message.\n` +
+      telegramGuard +
       `Be specific and useful. Ask at most ONE concrete question.\n` +
       `For trade requests, answer action-first and include numbers (entry, stop, target, size, R:R).\n` +
-      `If data is insufficient, say: No trade — insufficient reliable data.\n` +
+      `If data is insufficient, provide a provisional setup with assumptions, confidence, and one concrete question needed to confirm.\n` +
       `Return ONLY the reply text.\n`;
 
     const prompt =
@@ -696,6 +715,7 @@ app.post("/chat/respond_v2", async (req, res) => {
       factsBlock +
       workingBlock +
       recentBlock +
+      (!isTelegram ? `TRADING INTEL (internal features/signal/policy):\n${tradeIntel}\n\n` : "") +
       `USER:\n${message}\n\nTASK:\n${instruction}\nREPLY:\n`;
 
     const out = await ollama(prompt);
