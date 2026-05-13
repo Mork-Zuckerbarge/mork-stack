@@ -4,6 +4,18 @@ import tempfile
 import subprocess
 import random
 import requests
+
+
+def telegram_post(method: str, *, data: dict, files: dict | None = None, timeout: int = 20):
+    res = requests.post(f"{API}/{method}", data=data, files=files, timeout=timeout)
+    res.raise_for_status()
+    try:
+        payload = res.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict) and payload.get("ok") is False:
+        raise RuntimeError(f"Telegram {method} failed: {payload.get('description') or payload}")
+    return payload
 from collections import defaultdict, deque
 from dotenv import load_dotenv
 
@@ -245,7 +257,7 @@ def send_message(chat_id: int, text: str, reply_to: int | None = None):
     if reply_to:
         data["reply_to_message_id"] = reply_to
         data["allow_sending_without_reply"] = True
-    requests.post(f"{API}/sendMessage", data=data, timeout=20)
+    telegram_post("sendMessage", data=data, timeout=20)
 
 
 def send_generated_media(chat_id: int, media: dict, caption: str = "", reply_to: int | None = None):
@@ -272,10 +284,10 @@ def send_generated_media(chat_id: int, media: dict, caption: str = "", reply_to:
 
     if kind == "video":
         files = {"video": ("mork.mp4", file_bytes, "video/mp4")}
-        requests.post(f"{API}/sendVideo", data=data, files=files, timeout=90).raise_for_status()
+        telegram_post("sendVideo", data=data, files=files, timeout=90)
     else:
         files = {"photo": ("mork.png", file_bytes, "image/png")}
-        requests.post(f"{API}/sendPhoto", data=data, files=files, timeout=90).raise_for_status()
+        telegram_post("sendPhoto", data=data, files=files, timeout=90)
     return True
 
 
@@ -359,7 +371,7 @@ def send_voice(chat_id: int, text: str, reply_to: int | None = None):
                 data["allow_sending_without_reply"] = True
             with open(ogg_path, "rb") as vf:
                 files = {"voice": vf}
-                requests.post(f"{API}/sendVoice", data=data, files=files, timeout=40)
+                telegram_post("sendVoice", data=data, files=files, timeout=40)
         else:
             # Fallback: send as audio/mp3 if ffmpeg not present
             data = {"chat_id": chat_id, "title": "Mork"}
@@ -368,7 +380,7 @@ def send_voice(chat_id: int, text: str, reply_to: int | None = None):
                 data["allow_sending_without_reply"] = True
             with open(mp3_path, "rb") as af:
                 files = {"audio": af}
-                requests.post(f"{API}/sendAudio", data=data, files=files, timeout=40)
+                telegram_post("sendAudio", data=data, files=files, timeout=40)
 
 
 def get_me():
@@ -443,11 +455,14 @@ def main():
                     # Commands: toggle voice per-user
                     if text.lower().startswith("/voice"):
                         parts = text.lower().split()
-                        if len(parts) >= 2 and parts[1] in ("on", "off"):
+                        if len(parts) == 1 or (len(parts) >= 2 and parts[1] == "status"):
+                            configured = bool(ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID)
+                            send_message(chat_id, f"Voice replies: {'ON' if voice_enabled[user_id] else 'OFF'} | ElevenLabs configured: {'YES' if configured else 'NO'}", reply_to=msg.get("message_id"))
+                        elif len(parts) >= 2 and parts[1] in ("on", "off"):
                             voice_enabled[user_id] = parts[1] == "on"
                             send_message(chat_id, f"Voice replies: {'ON' if voice_enabled[user_id] else 'OFF'}", reply_to=msg.get("message_id"))
                         else:
-                            send_message(chat_id, "Usage: /voice on  or  /voice off", reply_to=msg.get("message_id"))
+                            send_message(chat_id, "Usage: /voice on | /voice off | /voice status", reply_to=msg.get("message_id"))
                         continue
                     if text.lower().startswith("/memory"):
                         parts = text.lower().split()
