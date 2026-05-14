@@ -144,7 +144,6 @@ async function normalizeVideoStyleReferences(model: string, refs: string[]): Pro
 }
 
 export async function generateImage(prompt: string): Promise<GeneratedMedia> {
-  const seed = Math.floor(Math.random() * 1_000_000_000);
   const imageUrl = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`);
   imageUrl.searchParams.set("nologo", "true");
   imageUrl.searchParams.set("enhance", "true");
@@ -296,11 +295,9 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
 }
 
 export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
-  const seed = Math.floor(Math.random() * 1_000_000_000);
   const endpoint = new URL(`https://gen.pollinations.ai/audio/${encodeURIComponent(prompt)}`);
   endpoint.searchParams.set("nologo", "true");
   endpoint.searchParams.set("enhance", "true");
-  endpoint.searchParams.set("seed", String(seed));
   let audioModel = (process.env.MEDIA_AUDIO_MODEL || "").trim();
   if (audioModel && POLLINATIONS_TRANSCRIPTION_MODELS.has(audioModel.toLowerCase())) {
     audioModel = "";
