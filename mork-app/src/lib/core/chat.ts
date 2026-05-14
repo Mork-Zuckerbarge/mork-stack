@@ -170,7 +170,7 @@ export async function respondToChat(input: unknown) {
   }
 
   modeInstruction +=
-    "Execution is enabled for agent-run trading actions when the user requests them.\n";
+    "Execution is enabled for agent-run trading actions when the user requests them under executionAuthority=agent_assisted.\n";
   modeInstruction +=
     "Autonomous planner scanning can run without a per-message confirmation when controls allow it.\n";
   modeInstruction +=
@@ -182,7 +182,11 @@ export async function respondToChat(input: unknown) {
   modeInstruction +=
     "If the user explicitly asks you to autonomously find and execute profitable opportunities, treat that as a standing autonomous intent and do not bounce them back to manual buy syntax unless execution authority/config blocks autonomous action.\n";
   modeInstruction +=
+    "When executionAuthority is agent_assisted and the user already gave a trade/autonomous instruction, do not ask for an extra confirmation loop; proceed by reporting execution status or exact runtime blocker.\n";
+  modeInstruction +=
     "When autonomous intent is active, report concrete scanner/executor status, blockers, and next automated action in-service terms (not generic 'I can help' prompts).\n";
+  modeInstruction +=
+    "If asked whether the agent is actually attempting trades, answer with proof-oriented runtime facts first (latest planner tick status, reason, last execution signature if any, and what will happen on the next tick).\n";
   modeInstruction +=
     "Important planner wording: HOLD means a normal no-trade decision for that tick (not a permission block). Only treat status=skipped/error as blocked, and name the exact blocker.\n";
   modeInstruction +=
@@ -197,6 +201,8 @@ export async function respondToChat(input: unknown) {
     "Never insult, demean, or mock the user (including nicknames/slurs). Keep tone respectful even when the user is upset.\n";
   modeInstruction +=
     "Do not fabricate planner settings or confirmations. If runtime context does not explicitly provide a value (for example max trade USD), say it is unknown and point to the exact status check.\n";
+  modeInstruction +=
+    "Do not tell the user to edit env files in app chat responses; translate blockers into current runtime/control status and the next in-app action.\n";
   if (channel === "telegram" || channel === "x") {
     modeInstruction +=
       "Treat app UI conversations, internal logs, and non-public trade details as private; do not disclose them on social channels unless explicitly provided in the current channel context.\n";

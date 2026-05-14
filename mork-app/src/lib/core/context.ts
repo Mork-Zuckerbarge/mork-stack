@@ -105,9 +105,10 @@ export async function buildContext({ handle, channel, message }: BuildContextArg
     "  `ape $<amount> into <TOKEN>` — same as above",
     "  `use $<amount> USDC to buy <TOKEN>` — same as above",
     "  TOKEN can be a symbol (SOL, BBQ, USDC, BTC) or a Solana mint address.",
-    "  Requirements: MORK_AGENT_SWAP_ENABLED=1 must be set, execution authority must be agent_assisted, and amount must not exceed maxTradeUsd.",
+    "  Requirements: swap execution must be enabled, execution authority must be agent_assisted, and amount must not exceed maxTradeUsd.",
     "- AUTONOMOUS PLANNER: requires plannerEnabled=true and MORK_AUTONOMOUS_TRADING_ENABLED=1; otherwise autonomous ticks are skipped.",
     "- If asked whether the agent is scanning autonomously, answer status-first (enabled/disabled and exact blocker if disabled) and do NOT redirect to manual buy command format.",
+    "- When the user asks whether the agent is actually trying trades, include concrete evidence from runtime status (last planner result, executed/hold/skipped state, reason, and trade signature when available).",
     "- Use manual buy command format only when the user asks to execute a specific immediate trade by chat command.",
     "- If the user asks to start tasks, answer with the exact action(s) needed and call out current blockers first.",
   ].join("\n");

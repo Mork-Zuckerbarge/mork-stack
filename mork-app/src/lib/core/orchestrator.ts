@@ -15,6 +15,7 @@ import {
   stopArb,
   stopSherpa,
 } from "./appControl";
+import { ensurePlannerAutopilotStarted } from "./plannerAutopilot";
 
 type HealthStatus = "healthy" | "degraded" | "stopped" | "unknown";
 type HealthComponent = "app" | "wallet" | "chat" | "arb" | "sherpa";
@@ -43,6 +44,7 @@ const healthRegistry: Record<HealthComponent, HealthRecord> = {
 
 export async function startOrchestrator() {
   await setStartupCompleted(true);
+  ensurePlannerAutopilotStarted();
   updateHealth("app", "healthy", "orchestrator started");
   return getOrchestratorState();
 }
@@ -59,6 +61,7 @@ export async function stopOrchestrator() {
 export async function startRuntime(module: "arb" | "sherpa") {
   if (module === "arb") {
     await startArb();
+    ensurePlannerAutopilotStarted();
     updateHealth("arb", "healthy", "running");
   } else {
     await startSherpa();

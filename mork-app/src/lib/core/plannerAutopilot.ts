@@ -1,4 +1,5 @@
 import { POST as runPlannerTickRoute } from "@/app/planner/tick/route";
+import { getAppControlState } from "@/lib/core/appControl";
 
 type PlannerAutopilotState = {
   startedAt: number;
@@ -21,6 +22,13 @@ async function runTick(state: PlannerAutopilotState) {
   if (state.running) return;
   state.running = true;
   try {
+    const app = await getAppControlState();
+    const shouldRun =
+      app.controls.startupCompleted &&
+      app.arb.status === "running" &&
+      app.controls.plannerEnabled &&
+      app.controls.executionAuthority.mode === "agent_assisted";
+    if (!shouldRun) return;
     await runPlannerTickRoute();
   } catch {
     // Keep scheduler alive even when a tick fails.
@@ -31,7 +39,6 @@ async function runTick(state: PlannerAutopilotState) {
 
 export function ensurePlannerAutopilotStarted() {
   if (process.env.MORK_PLANNER_AUTORUN === "0") return;
-  if (process.env.MORK_AUTONOMOUS_TRADING_ENABLED !== "1") return;
   if (globalThis.__morkPlannerAutopilotState) return;
 
   const intervalMs = getIntervalMs();
