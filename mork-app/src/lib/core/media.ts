@@ -289,10 +289,22 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
   endpoint.searchParams.set("nologo", "true");
   endpoint.searchParams.set("enhance", "true");
   endpoint.searchParams.set("seed", String(seed));
+  const audioModel = (process.env.MEDIA_AUDIO_MODEL || "").trim();
+  if (audioModel) endpoint.searchParams.set("model", audioModel);
   const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
   if (token) endpoint.searchParams.set("key", token);
   const headers: HeadersInit = token ? { Authorization: `Bearer ${token}`, accept: "audio/mpeg" } : { accept: "audio/mpeg" };
-  const res = await fetch(endpoint.toString(), { method: "GET", headers, cache: "no-store" });
+  const requestAudio = async (url: URL) => fetch(url.toString(), { method: "GET", headers, cache: "no-store" });
+  let res = await requestAudio(endpoint);
+  if (!res.ok && audioModel) {
+    const detail = await res.text().catch(() => "");
+    if (res.status === 400 && isPollinationsModelError(detail)) {
+      endpoint.searchParams.delete("model");
+      res = await requestAudio(endpoint);
+    } else {
+      throw new Error(`Audio generation failed (${res.status})${detail ? `: ${detail}` : ""}`);
+    }
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`Audio generation failed (${res.status})${detail ? `: ${detail}` : ""}`);
