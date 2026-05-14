@@ -11,5 +11,5 @@ export async function POST() {
 }
 
 export async function OPTIONS() {
-  return NextResponse.json({ ok: true }, { status: 204 });
+  return new NextResponse(null, { status: 204 });
 }

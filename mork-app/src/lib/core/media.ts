@@ -294,7 +294,17 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
   const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
   if (token) endpoint.searchParams.set("key", token);
   const headers: HeadersInit = token ? { Authorization: `Bearer ${token}`, accept: "audio/mpeg" } : { accept: "audio/mpeg" };
-  const res = await fetch(endpoint.toString(), { method: "GET", headers, cache: "no-store" });
+  const requestAudio = async (url: URL) => fetch(url.toString(), { method: "GET", headers, cache: "no-store" });
+  let res = await requestAudio(endpoint);
+  if (!res.ok && audioModel) {
+    const detail = await res.text().catch(() => "");
+    if (res.status === 400 && isPollinationsModelError(detail)) {
+      endpoint.searchParams.delete("model");
+      res = await requestAudio(endpoint);
+    } else {
+      throw new Error(`Audio generation failed (${res.status})${detail ? `: ${detail}` : ""}`);
+    }
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`Audio generation failed (${res.status})${detail ? `: ${detail}` : ""}`);
