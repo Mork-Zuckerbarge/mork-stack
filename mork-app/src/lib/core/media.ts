@@ -119,6 +119,13 @@ async function detectRemoteMimeType(url: string): Promise<string | null> {
   }
 }
 
+
+function buildStyleInfluencedPrompt(prompt: string): string {
+  return `${prompt}
+
+Style guidance: use provided reference images for broad visual language only (palette, mood, lighting, texture, composition rhythm). Do NOT recreate specific subjects, scenes, characters, logos, layouts, camera angles, or 1:1 compositions from any reference image. Avoid "turn this image into 3D" behavior; generate a novel scene that matches the user prompt while keeping only high-level stylistic influence.`;
+}
+
 async function normalizeVideoStyleReferences(model: string, refs: string[]): Promise<string[]> {
   if (model !== "nova-reel" || !refs.length) return refs;
   const accepted: string[] = [];
@@ -174,8 +181,9 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
       ? fallbackVideoModel
       : "ltx-2";
 
+  const styleAwarePrompt = buildStyleInfluencedPrompt(prompt);
   const endpoint = usePollinationsDefault
-    ? `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}`
+    ? `https://gen.pollinations.ai/image/${encodeURIComponent(styleAwarePrompt)}`
     : configuredEndpoint;
   const url = new URL(endpoint);
   if (usePollinationsDefault) {
@@ -200,7 +208,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
     }
   }
 
-  const body = !usePollinationsDefault && method !== "GET" ? JSON.stringify({ prompt }) : undefined;
+  const body = !usePollinationsDefault && method !== "GET" ? JSON.stringify({ prompt: styleAwarePrompt }) : undefined;
   const baseHeaders: HeadersInit = {
     ...(!usePollinationsDefault ? { "Content-Type": "application/json" } : {}),
   };
@@ -309,9 +317,24 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
     const detail = await res.text().catch(() => "");
     throw new Error(`Audio generation failed (${res.status})${detail ? `: ${detail}` : ""}`);
   }
-  const mimeType = (res.headers.get("content-type") || "audio/mpeg").toLowerCase();
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (!bytes.length) throw new Error("Audio generation returned empty bytes");
+  let mimeType = (res.headers.get("content-type") || "audio/mpeg").toLowerCase();
+  let bytes = new Uint8Array(await res.arrayBuffer());
+
+  const isAudioMime = mimeType.startsWith("audio/");
+  if (!bytes.length || !isAudioMime) {
+    if (audioModel) endpoint.searchParams.delete("model");
+    const retryRes = await requestAudio(endpoint);
+    if (!retryRes.ok) {
+      const detail = await retryRes.text().catch(() => "");
+      throw new Error(`Audio generation failed (${retryRes.status})${detail ? `: ${detail}` : ""}`);
+    }
+    mimeType = (retryRes.headers.get("content-type") || "audio/mpeg").toLowerCase();
+    bytes = new Uint8Array(await retryRes.arrayBuffer());
+  }
+
+  if (!bytes.length || !mimeType.startsWith("audio/")) {
+    throw new Error(`Audio generation failed: provider returned non-audio payload (${mimeType || "unknown"})`);
+  }
   const persisted = await persistBytes(bytes, prompt, mimeType);
   return {
     kind: "audio",

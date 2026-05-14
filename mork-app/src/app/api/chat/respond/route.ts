@@ -105,8 +105,17 @@ function normalizeBotToken(rawToken: string): string {
   return trimmed;
 }
 
+
+function normalizeLeadingChatBullets(input: string): string {
+  return input
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[-*•]\s*/, "").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
 function parseCommand(message: string): RoutedCommand | null {
-  const trimmed = message.trim();
+  const trimmed = normalizeLeadingChatBullets(message).trim();
   if (!trimmed) return null;
   const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() ?? "";
 
@@ -225,7 +234,7 @@ function parseCommand(message: string): RoutedCommand | null {
 }
 
 function parseVibeMediaCommand(message: string): RoutedCommand | null {
-  const trimmed = message.trim();
+  const trimmed = normalizeLeadingChatBullets(message).trim();
   if (!trimmed || trimmed.endsWith("?")) return null;
 
   const hasVideoWord = /\b(video|clip|reel|animation)\b/i.test(trimmed);
