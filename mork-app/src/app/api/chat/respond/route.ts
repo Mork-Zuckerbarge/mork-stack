@@ -233,6 +233,42 @@ function parseCommand(message: string): RoutedCommand | null {
   return null;
 }
 
+function isAutonomousTradeIntentMessage(message: string) {
+  const normalized = normalizeLeadingChatBullets(message).toLowerCase();
+  if (!normalized) return false;
+  if (!/\b(auto(?:nomous|pilot)?|agent)\b/.test(normalized)) return false;
+  return (
+    /\b(trade|trades|scann?ing|arb|arbitrage|execute|find opportunities|hunt opportunities)\b/.test(normalized) ||
+    /\btry(?:ing)? to trade\b/.test(normalized)
+  );
+}
+
+async function executeAutonomousIntentTick() {
+  const plannerResponse = await runPlannerTickRoute();
+  const plannerJson = (await plannerResponse.json().catch(() => ({}))) as {
+    status?: string;
+    reason?: string;
+    minutesRemaining?: number;
+    signature?: string | null;
+    usd?: number;
+    error?: string;
+  };
+  if (plannerJson.status === "executed") {
+    return `Autonomous planner tick just ran and executed a trade${plannerJson.usd ? ` ($${plannerJson.usd.toFixed(2)} target)` : ""}${plannerJson.signature ? `, signature: ${plannerJson.signature}` : ""}.`;
+  }
+  if (plannerJson.status === "hold") {
+    return `Autonomous planner tick just ran and returned HOLD (${plannerJson.reason || "no qualifying setup"}).`;
+  }
+  if (plannerJson.status === "skipped") {
+    const cooldownDetail =
+      plannerJson.reason === "cooldown_active" && typeof plannerJson.minutesRemaining === "number"
+        ? ` (${plannerJson.minutesRemaining.toFixed(1)} min remaining)`
+        : "";
+    return `Autonomous planner tick did not execute a trade: ${plannerJson.reason || "skipped"}${cooldownDetail}.`;
+  }
+  return `Autonomous planner tick failed: ${plannerJson.error || plannerJson.reason || `status ${plannerResponse.status}`}.`;
+}
+
 function parseVibeMediaCommand(message: string): RoutedCommand | null {
   const trimmed = normalizeLeadingChatBullets(message).trim();
   if (!trimmed || trimmed.endsWith("?")) return null;
@@ -670,6 +706,11 @@ export async function POST(req: NextRequest) {
       message,
       maxChars: typeof body?.maxChars === "number" ? body.maxChars : 12000,
     });
+
+    if (result.ok && typeof result.response === "string" && isAutonomousTradeIntentMessage(message)) {
+      const runtimeTick = await executeAutonomousIntentTick();
+      result.response = `${result.response.trim()}\n\n${runtimeTick}`.trim();
+    }
 
     return NextResponse.json(result, { status: result.status || 200 });
   } catch (e: unknown) {
