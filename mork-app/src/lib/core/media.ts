@@ -24,6 +24,10 @@ const POLLINATIONS_VIDEO_MODELS = new Set([
   "p-video",
   "nova-reel",
 ]);
+
+
+const POLLINATIONS_AUDIO_FALLBACK_MODELS = ["openai-audio", "openai"];
+
 function isPollinationsModelError(detail: string): boolean {
   const lowered = detail.toLowerCase();
   if (lowered.includes('path":["model"]') || lowered.includes("invalid option")) {
@@ -320,6 +324,16 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
   let mimeType = (res.headers.get("content-type") || "audio/mpeg").toLowerCase();
   let bytes = new Uint8Array(await res.arrayBuffer());
 
+  const retryWithModel = async (model: string): Promise<{ mimeType: string; bytes: Uint8Array } | null> => {
+    endpoint.searchParams.set("model", model);
+    const modelRes = await requestAudio(endpoint);
+    if (!modelRes.ok) return null;
+    const nextMimeType = (modelRes.headers.get("content-type") || "audio/mpeg").toLowerCase();
+    const nextBytes = new Uint8Array(await modelRes.arrayBuffer());
+    if (!nextBytes.length || !nextMimeType.startsWith("audio/")) return null;
+    return { mimeType: nextMimeType, bytes: nextBytes };
+  };
+
   const isAudioMime = mimeType.startsWith("audio/");
   if (!bytes.length || !isAudioMime) {
     if (audioModel) endpoint.searchParams.delete("model");
@@ -330,10 +344,22 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
     }
     mimeType = (retryRes.headers.get("content-type") || "audio/mpeg").toLowerCase();
     bytes = new Uint8Array(await retryRes.arrayBuffer());
+
+    if (!bytes.length || !mimeType.startsWith("audio/")) {
+      for (const model of POLLINATIONS_AUDIO_FALLBACK_MODELS) {
+        if (model === audioModel) continue;
+        const retried = await retryWithModel(model);
+        if (retried) {
+          mimeType = retried.mimeType;
+          bytes = retried.bytes;
+          break;
+        }
+      }
+    }
   }
 
   if (!bytes.length || !mimeType.startsWith("audio/")) {
-    throw new Error(`Audio generation failed: provider returned non-audio payload (${mimeType || "unknown"})`);
+    throw new Error(`Audio generation failed: provider returned non-audio payload (${mimeType || "unknown"}). Try setting MEDIA_AUDIO_MODEL=openai-audio.`);
   }
   const persisted = await persistBytes(bytes, prompt, mimeType);
   return {
