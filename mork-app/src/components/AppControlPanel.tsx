@@ -358,16 +358,12 @@ export default function AppControlPanel() {
             <div className="mb-1 text-xs uppercase tracking-wide text-white/60">Research + Controls</div>
             <FlagToggle label="Memory" enabled={state.controls.memoryEnabled} onToggle={(value) => act("controls.set", { key: "memoryEnabled", value })} busy={busy} />
             <FlagToggle label="Planner" enabled={state.controls.plannerEnabled} onToggle={(value) => act("controls.set", { key: "plannerEnabled", value })} busy={busy} />
-            <FlagToggle label="Wallet Auto Refresh" enabled={state.controls.walletAutoRefreshEnabled} onToggle={(value) => act("controls.set", { key: "walletAutoRefreshEnabled", value })} busy={busy} />
             <FlagToggle
-              label="OpenAI Fallback"
+              label="OpenAI Fallback + Enrichment"
               enabled={openAiRuntime.enabled}
               onToggle={(value) => act("openai.mode.set", { enabled: value })}
               busy={busy}
             />
-            <p className="text-[11px] text-white/50">
-              Controls USE_OPENAI in mork-app/.env.local for Sherpa fallback routing. Restart Sherpa after changing.
-            </p>
             <button
               onClick={() => act("memory.flush")}
               disabled={busy}
@@ -375,13 +371,9 @@ export default function AppControlPanel() {
             >
               Flush Conversation Memory (Prisma)
             </button>
-            <p className="text-[11px] text-white/50">
-              Clears Memory + MemorySummary tables to remove stale narrative drift. Persona modes/guidelines are kept.
-            </p>
           </div>
 
           <div className="rounded-2xl bg-black/35 p-3">
-            <div className="mb-2 text-xs uppercase tracking-wide text-white/60">Channel-level Controls</div>
             <FlagToggle label="Telegram Enabled" enabled={state.controls.telegramEnabled} onToggle={(value) => act("controls.set", { key: "telegramEnabled", value })} busy={busy} />
             <FlagToggle label="X Enabled" enabled={state.controls.xEnabled} onToggle={(value) => act("controls.set", { key: "xEnabled", value })} busy={busy} />
             <PersonaEditor
