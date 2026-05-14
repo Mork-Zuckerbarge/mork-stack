@@ -26,7 +26,8 @@ const POLLINATIONS_VIDEO_MODELS = new Set([
 ]);
 
 
-const POLLINATIONS_AUDIO_FALLBACK_MODELS = ["openai-audio", "openai"];
+const POLLINATIONS_AUDIO_FALLBACK_MODELS = ["elevenmusic", "openai-audio", "openai"];
+const POLLINATIONS_TRANSCRIPTION_MODELS = new Set(["scribe", "whisper-1", "whisper-large-v3", "universal-2", "universal-3-pro"]);
 
 function isPollinationsModelError(detail: string): boolean {
   const lowered = detail.toLowerCase();
@@ -143,7 +144,6 @@ async function normalizeVideoStyleReferences(model: string, refs: string[]): Pro
 }
 
 export async function generateImage(prompt: string): Promise<GeneratedMedia> {
-  const seed = Math.floor(Math.random() * 1_000_000_000);
   const imageUrl = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`);
   imageUrl.searchParams.set("nologo", "true");
   imageUrl.searchParams.set("enhance", "true");
@@ -295,14 +295,16 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
 }
 
 export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
-  const seed = Math.floor(Math.random() * 1_000_000_000);
-  const endpoint = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}`);
-  endpoint.searchParams.set("audio", "true");
+  const endpoint = new URL(`https://gen.pollinations.ai/audio/${encodeURIComponent(prompt)}`);
   endpoint.searchParams.set("nologo", "true");
   endpoint.searchParams.set("enhance", "true");
-  endpoint.searchParams.set("seed", String(seed));
-  const audioModel = (process.env.MEDIA_AUDIO_MODEL || "").trim();
+  let audioModel = (process.env.MEDIA_AUDIO_MODEL || "").trim();
+  if (audioModel && POLLINATIONS_TRANSCRIPTION_MODELS.has(audioModel.toLowerCase())) {
+    audioModel = "";
+  }
+  if (!audioModel) audioModel = "elevenmusic";
   if (audioModel) endpoint.searchParams.set("model", audioModel);
+  endpoint.searchParams.set("instrumental", "true");
   const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
   if (token) endpoint.searchParams.set("key", token);
   const headers: HeadersInit = token ? { Authorization: `Bearer ${token}`, accept: "audio/mpeg" } : { accept: "audio/mpeg" };
