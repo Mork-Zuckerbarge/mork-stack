@@ -298,8 +298,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
 export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
   const seed = Math.floor(Math.random() * 1_000_000_000);
   const musicOnlyPrompt = `Instrumental music only, no vocals, no spoken words. ${prompt}`;
-  const endpoint = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(musicOnlyPrompt)}`);
-  endpoint.searchParams.set("audio", "true");
+  const endpoint = new URL(`https://gen.pollinations.ai/audio/${encodeURIComponent(musicOnlyPrompt)}`);
   endpoint.searchParams.set("nologo", "true");
   endpoint.searchParams.set("enhance", "true");
   endpoint.searchParams.set("seed", String(seed));
