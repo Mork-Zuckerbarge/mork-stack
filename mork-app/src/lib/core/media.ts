@@ -289,6 +289,8 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
   endpoint.searchParams.set("nologo", "true");
   endpoint.searchParams.set("enhance", "true");
   endpoint.searchParams.set("seed", String(seed));
+  const audioModel = (process.env.MEDIA_AUDIO_MODEL || "").trim();
+  if (audioModel) endpoint.searchParams.set("model", audioModel);
   const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
   if (token) endpoint.searchParams.set("key", token);
   const headers: HeadersInit = token ? { Authorization: `Bearer ${token}`, accept: "audio/mpeg" } : { accept: "audio/mpeg" };
