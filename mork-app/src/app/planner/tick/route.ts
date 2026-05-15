@@ -29,7 +29,7 @@ async function estimateSolForUsd(usd: number): Promise<number> {
   return outLamports / 1_000_000_000;
 }
 
-async function pickBestMint(allowlist: string[]): Promise<string | null> {
+async function rankPolicyMints(allowlist: string[]): Promise<string[]> {
   const now = Date.now();
   const policies = await prisma.arbPolicy.findMany({ where: { mint: { in: allowlist } } });
 
@@ -44,8 +44,25 @@ async function pickBestMint(allowlist: string[]): Promise<string | null> {
   for (const mint of allowlist) {
     if (!scoreMap.has(mint)) scoreMap.set(mint, 0);
   }
-  const sorted = [...scoreMap.entries()].sort((a, b) => b[1] - a[1]);
-  return sorted[0]?.[0] ?? null;
+  return [...scoreMap.entries()].sort((a, b) => b[1] - a[1]).map(([mint]) => mint);
+}
+
+async function isMintTradableFromSol(outputMint: string): Promise<boolean> {
+  const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
+  quoteUrl.searchParams.set("inputMint", SOL_MINT);
+  quoteUrl.searchParams.set("outputMint", outputMint);
+  quoteUrl.searchParams.set("amount", "1000000");
+  quoteUrl.searchParams.set("slippageBps", "50");
+  const res = await fetch(quoteUrl.toString(), { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
+  return Boolean(res?.ok);
+}
+
+async function pickBestTradableMint(allowlist: string[]): Promise<string | null> {
+  const ranked = await rankPolicyMints(allowlist);
+  for (const mint of ranked) {
+    if (await isMintTradableFromSol(mint)) return mint;
+  }
+  return null;
 }
 
 
@@ -286,10 +303,10 @@ export async function POST() {
     data: { type: "reflection", content: `Autonomous planner tick decision: ${decision.reason} runId=${runId}`, entities: ["planner:decision", `planner:run:${runId}`], importance: 0.55, source: "system" },
   });
 
-  const outputMint = await pickBestMint(allowlist);
+  const outputMint = await pickBestTradableMint(allowlist);
   if (!outputMint) {
-    await logSkip("no_eligible_mint");
-    return NextResponse.json({ ok: true, status: "skipped", reason: "no_eligible_mint", runId });
+    await logSkip("no_tradable_mint");
+    return NextResponse.json({ ok: true, status: "skipped", reason: "no_tradable_mint", runId });
   }
 
   let amountSol: number;
