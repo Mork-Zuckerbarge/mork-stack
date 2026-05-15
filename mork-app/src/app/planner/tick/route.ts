@@ -3,7 +3,7 @@ import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
 import { ollama } from "@/lib/core/ollama";
 import { POST as executeSwapRoute } from "@/app/api/trade/swap/route";
-import { getWalletBalancesForMints } from "@/lib/core/wallet";
+import { getWalletTokenBalances } from "@/lib/core/wallet";
 
 export const runtime = "nodejs";
 
@@ -260,7 +260,8 @@ export async function POST() {
     return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty", runId });
   }
 
-  const walletBalances = await getWalletBalancesForMints([SOL_MINT, USDC_MINT, ...allowlist]);
+  const tokenBalances = await getWalletTokenBalances();
+  const walletBalances = Object.fromEntries(tokenBalances.map((row) => [row.mint, row.balance])) as Record<string, number>;
   const heldMint = allowlist.find((mint) => Number(walletBalances[mint] ?? 0) > 0);
   if (heldMint) {
     const heldAmount = Number(walletBalances[heldMint] ?? 0);
