@@ -141,7 +141,18 @@ async function buildDecisionContext(): Promise<PlannerContext> {
   return { text: parts.join("\n\n"), signalCount: recentSignals.length, feedCount: recentFeed.length, policyCount: topPolicies.length };
 }
 
-type PlannerDecision = { go: boolean; usd: number; reason: string; reasonCode: "model_trade" | "model_hold" | "model_error" | "model_invalid" };
+type PlannerReasonCode =
+  | "model_trade"
+  | "model_hold"
+  | "model_error"
+  | "model_invalid"
+  | "fallback_trade_on_positive_policy_signal"
+  | "fallback_trade_retry"
+  | "no_positive_policy_signal"
+  | "quote_failed"
+  | "swap_failed";
+
+type PlannerDecision = { go: boolean; usd: number; reason: string; reasonCode: PlannerReasonCode };
 
 async function getTradeDecision(context: string, maxTradeUsd: number): Promise<PlannerDecision> {
   const effectiveMaxTradeUsd = Number.isFinite(maxTradeUsd) && maxTradeUsd > 0 ? maxTradeUsd : 1_000_000;
@@ -172,12 +183,13 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<P
 }
 
 export async function POST() {
+  const runId = `planner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const logSkip = async (reason: string) => {
     await prisma.memory.create({
       data: {
         type: "reflection",
-        content: `Autonomous planner tick skipped: ${reason}`,
-        entities: ["planner:skip"],
+        content: `Autonomous planner tick skipped: ${reason} runId=${runId}`,
+        entities: ["planner:skip", `planner:run:${runId}`],
         importance: 0.45,
         source: "system",
       },
@@ -186,7 +198,7 @@ export async function POST() {
 
   if (process.env.MORK_AUTONOMOUS_TRADING_ENABLED !== "1") {
     await logSkip("autonomous_disabled");
-    return NextResponse.json({ ok: true, status: "skipped", reason: "autonomous_disabled" });
+    return NextResponse.json({ ok: true, status: "skipped", reason: "autonomous_disabled", runId });
   }
 
   const control = await getAppControlState();
@@ -194,17 +206,17 @@ export async function POST() {
 
   if (!control.controls.plannerEnabled) {
     await logSkip("planner_disabled");
-    return NextResponse.json({ ok: true, status: "skipped", reason: "planner_disabled" });
+    return NextResponse.json({ ok: true, status: "skipped", reason: "planner_disabled", runId });
   }
   if (authority.mode === "emergency_stop") {
     await logSkip("emergency_stop");
-    return NextResponse.json({ ok: true, status: "skipped", reason: "emergency_stop" });
+    return NextResponse.json({ ok: true, status: "skipped", reason: "emergency_stop", runId });
   }
 
   const allowlist = authority.mintAllowlist.filter((m) => m !== SOL_MINT && m !== USDC_MINT);
   if (allowlist.length === 0) {
     await logSkip("allowlist_empty");
-    return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty" });
+    return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty", runId });
   }
 
   const context = await buildDecisionContext();
@@ -214,29 +226,53 @@ export async function POST() {
 
   if (!decision.go) {
     const positiveSignal = await hasPositivePolicySignal(allowlist);
-    const fallbackUsdBase = Number.isFinite(authority.maxTradeUsd) && authority.maxTradeUsd > 0 ? authority.maxTradeUsd : 100;
-    decision.go = true;
-    decision.usd = Math.max(1, fallbackUsdBase);
-    decision.reason = positiveSignal
-      ? `${decision.reason || "HOLD"} -> fallback_trade_on_positive_policy_signal`
-      : `${decision.reason || "HOLD"} -> fallback_trade_retry`;
-    fallbackApplied = true;
+    if (positiveSignal) {
+      const fallbackUsdBase = Number.isFinite(authority.maxTradeUsd) && authority.maxTradeUsd > 0 ? authority.maxTradeUsd : 100;
+      decision.go = true;
+      decision.usd = Math.max(1, fallbackUsdBase);
+      decision.reason = `${decision.reason || "HOLD"} -> fallback_trade_on_positive_policy_signal`;
+      decision.reasonCode = "fallback_trade_on_positive_policy_signal";
+      fallbackApplied = true;
+    } else {
+      decision.reasonCode = "no_positive_policy_signal";
+      await prisma.memory.create({
+        data: {
+          type: "reflection",
+          content: `Autonomous planner tick searching_opportunities: no_positive_policy_signal runId=${runId}`,
+          entities: ["planner:searching", `planner:run:${runId}`],
+          importance: 0.5,
+          source: "system",
+        },
+      });
+      return NextResponse.json({
+        ok: true,
+        status: "skipped",
+        reason: "searching_opportunities",
+        runId,
+        decisionMeta: {
+          reasonCode: decision.reasonCode,
+          fallbackApplied,
+          feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount },
+          exitPlan: null,
+        },
+      });
+    }
   }
 
 
   await prisma.memory.create({
-    data: { type: "reflection", content: `Autonomous planner tick decision: ${decision.reason}`, entities: ["planner:decision"], importance: 0.55, source: "system" },
+    data: { type: "reflection", content: `Autonomous planner tick decision: ${decision.reason} runId=${runId}`, entities: ["planner:decision", `planner:run:${runId}`], importance: 0.55, source: "system" },
   });
 
   const outputMint = await pickBestMint(allowlist);
   if (!outputMint) {
     await logSkip("no_eligible_mint");
-    return NextResponse.json({ ok: true, status: "skipped", reason: "no_eligible_mint" });
+    return NextResponse.json({ ok: true, status: "skipped", reason: "no_eligible_mint", runId });
   }
 
   let amountSol: number;
   try { amountSol = await estimateSolForUsd(decision.usd); }
-  catch { return NextResponse.json({ ok: false, status: "error", reason: "quote_failed" }); }
+  catch { return NextResponse.json({ ok: false, status: "error", reason: "quote_failed", runId, decisionMeta: { reasonCode: "quote_failed" } }); }
 
   const maxSol = Number.isFinite(AGENT_SWAP_MAX_SOL) && AGENT_SWAP_MAX_SOL > 0 ? AGENT_SWAP_MAX_SOL : Number.POSITIVE_INFINITY;
   if (amountSol > maxSol) amountSol = maxSol;
@@ -250,7 +286,7 @@ export async function POST() {
   const swapJson = (await swapResponse.json().catch(() => ({}))) as { ok?: boolean; error?: string; signature?: string };
 
   if (!swapResponse.ok || !swapJson.ok) {
-    return NextResponse.json({ ok: false, status: "error", reason: "swap_failed", error: swapJson.error ?? `planner swap failed (${swapResponse.status})` }, { status: swapResponse.status || 500 });
+    return NextResponse.json({ ok: false, status: "error", reason: "swap_failed", runId, decisionMeta: { reasonCode: "swap_failed" }, error: swapJson.error ?? `planner swap failed (${swapResponse.status})` }, { status: swapResponse.status || 500 });
   }
 
   await prisma.memoryFact.upsert({
@@ -259,5 +295,5 @@ export async function POST() {
     update: { value: new Date().toISOString(), source: "agent", weight: 8 },
   });
 
-  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", usd: decision.usd, amountSol, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount } } });
+  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", runId, usd: decision.usd, amountSol, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: control.controls.strategyEngines.momentumRunner.exitTrailingStopPct ?? null, maxHoldMinutes: control.controls.strategyEngines.momentumRunner.maxHoldMinutes ?? null, hardStopLossPct: control.controls.strategyEngines.momentumRunner.hardStopLossPct ?? null } } });
 }
