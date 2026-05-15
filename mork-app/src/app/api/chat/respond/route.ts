@@ -20,6 +20,7 @@ type RoutedCommand =
   | { type: "trade"; quantity: number; inputSymbol: string; outputSymbol: string }
   | { type: "trade.sellAll"; inputSymbol: string; outputSymbol: string }
   | { type: "trade.autosearch" }
+  | { type: "trade.autonomyCheck" }
   | { type: "services.status" }
   | { type: "service.start"; service: "arb" | "sherpa" }
   | { type: "service.stop"; service: "arb" | "sherpa" };
@@ -205,6 +206,10 @@ function parseCommand(message: string): RoutedCommand | null {
   if (buyWordsMatch) {
     const quantity = parseUsdAmount(buyWordsMatch[1]);
     if (quantity) return { type: "trade", quantity, inputSymbol: "USDC", outputSymbol: normalizeTokenRef(buyWordsMatch[2]) };
+  }
+
+  if (/real\s+autonomy\s+check/i.test(trimmed) || /autonom(?:y|ous)\s+check/i.test(trimmed)) {
+    return { type: "trade.autonomyCheck" };
   }
 
   if (
@@ -592,6 +597,61 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
       ok: false,
       status: plannerResponse.status || 500,
       error: plannerJson.error || plannerJson.reason || "Autonomous trade scan failed.",
+    };
+  }
+
+  if (command.type === "trade.autonomyCheck") {
+    const control = await getAppControlState();
+    const authority = control.controls.executionAuthority;
+    const tickResponse = await runPlannerTickRoute();
+    const tickJson = (await tickResponse.json().catch(() => ({}))) as {
+      status?: string;
+      reason?: string;
+      signature?: string | null;
+      error?: string;
+      decisionMeta?: { reasonCode?: string };
+    };
+
+    const recentPlanner = await prisma.memory.findMany({
+      where: {
+        source: "system",
+        OR: [
+          { content: { contains: "Autonomous planner tick decision:" } },
+          { content: { contains: "Autonomous planner tick skipped:" } },
+          { content: { contains: "Autonomous planner tick searching_opportunities:" } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+      select: { createdAt: true, content: true },
+    });
+
+    const plannerLines = recentPlanner.map((row, idx) => {
+      const content = String(row.content || "");
+      const runId = content.match(/runId=([a-z0-9_]+)/i)?.[1] || "unknown";
+      const status = content.includes("tick decision:")
+        ? "decision"
+        : content.includes("tick skipped:")
+        ? "skipped"
+        : content.includes("searching_opportunities:")
+        ? "searching_opportunities"
+        : "unknown";
+      const reasonCode = content.match(/fallback_trade_[a-z_]+|no_positive_policy_signal|model_[a-z_]+/i)?.[0] || "n/a";
+      return `${idx + 1}. ${row.createdAt.toISOString()} runId=${runId} status=${status} reasonCode=${reasonCode}`;
+    });
+
+    return {
+      ok: true,
+      status: 200,
+      routed: "planner",
+      command: "trade.autonomyCheck",
+      response:
+        `Autonomy check result:\n` +
+        `- plannerEnabled: ${control.controls.plannerEnabled}\n` +
+        `- MORK_AUTONOMOUS_TRADING_ENABLED: ${process.env.MORK_AUTONOMOUS_TRADING_ENABLED === "1" ? "1 (enabled)" : "0 (disabled)"}\n` +
+        `- executionAuthority: mode=${authority.mode}, maxTradeUsd=${authority.maxTradeUsd}, cooldownMinutes=${authority.cooldownMinutes}\n` +
+        `- thisTick: status=${tickJson.status || "unknown"}, reasonCode=${tickJson.decisionMeta?.reasonCode || "n/a"}, attemptedSwap=${tickJson.status === "executed" ? "true" : "false"}, signature=${tickJson.signature || "none"}, error=${tickJson.error || "none"}\n` +
+        `- recentPlannerTicks:\n${plannerLines.length ? plannerLines.map((line) => `  ${line}`).join("\n") : "  none found"}`,
     };
   }
 
