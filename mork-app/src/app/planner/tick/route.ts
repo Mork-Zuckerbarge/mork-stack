@@ -10,7 +10,9 @@ const LAST_PLANNER_TRADE_KEY = "__planner_last_trade_iso_v1__";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
-const AGENT_SWAP_MAX_SOL = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0);
+// Keep planner sizing aligned with /api/trade/swap guard default.
+// If env is unset/invalid, swap route enforces 0.25 SOL max.
+const AGENT_SWAP_MAX_SOL = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
 
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
@@ -61,6 +63,14 @@ async function hasPositivePolicySignal(allowlist: string[]): Promise<boolean> {
     if (Number.isFinite(score) && score > 0 && ok >= fail) return true;
   }
   return false;
+}
+
+async function getLastPlannerTradeAtMs(): Promise<number | null> {
+  const fact = await prisma.memoryFact.findUnique({ where: { key: LAST_PLANNER_TRADE_KEY } });
+  if (!fact?.value) return null;
+  const ts = Date.parse(String(fact.value));
+  if (!Number.isFinite(ts)) return null;
+  return ts;
 }
 
 type PlannerContext = { text: string; signalCount: number; feedCount: number; policyCount: number };
@@ -234,28 +244,40 @@ export async function POST() {
       decision.reasonCode = "fallback_trade_on_positive_policy_signal";
       fallbackApplied = true;
     } else {
-      decision.reasonCode = "no_positive_policy_signal";
-      await prisma.memory.create({
-        data: {
-          type: "reflection",
-          content: `Autonomous planner tick searching_opportunities: no_positive_policy_signal runId=${runId}`,
-          entities: ["planner:searching", `planner:run:${runId}`],
-          importance: 0.5,
-          source: "system",
-        },
-      });
-      return NextResponse.json({
-        ok: true,
-        status: "skipped",
-        reason: "searching_opportunities",
-        runId,
-        decisionMeta: {
-          reasonCode: decision.reasonCode,
-          fallbackApplied,
-          feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount },
-          exitPlan: null,
-        },
-      });
+      const lastTradeAtMs = await getLastPlannerTradeAtMs();
+      const cooldownMs = Math.max(1, Number(authority.cooldownMinutes) || 15) * 60_000;
+      const idleMs = lastTradeAtMs ? Date.now() - lastTradeAtMs : Number.POSITIVE_INFINITY;
+      const shouldForceRetry = !Number.isFinite(idleMs) || idleMs >= cooldownMs * 2;
+      if (shouldForceRetry) {
+        decision.go = true;
+        decision.usd = 1;
+        decision.reason = `${decision.reason || "HOLD"} -> fallback_trade_retry`;
+        decision.reasonCode = "fallback_trade_retry";
+        fallbackApplied = true;
+      } else {
+        decision.reasonCode = "no_positive_policy_signal";
+        await prisma.memory.create({
+          data: {
+            type: "reflection",
+            content: `Autonomous planner tick searching_opportunities: no_positive_policy_signal runId=${runId}`,
+            entities: ["planner:searching", `planner:run:${runId}`],
+            importance: 0.5,
+            source: "system",
+          },
+        });
+        return NextResponse.json({
+          ok: true,
+          status: "skipped",
+          reason: "searching_opportunities",
+          runId,
+          decisionMeta: {
+            reasonCode: decision.reasonCode,
+            fallbackApplied,
+            feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount },
+            exitPlan: null,
+          },
+        });
+      }
     }
   }
 
@@ -274,7 +296,7 @@ export async function POST() {
   try { amountSol = await estimateSolForUsd(decision.usd); }
   catch { return NextResponse.json({ ok: false, status: "error", reason: "quote_failed", runId, decisionMeta: { reasonCode: "quote_failed" } }); }
 
-  const maxSol = Number.isFinite(AGENT_SWAP_MAX_SOL) && AGENT_SWAP_MAX_SOL > 0 ? AGENT_SWAP_MAX_SOL : Number.POSITIVE_INFINITY;
+  const maxSol = Number.isFinite(AGENT_SWAP_MAX_SOL) && AGENT_SWAP_MAX_SOL > 0 ? AGENT_SWAP_MAX_SOL : 0.25;
   if (amountSol > maxSol) amountSol = maxSol;
 
   const swapReq = new Request("http://planner.internal/api/trade/swap", {
