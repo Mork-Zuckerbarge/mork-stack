@@ -200,7 +200,7 @@ export async function respondToChat(input: unknown) {
   modeInstruction +=
     "Never insult, demean, or mock the user (including nicknames/slurs). Keep tone respectful even when the user is upset.\n";
   modeInstruction +=
-    "Do not fabricate planner settings or confirmations. If runtime context does not explicitly provide a value (for example max trade USD), say it is unknown and point to the exact status check.\n";
+    "Do not fabricate planner settings or confirmations. Use values from OPERATIONS SNAPSHOT when present (including maxTradeUsd/cooldownMinutes); only say unknown when the value is truly absent from context.\n";
   modeInstruction +=
     "Do not tell the user to edit env files in app chat responses; translate blockers into current runtime/control status and the next in-app action.\n";
   if (channel === "telegram" || channel === "x") {
