@@ -10,7 +10,7 @@ const LAST_PLANNER_TRADE_KEY = "__planner_last_trade_iso_v1__";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
-const AGENT_SWAP_MAX_SOL = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
+const AGENT_SWAP_MAX_SOL = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0);
 
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
@@ -144,14 +144,15 @@ async function buildDecisionContext(): Promise<PlannerContext> {
 type PlannerDecision = { go: boolean; usd: number; reason: string; reasonCode: "model_trade" | "model_hold" | "model_error" | "model_invalid" };
 
 async function getTradeDecision(context: string, maxTradeUsd: number): Promise<PlannerDecision> {
+  const effectiveMaxTradeUsd = Number.isFinite(maxTradeUsd) && maxTradeUsd > 0 ? maxTradeUsd : 1_000_000;
   const prompt =
     `You are the autonomous trading engine for Mork Zuckerbarge.\n` +
-    `Max trade allowed this cycle: $${maxTradeUsd} USD.\n\n` +
+    `Max trade allowed this cycle: $${effectiveMaxTradeUsd} USD.\n\n` +
     `CURRENT CONTEXT:\n${context}\n\n` +
     `Decision rules:\n` +
     `- If there are positive arb signals, healthy wallet, and no recent loss streak: respond TRADE $<amount>\n` +
     `- If signals are absent, wallet is low, or recent trades failed: respond HOLD\n` +
-    `- Amount can be any positive USD value up to $${maxTradeUsd}.\n\n` +
+    `- Amount can be any positive USD value up to $${effectiveMaxTradeUsd}.\n\n` +
     `Respond with exactly ONE line in one of these formats:\n` +
     `TRADE $<amount>\n` +
     `HOLD`;
@@ -163,7 +164,7 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<P
   const firstLine = (raw.trim().split("\n")[0] ?? "").trim();
   const tradeMatch = firstLine.match(/^TRADE\s+\$?(\d+(?:\.\d+)?)/i);
   if (tradeMatch) {
-    const usd = Math.min(Math.max(Number(tradeMatch[1]), 0), maxTradeUsd);
+    const usd = Math.min(Math.max(Number(tradeMatch[1]), 0), effectiveMaxTradeUsd);
     if (Number.isFinite(usd) && usd > 0) return { go: true, usd, reason: firstLine, reasonCode: "model_trade" };
   }
   if (/^HOLD$/i.test(firstLine)) return { go: false, usd: 0, reason: "HOLD", reasonCode: "model_hold" };
@@ -213,10 +214,12 @@ export async function POST() {
 
   if (!decision.go) {
     const positiveSignal = await hasPositivePolicySignal(allowlist);
-    if (!positiveSignal) return NextResponse.json({ ok: true, status: "hold", reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied: false, positiveSignal: false, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount } } });
+    const fallbackUsdBase = Number.isFinite(authority.maxTradeUsd) && authority.maxTradeUsd > 0 ? authority.maxTradeUsd : 100;
     decision.go = true;
-    decision.usd = Math.max(1, Math.min(authority.maxTradeUsd, Math.max(1, authority.maxTradeUsd * 0.35)));
-    decision.reason = `${decision.reason || "HOLD"} -> fallback_probe_trade_on_positive_policy_signal`;
+    decision.usd = Math.max(1, fallbackUsdBase);
+    decision.reason = positiveSignal
+      ? `${decision.reason || "HOLD"} -> fallback_trade_on_positive_policy_signal`
+      : `${decision.reason || "HOLD"} -> fallback_trade_retry`;
     fallbackApplied = true;
   }
 
@@ -235,10 +238,8 @@ export async function POST() {
   try { amountSol = await estimateSolForUsd(decision.usd); }
   catch { return NextResponse.json({ ok: false, status: "error", reason: "quote_failed" }); }
 
-  const maxSol = Number.isFinite(AGENT_SWAP_MAX_SOL) && AGENT_SWAP_MAX_SOL > 0 ? AGENT_SWAP_MAX_SOL : 0.25;
-  if (amountSol > maxSol) {
-    amountSol = maxSol;
-  }
+  const maxSol = Number.isFinite(AGENT_SWAP_MAX_SOL) && AGENT_SWAP_MAX_SOL > 0 ? AGENT_SWAP_MAX_SOL : Number.POSITIVE_INFINITY;
+  if (amountSol > maxSol) amountSol = maxSol;
 
   const swapReq = new Request("http://planner.internal/api/trade/swap", {
     method: "POST",
