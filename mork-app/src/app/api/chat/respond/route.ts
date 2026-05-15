@@ -254,7 +254,7 @@ async function executeAutonomousIntentTick() {
     error?: string;
   };
   if (plannerJson.status === "executed") {
-    return `Autonomous planner tick just ran and executed a trade${plannerJson.usd ? ` ($${plannerJson.usd.toFixed(2)} target)` : ""}${plannerJson.signature ? `, signature: ${plannerJson.signature}` : ""}.`;
+    return `Autonomous planner tick submitted a trade${plannerJson.usd ? ` ($${plannerJson.usd.toFixed(2)} target)` : ""}${plannerJson.signature ? ` and received confirmation signature: ${plannerJson.signature}` : ". No on-chain signature returned yet; treat as submitted/pending."}`;
   }
   if (plannerJson.status === "hold") {
     return `Autonomous planner tick just ran and returned HOLD (${plannerJson.reason || "no qualifying setup"}).`;
@@ -633,6 +633,9 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   }
   if (inputToken.mint === outputToken.mint) {
     return { ok: false, status: 400, error: "Input and output tokens resolve to the same mint. Choose two different tokens." };
+  }
+  if (inputToken.mint === BBQ_MINT) {
+    return { ok: false, status: 400, error: "Trade blocked: selling $BBQ is disabled by policy." };
   }
 
   let quantity = requestedQuantity;
