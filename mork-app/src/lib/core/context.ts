@@ -43,7 +43,7 @@ export async function buildContext({ handle, channel, message }: BuildContextArg
       ? ["x"]
       : ["mork-app", "frontend-coding", channel];
 
-  const [recentChat, walletMemory, tradeMemory, reflection, relationshipMemory, appControl, orchestratorState, preflight] =
+  const [recentChat, walletMemory, tradeMemory, reflection, plannerMemory, relationshipMemory, appControl, orchestratorState, preflight] =
     await Promise.all([
       prisma.memory.findMany({
         where: { source: { in: recentSources } },
@@ -54,6 +54,19 @@ export async function buildContext({ handle, channel, message }: BuildContextArg
       technical ? prisma.memory.findFirst({ where: { OR: [{ source: "arb" }, { source: "arb-bot" }, { source: "trade" }] }, orderBy: { createdAt: "desc" } }) : Promise.resolve(null),
       plannerEnabled && channel !== "telegram" && channel !== "x"
         ? prisma.memory.findFirst({ where: { type: "reflection" }, orderBy: { createdAt: "desc" } })
+        : Promise.resolve(null),
+      technical
+        ? prisma.memory.findFirst({
+            where: {
+              source: "system",
+              OR: [
+                { content: { contains: "Autonomous planner tick decision:" } },
+                { content: { contains: "Autonomous planner tick skipped:" } },
+                { content: { contains: "Autonomous planner tick searching_opportunities:" } },
+              ],
+            },
+            orderBy: { createdAt: "desc" },
+          })
         : Promise.resolve(null),
       normalizedHandle
         ? prisma.memory.findFirst({
@@ -78,6 +91,7 @@ export async function buildContext({ handle, channel, message }: BuildContextArg
   const walletBlock = walletMemory ? `LATEST WALLET STATE:\n- ${clipText(walletMemory.content, MAX_MEMORY_BLOCK_CHARS)}` : "";
   const tradeBlock = tradeMemory ? `LATEST TRADE / ARB STATE:\n- ${clipText(tradeMemory.content, MAX_MEMORY_BLOCK_CHARS)}` : "";
   const reflectionBlock = reflection ? `LATEST REFLECTION:\n- ${clipText(reflection.content, MAX_MEMORY_BLOCK_CHARS)}` : "";
+  const plannerBlock = plannerMemory ? `LATEST PLANNER RESULT:\n- ${clipText(plannerMemory.content, MAX_MEMORY_BLOCK_CHARS)}` : "";
   const relationshipBlock = relationshipMemory ? `RELATIONSHIP MEMORY:\n- ${clipText(relationshipMemory.content, MAX_MEMORY_BLOCK_CHARS)}` : "";
 
   const failingHealth = Object.entries(orchestratorState.health)
@@ -119,6 +133,7 @@ export async function buildContext({ handle, channel, message }: BuildContextArg
     technical ? walletBlock : "",
     technical ? tradeBlock : "",
     reflectionBlock,
+    technical ? plannerBlock : "",
     relationshipBlock,
     operationsBlock,
     `CURRENT MESSAGE:\n${message}`,
