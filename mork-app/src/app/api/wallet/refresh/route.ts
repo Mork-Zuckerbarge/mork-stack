@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { refreshWalletMemory } from "@/lib/core/wallet";
-import { isWalletAutoRefreshEnabled, updateHealth } from "@/lib/core/orchestrator";
+import { updateHealth } from "@/lib/core/orchestrator";
 import { resolveWalletAddressFromEnv } from "@/lib/core/walletConfig";
 
 function buildFallbackWallet() {
@@ -21,13 +21,6 @@ function buildFallbackWallet() {
 
 export async function POST() {
   try {
-    if (!(await isWalletAutoRefreshEnabled())) {
-      return NextResponse.json({
-        ok: false,
-        error: "wallet auto refresh is disabled in app controls",
-      });
-    }
-
     const wallet = await refreshWalletMemory();
     updateHealth("wallet", "healthy", "wallet refreshed");
 
