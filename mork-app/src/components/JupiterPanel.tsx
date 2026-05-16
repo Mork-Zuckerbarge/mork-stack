@@ -319,17 +319,22 @@ export default function JupiterPanel() {
     }
   }, []);
 
-  const refreshWalletMemory = useCallback(async () => {
-    if (walletRefreshBusy) return;
+  const refreshWalletMemory = useCallback(async (): Promise<{ ok: boolean; message: string }> => {
+    if (walletRefreshBusy) return { ok: false, message: "Wallet refresh already in progress" };
     setWalletRefreshBusy(true);
     try {
       const res = await fetch("/api/wallet/refresh", { method: "POST" });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = (await res.json()) as { ok?: boolean; degraded?: boolean; error?: string };
       if (!res.ok || !data.ok) {
-      } else {
-        void loadExecution();
+        return { ok: false, message: data.error || `Wallet refresh failed (${res.status})` };
       }
+      void loadExecution();
+      if (data.degraded) {
+        return { ok: false, message: data.error || "Wallet refresh degraded (RPC/config issue)" };
+      }
+      return { ok: true, message: "Wallet control refreshed" };
     } catch {
+      return { ok: false, message: "Wallet refresh request failed" };
     } finally {
       setWalletRefreshBusy(false);
     }
@@ -463,8 +468,8 @@ export default function JupiterPanel() {
         loadPairBalances(),
         loadQuote(),
       ]);
-      await refreshWalletMemory();
-      setPanelRefreshStatus("Wallet control refreshed");
+      const refresh = await refreshWalletMemory();
+      setPanelRefreshStatus(refresh.message);
     } catch {
       setPanelRefreshStatus("Wallet control refresh failed");
     } finally {

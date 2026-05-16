@@ -12,27 +12,36 @@ type WalletState = {
 
 export default function WalletPanel() {
   const [wallet, setWallet] = useState<WalletState | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
+  const [degraded, setDegraded] = useState(false);
 
   async function loadState(force = false) {
     try {
       const endpoint = force ? "/api/wallet/state?force=1" : "/api/wallet/state";
       const res = await fetch(endpoint, { cache: "no-store" });
-      const data = (await res.json()) as { ok?: boolean; wallet?: WalletState };
+      const data = (await res.json()) as { ok?: boolean; wallet?: WalletState; degraded?: boolean; error?: string };
       if (!res.ok || data.ok === false) {
         setWallet(null);
+        setDegraded(false);
+        setLastError(data?.error || "wallet request failed");
         return;
       }
       setWallet(data.wallet ?? null);
+      setDegraded(Boolean(data.degraded));
+      setLastError(data.error ?? null);
     } catch {
       setWallet(null);
+      setDegraded(false);
+      setLastError("wallet request failed");
     }
   }
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadState();
-    }, 0);
-    return () => window.clearTimeout(timer);
+    void loadState();
+    const interval = window.setInterval(() => {
+      void loadState(true);
+    }, 30000);
+    return () => window.clearInterval(interval);
   }, []);
 
   return (
@@ -51,6 +60,11 @@ export default function WalletPanel() {
         <p className="text-sm text-white/60">No wallet data yet.</p>
       ) : (
         <div className="space-y-3 text-sm">
+          {degraded ? (
+            <div className="rounded-xl border border-yellow-400/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-200">
+              Wallet data is degraded (RPC/config issue): {lastError || "unknown error"}
+            </div>
+          ) : null}
           <div>
             <div className="text-white/50">Address</div>
             <div className="break-all">{wallet.address || "Not configured"}</div>
