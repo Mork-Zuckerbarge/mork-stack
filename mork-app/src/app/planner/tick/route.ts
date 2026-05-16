@@ -106,7 +106,17 @@ async function getLastPlannerTradeAtMs(): Promise<number | null> {
 
 type PlannerContext = { text: string; signalCount: number; feedCount: number; policyCount: number };
 
-async function buildDecisionContext(): Promise<PlannerContext> {
+function buildStrategyEngineSummary(control: Awaited<ReturnType<typeof getAppControlState>>): string {
+  const engines = control.controls.strategyEngines;
+  return [
+    "STRATEGY ENGINE SNAPSHOT:",
+    `- poolImbalance minImbalancePct=${engines.poolImbalance.minImbalancePct} poolsWatched=${engines.poolImbalance.poolsWatched} useJitoBundle=${engines.poolImbalance.useJitoBundle}`,
+    `- crossDexArb minNetProfitSol=${engines.crossDexArb.minNetProfitSol} routeVia=${engines.crossDexArb.routeVia} enableTriangularRoutes=${engines.crossDexArb.enableTriangularRoutes}`,
+    `- momentumRunner entryVolSpikeMultiplier=${engines.momentumRunner.entryVolSpikeMultiplier} exitTrailingStopPct=${engines.momentumRunner.exitTrailingStopPct} maxHoldMinutes=${engines.momentumRunner.maxHoldMinutes} hardStopLossPct=${engines.momentumRunner.hardStopLossPct} watchPumpFunLaunches=${engines.momentumRunner.watchPumpFunLaunches} useBirdeyeTrendingFeed=${engines.momentumRunner.useBirdeyeTrendingFeed}`,
+  ].join("\n");
+}
+
+async function buildDecisionContext(control: Awaited<ReturnType<typeof getAppControlState>>): Promise<PlannerContext> {
   const [recentSignals, recentFeed, walletMem, latestReflection, topPolicies, latestPlannerState] = await Promise.all([
     prisma.memory.findMany({
       where: {
@@ -178,6 +188,7 @@ async function buildDecisionContext(): Promise<PlannerContext> {
   if (latestPlannerState) {
     parts.push(`LATEST PLANNER STATE:\n${String(latestPlannerState.content).slice(0, 200)}`);
   }
+  parts.push(buildStrategyEngineSummary(control));
   if (latestReflection) parts.push(`LATEST REFLECTION:\n${String(latestReflection.content).slice(0, 240)}`);
   return { text: parts.join("\n\n"), signalCount: recentSignals.length, feedCount: recentFeed.length, policyCount: topPolicies.length };
 }
@@ -290,7 +301,7 @@ export async function POST() {
     }
   }
 
-  const context = await buildDecisionContext();
+  const context = await buildDecisionContext(control);
   const baseDecision = await getTradeDecision(context.text, authority.maxTradeUsd);
   const decision = { ...baseDecision };
   let fallbackApplied = false;
