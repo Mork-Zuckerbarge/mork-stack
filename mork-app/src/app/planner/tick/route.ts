@@ -3,6 +3,7 @@ import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
 import { ollama } from "@/lib/core/ollama";
 import { POST as executeSwapRoute } from "@/app/api/trade/swap/route";
+import { getWalletTokenBalances } from "@/lib/core/wallet";
 
 export const runtime = "nodejs";
 
@@ -27,6 +28,19 @@ async function estimateSolForUsd(usd: number): Promise<number> {
   const outLamports = Number(json.outAmount ?? 0);
   if (!Number.isFinite(outLamports) || outLamports <= 0) throw new Error("planner quote returned no output");
   return outLamports / 1_000_000_000;
+}
+
+async function getQuoteOutAmount(inputMint: string, outputMint: string, amountInUi: number): Promise<number | null> {
+  const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
+  quoteUrl.searchParams.set("inputMint", inputMint);
+  quoteUrl.searchParams.set("outputMint", outputMint);
+  quoteUrl.searchParams.set("amount", String(Math.max(1, Math.floor(amountInUi * 1_000_000))));
+  quoteUrl.searchParams.set("slippageBps", "50");
+  const res = await fetch(quoteUrl.toString(), { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
+  if (!res?.ok) return null;
+  const json = (await res.json()) as { outAmount?: string };
+  const outBase = Number(json.outAmount ?? 0);
+  return Number.isFinite(outBase) && outBase > 0 ? outBase / 1_000_000 : null;
 }
 
 async function rankPolicyMints(allowlist: string[]): Promise<string[]> {
@@ -92,7 +106,17 @@ async function getLastPlannerTradeAtMs(): Promise<number | null> {
 
 type PlannerContext = { text: string; signalCount: number; feedCount: number; policyCount: number };
 
-async function buildDecisionContext(): Promise<PlannerContext> {
+function buildStrategyEngineSummary(control: Awaited<ReturnType<typeof getAppControlState>>): string {
+  const engines = control.controls.strategyEngines;
+  return [
+    "STRATEGY ENGINE SNAPSHOT:",
+    `- poolImbalance minImbalancePct=${engines.poolImbalance.minImbalancePct} poolsWatched=${engines.poolImbalance.poolsWatched} useJitoBundle=${engines.poolImbalance.useJitoBundle}`,
+    `- crossDexArb minNetProfitSol=${engines.crossDexArb.minNetProfitSol} routeVia=${engines.crossDexArb.routeVia} enableTriangularRoutes=${engines.crossDexArb.enableTriangularRoutes}`,
+    `- momentumRunner entryVolSpikeMultiplier=${engines.momentumRunner.entryVolSpikeMultiplier} exitTrailingStopPct=${engines.momentumRunner.exitTrailingStopPct} maxHoldMinutes=${engines.momentumRunner.maxHoldMinutes} hardStopLossPct=${engines.momentumRunner.hardStopLossPct} watchPumpFunLaunches=${engines.momentumRunner.watchPumpFunLaunches} useBirdeyeTrendingFeed=${engines.momentumRunner.useBirdeyeTrendingFeed}`,
+  ].join("\n");
+}
+
+async function buildDecisionContext(control: Awaited<ReturnType<typeof getAppControlState>>): Promise<PlannerContext> {
   const [recentSignals, recentFeed, walletMem, latestReflection, topPolicies, latestPlannerState] = await Promise.all([
     prisma.memory.findMany({
       where: {
@@ -164,6 +188,7 @@ async function buildDecisionContext(): Promise<PlannerContext> {
   if (latestPlannerState) {
     parts.push(`LATEST PLANNER STATE:\n${String(latestPlannerState.content).slice(0, 200)}`);
   }
+  parts.push(buildStrategyEngineSummary(control));
   if (latestReflection) parts.push(`LATEST REFLECTION:\n${String(latestReflection.content).slice(0, 240)}`);
   return { text: parts.join("\n\n"), signalCount: recentSignals.length, feedCount: recentFeed.length, policyCount: topPolicies.length };
 }
@@ -246,7 +271,37 @@ export async function POST() {
     return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty", runId });
   }
 
-  const context = await buildDecisionContext();
+  const tokenBalances = await getWalletTokenBalances();
+  const walletBalances = Object.fromEntries(tokenBalances.map((row) => [row.mint, row.balance])) as Record<string, number>;
+  const heldMint = allowlist.find((mint) => Number(walletBalances[mint] ?? 0) > 0);
+  if (heldMint) {
+    const heldAmount = Number(walletBalances[heldMint] ?? 0);
+    const outUsdc = await getQuoteOutAmount(heldMint, USDC_MINT, heldAmount);
+    const outSol = await getQuoteOutAmount(heldMint, SOL_MINT, heldAmount);
+    const usdcBalance = Number(walletBalances[USDC_MINT] ?? 0);
+    const solBalance = Number(walletBalances[SOL_MINT] ?? 0);
+    const profitableToExit = (outUsdc !== null && outUsdc > usdcBalance) || (outSol !== null && outSol > solBalance);
+    if (profitableToExit) {
+      const outputMint = outUsdc !== null && (outSol === null || outUsdc >= outSol) ? USDC_MINT : SOL_MINT;
+      const swapReq = new Request("http://planner.internal/api/trade/swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amountIn: heldAmount, slippageBps: 50, inputMint: heldMint, outputMint, agentInitiated: true }),
+      });
+      const swapResponse = await executeSwapRoute(swapReq);
+      const swapJson = (await swapResponse.json().catch(() => ({}))) as { ok?: boolean; error?: string; signature?: string };
+      if (swapResponse.ok && swapJson.ok) {
+        await prisma.memoryFact.upsert({
+          where: { key: LAST_PLANNER_TRADE_KEY },
+          create: { key: LAST_PLANNER_TRADE_KEY, value: new Date().toISOString(), source: "agent", weight: 8 },
+          update: { value: new Date().toISOString(), source: "agent", weight: 8 },
+        });
+        return NextResponse.json({ ok: true, status: "executed", mode: "planner_autonomous_exit", runId, inputMint: heldMint, outputMint, amountIn: heldAmount, signature: swapJson.signature ?? null, reason: "profitable_exit" });
+      }
+    }
+  }
+
+  const context = await buildDecisionContext(control);
   const baseDecision = await getTradeDecision(context.text, authority.maxTradeUsd);
   const decision = { ...baseDecision };
   let fallbackApplied = false;
@@ -316,10 +371,12 @@ export async function POST() {
   const maxSol = Number.isFinite(AGENT_SWAP_MAX_SOL) && AGENT_SWAP_MAX_SOL > 0 ? AGENT_SWAP_MAX_SOL : 0.25;
   if (amountSol > maxSol) amountSol = maxSol;
 
+  const fundingMint = heldMint && Number(walletBalances[heldMint] ?? 0) > 0 ? heldMint : SOL_MINT;
+  const amountIn = fundingMint === SOL_MINT ? amountSol : Number(walletBalances[fundingMint] ?? 0);
   const swapReq = new Request("http://planner.internal/api/trade/swap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ amountSol, slippageBps: 50, outputMint, agentInitiated: true }),
+    body: JSON.stringify({ amountIn, inputMint: fundingMint, slippageBps: 50, outputMint, agentInitiated: true }),
   });
   const swapResponse = await executeSwapRoute(swapReq);
   const swapJson = (await swapResponse.json().catch(() => ({}))) as { ok?: boolean; error?: string; signature?: string };
@@ -334,5 +391,5 @@ export async function POST() {
     update: { value: new Date().toISOString(), source: "agent", weight: 8 },
   });
 
-  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", runId, usd: decision.usd, amountSol, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: control.controls.strategyEngines.momentumRunner.exitTrailingStopPct ?? null, maxHoldMinutes: control.controls.strategyEngines.momentumRunner.maxHoldMinutes ?? null, hardStopLossPct: control.controls.strategyEngines.momentumRunner.hardStopLossPct ?? null } } });
+  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", runId, usd: decision.usd, amountSol, amountIn, inputMint: fundingMint, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: control.controls.strategyEngines.momentumRunner.exitTrailingStopPct ?? null, maxHoldMinutes: control.controls.strategyEngines.momentumRunner.maxHoldMinutes ?? null, hardStopLossPct: control.controls.strategyEngines.momentumRunner.hardStopLossPct ?? null } } });
 }
