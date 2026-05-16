@@ -26,13 +26,24 @@ let walletFetchInFlight: Promise<WalletState> | null = null;
 const WALLET_CACHE_MS = 60000;
 const RPC_RETRY_DELAYS_MS = [500, 1000, 2000, 4000];
 
-function isRpcRateLimitError(error: unknown) {
+function isTransientRpcError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   const lower = message.toLowerCase();
   return (
     lower.includes("429") ||
     lower.includes("too many requests") ||
-    lower.includes("rate limit")
+    lower.includes("rate limit") ||
+    lower.includes("fetch failed") ||
+    lower.includes("network error") ||
+    lower.includes("network request failed") ||
+    lower.includes("connection reset") ||
+    lower.includes("timed out") ||
+    lower.includes("timeout") ||
+    lower.includes("econnreset") ||
+    lower.includes("econnrefused") ||
+    lower.includes("etimedout") ||
+    lower.includes("enotfound") ||
+    lower.includes("eai_again")
   );
 }
 
@@ -44,7 +55,7 @@ async function withRpcRetry<T>(label: string, task: () => Promise<T>): Promise<T
       return await task();
     } catch (error) {
       lastError = error;
-      const canRetry = isRpcRateLimitError(error) && attempt < RPC_RETRY_DELAYS_MS.length;
+      const canRetry = isTransientRpcError(error) && attempt < RPC_RETRY_DELAYS_MS.length;
       if (!canRetry) break;
       const delay = RPC_RETRY_DELAYS_MS[attempt];
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -218,7 +229,7 @@ export async function getWalletState(force = false) {
       return wallet;
     })
     .catch((error: unknown) => {
-      if (walletCache && isRpcRateLimitError(error)) {
+      if (walletCache && isTransientRpcError(error)) {
         return walletCache;
       }
       throw error;
