@@ -15,6 +15,11 @@ type WalletState = {
   requirementMet: boolean;
 };
 
+export type WalletTokenBalance = {
+  mint: string;
+  balance: number;
+};
+
 let walletCache: WalletState | null = null;
 let walletCacheAt = 0;
 let walletFetchInFlight: Promise<WalletState> | null = null;
@@ -114,6 +119,53 @@ export async function getWalletBalancesForMints(mints: string[]): Promise<Record
   );
 
   return balances;
+}
+
+export async function getWalletTokenBalances(): Promise<WalletTokenBalance[]> {
+  const RPC =
+    process.env.SOLANA_RPC_URL ||
+    process.env.SOLANA_RPC ||
+    process.env.RPC_URL ||
+    "https://api.mainnet-beta.solana.com";
+  const WALLET = resolveWalletAddressFromEnv();
+
+  if (!WALLET) {
+    throw new Error("Wallet not configured (set MORK_WALLET or MORK_WALLET_SECRET_KEY)");
+  }
+
+  const connection = new Connection(RPC);
+  const owner = new PublicKey(WALLET);
+  const tokenAccounts = await withRpcRetry("getParsedTokenAccountsByOwner", () =>
+    connection.getParsedTokenAccountsByOwner(owner, { programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") }),
+  );
+
+  const mintBalances = new Map<string, number>();
+
+  for (const acc of tokenAccounts.value) {
+    const data = acc.account.data;
+    if (!data || typeof data !== "object" || !("parsed" in data)) {
+      continue;
+    }
+
+    const parsed = (data as ParsedAccountData).parsed;
+    const mint = String(parsed?.info?.mint ?? "").trim();
+    const amount = Number(parsed?.info?.tokenAmount?.uiAmount ?? 0);
+    if (!mint || !Number.isFinite(amount) || amount <= 0) {
+      continue;
+    }
+
+    mintBalances.set(mint, (mintBalances.get(mint) ?? 0) + amount);
+  }
+
+  const solLamports = await withRpcRetry("getBalance", () => connection.getBalance(owner));
+  const solBalance = solLamports / 1e9;
+  if (solBalance > 0) {
+    mintBalances.set(SOL_MINT, (mintBalances.get(SOL_MINT) ?? 0) + solBalance);
+  }
+
+  return [...mintBalances.entries()]
+    .map(([mint, balance]) => ({ mint, balance }))
+    .sort((a, b) => b.balance - a.balance);
 }
 
 async function fetchWalletState(): Promise<WalletState> {

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
 import { ollama } from "@/lib/core/ollama";
 import { POST as executeSwapRoute } from "@/app/api/trade/swap/route";
-import { getWalletTokenBalances } from "@/lib/core/wallet";
+import { getWalletBalancesForMints } from "@/lib/core/wallet";
 
 export const runtime = "nodejs";
 
@@ -14,6 +14,26 @@ const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
 // Keep planner sizing aligned with /api/trade/swap guard default.
 // If env is unset/invalid, swap route enforces 0.25 SOL max.
 const AGENT_SWAP_MAX_SOL = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
+const mintDecimalsCache = new Map<string, number>([
+  [SOL_MINT, 9],
+  [USDC_MINT, 6],
+]);
+
+async function getMintDecimals(mint: string): Promise<number> {
+  const cached = mintDecimalsCache.get(mint);
+  if (Number.isFinite(cached)) return Number(cached);
+
+  const res = await fetch(`${JUP_BASE}/tokens/v1/token/${mint}`, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  }).catch(() => null);
+  if (!res?.ok) return 6;
+  const json = (await res.json()) as { decimals?: number };
+  const decimals = Number(json.decimals ?? 6);
+  const safe = Number.isFinite(decimals) && decimals >= 0 ? decimals : 6;
+  mintDecimalsCache.set(mint, safe);
+  return safe;
+}
 
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
@@ -31,16 +51,21 @@ async function estimateSolForUsd(usd: number): Promise<number> {
 }
 
 async function getQuoteOutAmount(inputMint: string, outputMint: string, amountInUi: number): Promise<number | null> {
+  const [inputDecimals, outputDecimals] = await Promise.all([
+    getMintDecimals(inputMint),
+    getMintDecimals(outputMint),
+  ]);
+  const inputBase = Math.max(1, Math.floor(amountInUi * 10 ** inputDecimals));
   const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
   quoteUrl.searchParams.set("inputMint", inputMint);
   quoteUrl.searchParams.set("outputMint", outputMint);
-  quoteUrl.searchParams.set("amount", String(Math.max(1, Math.floor(amountInUi * 1_000_000))));
+  quoteUrl.searchParams.set("amount", String(inputBase));
   quoteUrl.searchParams.set("slippageBps", "50");
   const res = await fetch(quoteUrl.toString(), { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
   if (!res?.ok) return null;
   const json = (await res.json()) as { outAmount?: string };
   const outBase = Number(json.outAmount ?? 0);
-  return Number.isFinite(outBase) && outBase > 0 ? outBase / 1_000_000 : null;
+  return Number.isFinite(outBase) && outBase > 0 ? outBase / 10 ** outputDecimals : null;
 }
 
 async function rankPolicyMints(allowlist: string[]): Promise<string[]> {
@@ -271,8 +296,8 @@ export async function POST() {
     return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty", runId });
   }
 
-  const tokenBalances = await getWalletTokenBalances();
-  const walletBalances = Object.fromEntries(tokenBalances.map((row) => [row.mint, row.balance])) as Record<string, number>;
+  const trackedMints = Array.from(new Set([SOL_MINT, USDC_MINT, ...allowlist]));
+  const walletBalances = await getWalletBalancesForMints(trackedMints);
   const heldMint = allowlist.find((mint) => Number(walletBalances[mint] ?? 0) > 0);
   if (heldMint) {
     const heldAmount = Number(walletBalances[heldMint] ?? 0);

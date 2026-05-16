@@ -145,9 +145,12 @@ async function normalizeVideoStyleReferences(model: string, refs: string[]): Pro
 
 export async function generateImage(prompt: string): Promise<GeneratedMedia> {
   const imageUrl = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`);
+  const seed = Number(process.env.MEDIA_IMAGE_SEED || "");
   imageUrl.searchParams.set("nologo", "true");
   imageUrl.searchParams.set("enhance", "true");
-  imageUrl.searchParams.set("seed", String(seed));
+  if (Number.isFinite(seed)) {
+    imageUrl.searchParams.set("seed", String(seed));
+  }
   imageUrl.searchParams.set("width", process.env.MEDIA_IMAGE_WIDTH || "1024");
   imageUrl.searchParams.set("height", process.env.MEDIA_IMAGE_HEIGHT || "1024");
   const model = (process.env.MEDIA_IMAGE_MODEL || "flux").trim();
@@ -353,7 +356,7 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
         const retried = await retryWithModel(model);
         if (retried) {
           mimeType = retried.mimeType;
-          bytes = retried.bytes;
+          bytes = new Uint8Array(retried.bytes);
           break;
         }
       }
