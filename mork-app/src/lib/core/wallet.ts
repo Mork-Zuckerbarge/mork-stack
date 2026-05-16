@@ -70,9 +70,18 @@ async function getSplBalance(
   let total = 0;
 
   for (const acc of accounts.value) {
-    const parsed = (acc.account.data as ParsedAccountData).parsed;
-    const amount = parsed?.info?.tokenAmount?.uiAmount;
-    total += Number(amount || 0);
+    const data = acc.account.data;
+    if (!data || typeof data !== "object" || !("parsed" in data)) {
+      continue;
+    }
+
+    const parsed = (data as ParsedAccountData).parsed;
+    const amount = Number(parsed?.info?.tokenAmount?.uiAmount ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      continue;
+    }
+
+    total += amount;
   }
 
   return total;
@@ -173,8 +182,10 @@ async function fetchWalletState(): Promise<WalletState> {
   const solLamports = await withRpcRetry("getBalance", () => connection.getBalance(owner));
   const sol = solLamports / 1e9;
 
-  const bbq = await getSplBalance(connection, owner, BBQ_MINT);
-  const usdc = await getSplBalance(connection, owner, USDC_MINT);
+  const [bbq, usdc] = await Promise.all([
+    getSplBalance(connection, owner, BBQ_MINT),
+    getSplBalance(connection, owner, USDC_MINT),
+  ]);
 
   return {
     address: WALLET,
