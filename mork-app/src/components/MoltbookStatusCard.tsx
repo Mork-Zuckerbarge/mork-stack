@@ -96,6 +96,25 @@ export default function MoltbookStatusCard() {
         </button>
       </div>
 
+      <div>
+        <button
+          onClick={async () => {
+            setStatus("Running server Moltbook tick...");
+            try {
+              const res = await fetch("/api/moltbook/tick", { method: "POST" });
+              const data = await res.json();
+              if (!res.ok) throw new Error(data?.reason || "tick failed");
+              setStatus(`Server tick ok. postedFromSherpa=${Boolean(data?.postedFromSherpa)} signals=${Number(data?.tradeSignalCount || 0)}`);
+            } catch (error) {
+              setStatus(`Server tick failed: ${error instanceof Error ? error.message : "unknown error"}`);
+            }
+          }}
+          className="rounded-xl border border-cyan-300/40 bg-cyan-300/10 px-3 py-2 text-sm"
+        >
+          Run Server Tick
+        </button>
+      </div>
+
       {snapshot ? (
         <div className="text-xs text-white/70">
           Last check: {snapshot.checkedAt} · feed sample count: {snapshot.feedCount}
