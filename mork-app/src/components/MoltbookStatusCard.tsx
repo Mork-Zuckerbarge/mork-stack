@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   getMoltbookFeed,
   getMoltbookHome,
@@ -19,8 +19,11 @@ export default function MoltbookStatusCard() {
   const [status, setStatus] = useState("");
   const [running, setRunning] = useState(false);
   const [snapshot, setSnapshot] = useState<MoltbookSnapshot | null>(null);
+  const [hasKey, setHasKey] = useState(false);
 
-  const hasKey = typeof window !== "undefined" && Boolean(getSavedMoltbookApiKey());
+  useEffect(() => {
+    setHasKey(Boolean(getSavedMoltbookApiKey()));
+  }, []);
 
   async function runHeartbeat() {
     setRunning(true);
@@ -46,12 +49,14 @@ export default function MoltbookStatusCard() {
     }
 
     saveMoltbookApiKey(apiKeyInput.trim());
+    setHasKey(true);
     setApiKeyInput("");
     setStatus("Saved Moltbook API key to browser storage.");
   }
 
   function clearKey() {
     clearSavedMoltbookApiKey();
+    setHasKey(false);
     setStatus("Cleared Moltbook API key from browser storage.");
   }
 
