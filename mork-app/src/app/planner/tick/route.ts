@@ -3,6 +3,7 @@ import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
 import { ollama } from "@/lib/core/ollama";
 import { POST as executeSwapRoute } from "@/app/api/trade/swap/route";
+import { getWalletBalancesForMints } from "@/lib/core/wallet";
 
 export const runtime = "nodejs";
 
@@ -13,6 +14,20 @@ const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
 // Keep planner sizing aligned with /api/trade/swap guard default.
 // If env is unset/invalid, swap route enforces 0.25 SOL max.
 const AGENT_SWAP_MAX_SOL = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
+
+const TOKEN_DECIMALS: Record<string, number> = {
+  [SOL_MINT]: 9,
+  [USDC_MINT]: 6,
+};
+
+type StrategySnapshot = {
+  minImbalancePct: number | null;
+  minNetProfitSol: number | null;
+  entryVolSpikeMultiplier: number | null;
+  exitTrailingStopPct: number | null;
+  maxHoldMinutes: number | null;
+  hardStopLossPct: number | null;
+};
 
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
@@ -27,6 +42,34 @@ async function estimateSolForUsd(usd: number): Promise<number> {
   const outLamports = Number(json.outAmount ?? 0);
   if (!Number.isFinite(outLamports) || outLamports <= 0) throw new Error("planner quote returned no output");
   return outLamports / 1_000_000_000;
+}
+
+async function getTokenDecimals(mint: string): Promise<number> {
+  const known = TOKEN_DECIMALS[mint];
+  if (Number.isFinite(known)) return known;
+  const res = await fetch(`${JUP_BASE}/tokens/v1/token/${mint}`, { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
+  if (!res?.ok) return 0;
+  const json = (await res.json()) as { decimals?: number };
+  const decimals = Number(json.decimals ?? 0);
+  return Number.isFinite(decimals) && decimals >= 0 && decimals <= 12 ? decimals : 0;
+}
+
+async function getQuoteOutAmount(inputMint: string, outputMint: string, amountInUi: number): Promise<number | null> {
+  if (!Number.isFinite(amountInUi) || amountInUi <= 0) return null;
+  const inDecimals = await getTokenDecimals(inputMint);
+  const outDecimals = await getTokenDecimals(outputMint);
+  const amountInBase = Math.max(1, Math.floor(amountInUi * 10 ** inDecimals));
+  const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
+  quoteUrl.searchParams.set("inputMint", inputMint);
+  quoteUrl.searchParams.set("outputMint", outputMint);
+  quoteUrl.searchParams.set("amount", String(amountInBase));
+  quoteUrl.searchParams.set("slippageBps", "50");
+  const res = await fetch(quoteUrl.toString(), { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
+  if (!res?.ok) return null;
+  const json = (await res.json()) as { outAmount?: string };
+  const outBase = Number(json.outAmount ?? 0);
+  if (!Number.isFinite(outBase) || outBase <= 0) return null;
+  return outBase / 10 ** outDecimals;
 }
 
 async function rankPolicyMints(allowlist: string[]): Promise<string[]> {
@@ -92,7 +135,18 @@ async function getLastPlannerTradeAtMs(): Promise<number | null> {
 
 type PlannerContext = { text: string; signalCount: number; feedCount: number; policyCount: number };
 
-async function buildDecisionContext(): Promise<PlannerContext> {
+function snapshotStrategies(control: Awaited<ReturnType<typeof getAppControlState>>): StrategySnapshot {
+  return {
+    minImbalancePct: control.controls.strategyEngines.poolImbalance.minImbalancePct ?? null,
+    minNetProfitSol: control.controls.strategyEngines.crossDexArb.minNetProfitSol ?? null,
+    entryVolSpikeMultiplier: control.controls.strategyEngines.momentumRunner.entryVolSpikeMultiplier ?? null,
+    exitTrailingStopPct: control.controls.strategyEngines.momentumRunner.exitTrailingStopPct ?? null,
+    maxHoldMinutes: control.controls.strategyEngines.momentumRunner.maxHoldMinutes ?? null,
+    hardStopLossPct: control.controls.strategyEngines.momentumRunner.hardStopLossPct ?? null,
+  };
+}
+
+async function buildDecisionContext(strategySnapshot: StrategySnapshot): Promise<PlannerContext> {
   const [recentSignals, recentFeed, walletMem, latestReflection, topPolicies, latestPlannerState] = await Promise.all([
     prisma.memory.findMany({
       where: {
@@ -161,6 +215,7 @@ async function buildDecisionContext(): Promise<PlannerContext> {
   if (policySignalLines.length) {
     parts.push(`ARB POLICY SNAPSHOT:\n${policySignalLines.join("\n")}`);
   }
+  parts.push(`STRATEGY ENGINE SNAPSHOT:\n${JSON.stringify(strategySnapshot)}`);
   if (latestPlannerState) {
     parts.push(`LATEST PLANNER STATE:\n${String(latestPlannerState.content).slice(0, 200)}`);
   }
@@ -230,6 +285,7 @@ export async function POST() {
 
   const control = await getAppControlState();
   const authority = control.controls.executionAuthority;
+  const strategySnapshot = snapshotStrategies(control);
 
   if (!control.controls.plannerEnabled) {
     await logSkip("planner_disabled");
@@ -246,7 +302,37 @@ export async function POST() {
     return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty", runId });
   }
 
-  const context = await buildDecisionContext();
+  const walletBalances = await getWalletBalancesForMints([SOL_MINT, USDC_MINT, ...allowlist]);
+  const heldMint = allowlist.find((mint) => Number(walletBalances[mint] ?? 0) > 0) ?? null;
+
+  if (heldMint) {
+    const heldAmount = Number(walletBalances[heldMint] ?? 0);
+    const outUsdc = await getQuoteOutAmount(heldMint, USDC_MINT, heldAmount);
+    const outSol = await getQuoteOutAmount(heldMint, SOL_MINT, heldAmount);
+    const outputMint = outUsdc !== null && (outSol === null || outUsdc >= outSol) ? USDC_MINT : SOL_MINT;
+    const chosenOut = outputMint === USDC_MINT ? outUsdc : outSol;
+    const minExitValue = heldMint === SOL_MINT ? 0.01 : 0.1;
+
+    if (chosenOut !== null && Number.isFinite(chosenOut) && chosenOut > minExitValue) {
+      const exitReq = new Request("http://planner.internal/api/trade/swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amountIn: heldAmount, slippageBps: 50, inputMint: heldMint, outputMint, agentInitiated: true }),
+      });
+      const exitResponse = await executeSwapRoute(exitReq);
+      const exitJson = (await exitResponse.json().catch(() => ({}))) as { ok?: boolean; signature?: string };
+      if (exitResponse.ok && exitJson.ok) {
+        await prisma.memoryFact.upsert({
+          where: { key: LAST_PLANNER_TRADE_KEY },
+          create: { key: LAST_PLANNER_TRADE_KEY, value: new Date().toISOString(), source: "agent", weight: 8 },
+          update: { value: new Date().toISOString(), source: "agent", weight: 8 },
+        });
+        return NextResponse.json({ ok: true, status: "executed", mode: "planner_autonomous_exit", runId, inputMint: heldMint, outputMint, amountIn: heldAmount, signature: exitJson.signature ?? null, reason: "held_token_exit" });
+      }
+    }
+  }
+
+  const context = await buildDecisionContext(strategySnapshot);
   const baseDecision = await getTradeDecision(context.text, authority.maxTradeUsd);
   const decision = { ...baseDecision };
   let fallbackApplied = false;
@@ -316,10 +402,12 @@ export async function POST() {
   const maxSol = Number.isFinite(AGENT_SWAP_MAX_SOL) && AGENT_SWAP_MAX_SOL > 0 ? AGENT_SWAP_MAX_SOL : 0.25;
   if (amountSol > maxSol) amountSol = maxSol;
 
+  const fundingMint = heldMint && Number(walletBalances[heldMint] ?? 0) > 0 ? heldMint : SOL_MINT;
+  const amountIn = fundingMint === SOL_MINT ? amountSol : Number(walletBalances[fundingMint] ?? 0);
   const swapReq = new Request("http://planner.internal/api/trade/swap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ amountSol, slippageBps: 50, outputMint, agentInitiated: true }),
+    body: JSON.stringify({ amountIn, inputMint: fundingMint, slippageBps: 50, outputMint, agentInitiated: true }),
   });
   const swapResponse = await executeSwapRoute(swapReq);
   const swapJson = (await swapResponse.json().catch(() => ({}))) as { ok?: boolean; error?: string; signature?: string };
@@ -334,5 +422,5 @@ export async function POST() {
     update: { value: new Date().toISOString(), source: "agent", weight: 8 },
   });
 
-  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", runId, usd: decision.usd, amountSol, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: control.controls.strategyEngines.momentumRunner.exitTrailingStopPct ?? null, maxHoldMinutes: control.controls.strategyEngines.momentumRunner.maxHoldMinutes ?? null, hardStopLossPct: control.controls.strategyEngines.momentumRunner.hardStopLossPct ?? null } } });
+  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", runId, usd: decision.usd, amountSol, amountIn, inputMint: fundingMint, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: strategySnapshot.exitTrailingStopPct, maxHoldMinutes: strategySnapshot.maxHoldMinutes, hardStopLossPct: strategySnapshot.hardStopLossPct } } });
 }
