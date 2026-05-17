@@ -305,40 +305,13 @@ export async function POST() {
   const walletBalances = await getWalletBalancesForMints([SOL_MINT, USDC_MINT, ...allowlist]);
   const heldMint = allowlist.find((mint) => Number(walletBalances[mint] ?? 0) > 0) ?? null;
 
-  if (heldMint) {
-    const heldAmount = Number(walletBalances[heldMint] ?? 0);
-    const outUsdc = await getQuoteOutAmount(heldMint, USDC_MINT, heldAmount);
-    const outSol = await getQuoteOutAmount(heldMint, SOL_MINT, heldAmount);
-    const outputMint = outUsdc !== null && (outSol === null || outUsdc >= outSol) ? USDC_MINT : SOL_MINT;
-    const chosenOut = outputMint === USDC_MINT ? outUsdc : outSol;
-    const minExitValue = heldMint === SOL_MINT ? 0.01 : 0.1;
-
-    if (chosenOut !== null && Number.isFinite(chosenOut) && chosenOut > minExitValue) {
-      const exitReq = new Request("http://planner.internal/api/trade/swap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amountIn: heldAmount, slippageBps: 50, inputMint: heldMint, outputMint, agentInitiated: true }),
-      });
-      const exitResponse = await executeSwapRoute(exitReq);
-      const exitJson = (await exitResponse.json().catch(() => ({}))) as { ok?: boolean; signature?: string };
-      if (exitResponse.ok && exitJson.ok) {
-        await prisma.memoryFact.upsert({
-          where: { key: LAST_PLANNER_TRADE_KEY },
-          create: { key: LAST_PLANNER_TRADE_KEY, value: new Date().toISOString(), source: "agent", weight: 8 },
-          update: { value: new Date().toISOString(), source: "agent", weight: 8 },
-        });
-        return NextResponse.json({ ok: true, status: "executed", mode: "planner_autonomous_exit", runId, inputMint: heldMint, outputMint, amountIn: heldAmount, signature: exitJson.signature ?? null, reason: "held_token_exit" });
-      }
-    }
-  }
-
   const context = await buildDecisionContext(strategySnapshot);
   const baseDecision = await getTradeDecision(context.text, authority.maxTradeUsd);
   const decision = { ...baseDecision };
   let fallbackApplied = false;
+  const positiveSignal = await hasPositivePolicySignal(allowlist);
 
   if (!decision.go) {
-    const positiveSignal = await hasPositivePolicySignal(allowlist);
     if (positiveSignal) {
       const fallbackUsdBase = Number.isFinite(authority.maxTradeUsd) && authority.maxTradeUsd > 0 ? authority.maxTradeUsd : 100;
       decision.go = true;
@@ -388,6 +361,34 @@ export async function POST() {
   await prisma.memory.create({
     data: { type: "reflection", content: `Autonomous planner tick decision: ${decision.reason} runId=${runId}`, entities: ["planner:decision", `planner:run:${runId}`], importance: 0.55, source: "system" },
   });
+
+  // Only unwind held positions when we have a live rotate intent and policy signal.
+  // This avoids dumping purely because a token is held.
+  if (heldMint && decision.go && positiveSignal) {
+    const heldAmount = Number(walletBalances[heldMint] ?? 0);
+    const outUsdc = await getQuoteOutAmount(heldMint, USDC_MINT, heldAmount);
+    const outSol = await getQuoteOutAmount(heldMint, SOL_MINT, heldAmount);
+    const outputMint = outUsdc !== null && (outSol === null || outUsdc >= outSol) ? USDC_MINT : SOL_MINT;
+    const chosenOut = outputMint === USDC_MINT ? outUsdc : outSol;
+    const minRotateValue = outputMint === USDC_MINT ? 1 : 0.01;
+    if (chosenOut !== null && Number.isFinite(chosenOut) && chosenOut >= minRotateValue) {
+      const exitReq = new Request("http://planner.internal/api/trade/swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amountIn: heldAmount, slippageBps: 50, inputMint: heldMint, outputMint, agentInitiated: true }),
+      });
+      const exitResponse = await executeSwapRoute(exitReq);
+      const exitJson = (await exitResponse.json().catch(() => ({}))) as { ok?: boolean; signature?: string };
+      if (exitResponse.ok && exitJson.ok) {
+        await prisma.memoryFact.upsert({
+          where: { key: LAST_PLANNER_TRADE_KEY },
+          create: { key: LAST_PLANNER_TRADE_KEY, value: new Date().toISOString(), source: "agent", weight: 8 },
+          update: { value: new Date().toISOString(), source: "agent", weight: 8 },
+        });
+        return NextResponse.json({ ok: true, status: "executed", mode: "planner_autonomous_rotate", runId, inputMint: heldMint, outputMint, amountIn: heldAmount, signature: exitJson.signature ?? null, reason: "held_token_rotate" });
+      }
+    }
+  }
 
   const outputMint = await pickBestTradableMint(allowlist);
   if (!outputMint) {
