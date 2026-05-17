@@ -20,6 +20,13 @@ type SwapBody = {
   agentInitiated?: boolean;
 };
 
+type SocialExecutionGate = {
+  pass: boolean;
+  reason: string;
+  socialSignalCount: number;
+  sherpaFeedCount: number;
+};
+
 type JupiterTokenMeta = { decimals?: number };
 
 function parseSecretKey(raw: string): Uint8Array | null {
@@ -77,6 +84,58 @@ async function getTokenDecimals(mint: string, connection: Connection): Promise<n
   }
 }
 
+async function evaluateSocialExecutionGate(): Promise<SocialExecutionGate> {
+  if (process.env.MOLTBOOK_MULTI_FACTOR_REQUIRED === "0") {
+    return { pass: true, reason: "multi_factor_disabled", socialSignalCount: 0, sherpaFeedCount: 0 };
+  }
+
+  const socialWindowMinutes = Math.max(1, Number(process.env.MORK_SOCIAL_SIGNAL_WINDOW_MINUTES ?? 180) || 180);
+  const minSocialSignals = Math.max(1, Number(process.env.MORK_SOCIAL_SIGNAL_MIN_COUNT ?? 1) || 1);
+  const minSherpaFeeds = Math.max(1, Number(process.env.MORK_SOCIAL_SHERPA_MIN_COUNT ?? 1) || 1);
+  const since = new Date(Date.now() - socialWindowMinutes * 60_000);
+
+  const [moltbookTicks, sherpaFeeds] = await Promise.all([
+    prisma.memory.findMany({
+      where: { source: "moltbook", createdAt: { gte: since }, content: { contains: "socialSignals=" } },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: { content: true },
+    }),
+    prisma.memory.count({
+      where: {
+        source: "sherpa",
+        createdAt: { gte: since },
+        OR: [{ content: { contains: "[feed/" } }, { content: { contains: "feed" } }],
+      },
+    }),
+  ]);
+
+  const socialSignalCount = moltbookTicks.reduce((acc, tick) => {
+    const m = String(tick.content).match(/socialSignals=(\d+)/i);
+    return acc + (m ? Number(m[1] ?? 0) : 0);
+  }, 0);
+
+  if (socialSignalCount < minSocialSignals) {
+    return {
+      pass: false,
+      reason: `social_signal_threshold_unmet(${socialSignalCount}<${minSocialSignals})`,
+      socialSignalCount,
+      sherpaFeedCount: sherpaFeeds,
+    };
+  }
+
+  if (sherpaFeeds < minSherpaFeeds) {
+    return {
+      pass: false,
+      reason: `sherpa_feed_threshold_unmet(${sherpaFeeds}<${minSherpaFeeds})`,
+      socialSignalCount,
+      sherpaFeedCount: sherpaFeeds,
+    };
+  }
+
+  return { pass: true, reason: "social_thresholds_met", socialSignalCount, sherpaFeedCount: sherpaFeeds };
+}
+
 export async function POST(req: Request) {
   try {
     const control = await getAppControlState();
@@ -92,6 +151,21 @@ export async function POST(req: Request) {
       if (authority.mode === "emergency_stop") {
         return NextResponse.json(
           { ok: false, error: "Trading disabled: emergency_stop mode is active." },
+          { status: 403 }
+        );
+      }
+
+      const socialGate = await evaluateSocialExecutionGate();
+      if (!socialGate.pass) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `Agent execution blocked by social multi-factor gate: ${socialGate.reason}`,
+            decisionMeta: {
+              socialSignalCount: socialGate.socialSignalCount,
+              sherpaFeedCount: socialGate.sherpaFeedCount,
+            },
+          },
           { status: 403 }
         );
       }
