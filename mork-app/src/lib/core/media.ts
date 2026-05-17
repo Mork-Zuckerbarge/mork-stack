@@ -147,7 +147,10 @@ export async function generateImage(prompt: string): Promise<GeneratedMedia> {
   const imageUrl = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`);
   imageUrl.searchParams.set("nologo", "true");
   imageUrl.searchParams.set("enhance", "true");
-  imageUrl.searchParams.set("seed", String(seed));
+  const seed = Number(process.env.MEDIA_IMAGE_SEED || "");
+  if (Number.isFinite(seed) && seed > 0) {
+    imageUrl.searchParams.set("seed", String(Math.floor(seed)));
+  }
   imageUrl.searchParams.set("width", process.env.MEDIA_IMAGE_WIDTH || "1024");
   imageUrl.searchParams.set("height", process.env.MEDIA_IMAGE_HEIGHT || "1024");
   const model = (process.env.MEDIA_IMAGE_MODEL || "flux").trim();

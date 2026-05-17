@@ -546,7 +546,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   }
 
   if (command.type === "tweet") {
-    const draft = await respondToChat({ channel: "x", handle: "app-user", message: `Draft an X post using this user-provided text. Keep intent and key wording intact unless it violates policy: ${command.text}`, maxChars: 560 });
+    const draft = await respondToChat({ channel: "x", handle: "app-user", message: `Draft an X post using this user-provided text. Keep intent and key wording intact unless it violates policy: ${command.text}`, maxChars: 20000 });
     return { ok: true, routed: "sherpa/x", command: "tweet", response: draft.response || command.text, status: 200, note: "Draft generated for X voice. Sherpa posting remains external unless wired to X credentials." };
   }
 
