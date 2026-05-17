@@ -7,6 +7,7 @@ type Settings = {
   solanaRpc: string;
   telegramBotToken: string;
   facebootAgentToken: string;
+  moltbookApiKey: string;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   ollamaHost: string;
@@ -18,6 +19,7 @@ const emptySettings: Settings = {
   solanaRpc: "https://api.mainnet-beta.solana.com",
   telegramBotToken: "",
   facebootAgentToken: "",
+  moltbookApiKey: "",
   elevenLabsApiKey: "",
   elevenLabsVoiceId: "",
   ollamaHost: "http://127.0.0.1:11434",
@@ -69,6 +71,7 @@ export default function SettingsPage() {
           <Field label="Solana RPC" value={settings.solanaRpc} onChange={(v) => update("solanaRpc", v)} />
           <Field label="Telegram Bot Token" value={settings.telegramBotToken} onChange={(v) => update("telegramBotToken", v)} secret />
           <Field label="Faceboot Agent Token" value={settings.facebootAgentToken} onChange={(v) => update("facebootAgentToken", v)} secret />
+          <Field label="Moltbook API Key" value={settings.moltbookApiKey} onChange={(v) => update("moltbookApiKey", v)} secret />
           <Field label="ElevenLabs API Key" value={settings.elevenLabsApiKey} onChange={(v) => update("elevenLabsApiKey", v)} secret />
           <Field label="ElevenLabs Voice ID" value={settings.elevenLabsVoiceId} onChange={(v) => update("elevenLabsVoiceId", v)} />
           <Field label="Ollama Host" value={settings.ollamaHost} onChange={(v) => update("ollamaHost", v)} />
