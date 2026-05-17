@@ -4,6 +4,7 @@ import JupiterPanel from "@/components/JupiterPanel";
 import AppControlPanel from "@/components/AppControlPanel";
 import PreflightStatusCard from "@/components/PreflightStatusCard";
 import SherpaPanel from "@/components/SherpaPanel";
+import MoltbookStatusCard from "@/components/MoltbookStatusCard";
 
 export default function HomePage() {
   return (
@@ -23,6 +24,7 @@ export default function HomePage() {
           <AppControlPanel />
           <AgentStatusCard />
           <PreflightStatusCard />
+          <MoltbookStatusCard />
         </section>
       </div>
     </main>

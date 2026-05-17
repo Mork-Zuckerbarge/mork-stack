@@ -9,6 +9,7 @@ type SettingsPayload = {
   solanaRpc: string;
   telegramBotToken: string;
   facebootAgentToken: string;
+  moltbookApiKey: string;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   ollamaHost: string;
@@ -20,6 +21,7 @@ const DEFAULT_SETTINGS: SettingsPayload = {
   solanaRpc: "https://api.mainnet-beta.solana.com",
   telegramBotToken: "",
   facebootAgentToken: "",
+  moltbookApiKey: "",
   elevenLabsApiKey: "",
   elevenLabsVoiceId: "",
   ollamaHost: "http://127.0.0.1:11434",
@@ -31,6 +33,7 @@ const SETTINGS_TO_ENV: Array<[keyof SettingsPayload, string]> = [
   ["solanaRpc", "SOLANA_RPC"],
   ["telegramBotToken", "TELEGRAM_BOT_TOKEN"],
   ["facebootAgentToken", "FACEBOOT_AGENT_TOKEN"],
+  ["moltbookApiKey", "MOLTBOOK_API_KEY"],
   ["elevenLabsApiKey", "ELEVENLABS_API_KEY"],
   ["elevenLabsVoiceId", "ELEVENLABS_VOICE_ID"],
   ["ollamaHost", "OLLAMA_HOST"],
