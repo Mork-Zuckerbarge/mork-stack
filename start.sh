@@ -45,6 +45,16 @@ wait_for_http() {
   return 1
 }
 
+extract_port_from_url() {
+  local url="${1:-}"
+  local default_port="${2:-8790}"
+  if [[ "$url" =~ :([0-9]{2,5})($|/) ]]; then
+    printf "%s" "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  printf "%s" "$default_port"
+}
+
 is_valid_telegram_bot_token() {
   local token="${1:-}"
   token="${token#bot}"
@@ -178,9 +188,10 @@ if [[ -d "$MORK_CORE_DIR" ]]; then
   fi
 
   log "Starting mork-core service"
+  MORK_CORE_RUNTIME_PORT="$(extract_port_from_url "$LOCAL_CORE_RUNTIME_URL" "8790")"
   (
     cd "$MORK_CORE_DIR"
-    npm run dev >>"$LOG_DIR/mork-core.log" 2>&1
+    PORT="$MORK_CORE_RUNTIME_PORT" MORK_CORE_PORT="$MORK_CORE_RUNTIME_PORT" npm run dev >>"$LOG_DIR/mork-core.log" 2>&1
   ) &
   MORK_CORE_PID=$!
   sleep 1
@@ -305,10 +316,10 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
     fi
 
     if [[ -n "$TELEGRAM_PYTHON" ]]; then
-      log "Starting telegram bridge (MORK_CORE_URL=$MORK_CORE_URL, MORK_APP_URL=$MORK_APP_URL)"
+      log "Starting telegram bridge (MORK_CORE_URL=$LOCAL_CORE_RUNTIME_URL, MORK_APP_URL=$MORK_APP_URL)"
       (
         cd "$TELEGRAM_BRIDGE_DIR"
-        "$TELEGRAM_PYTHON" bridge.py >>"$LOG_DIR/telegram-bridge.log" 2>&1
+        MORK_CORE_URL="$LOCAL_CORE_RUNTIME_URL" "$TELEGRAM_PYTHON" bridge.py >>"$LOG_DIR/telegram-bridge.log" 2>&1
       ) &
       TELEGRAM_PID=$!
       sleep 1
