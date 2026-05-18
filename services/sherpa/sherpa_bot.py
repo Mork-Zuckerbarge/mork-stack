@@ -2052,6 +2052,40 @@ class TwitterBot:
         print(f"\nUpdated rate limit count: {self.rate_limits['tweets']['current_count']}")
         print(f"Remaining in window: {self.rate_limits['tweets']['max_tweets'] - self.rate_limits['tweets']['current_count']}")
 
+    def _ingest_successful_x_post_to_memory(self, tweet_text, tweet_id=None, tweet_url=None):
+        """Store successful X posts in app memory so downstream ticks can reuse them."""
+        try:
+            text = (tweet_text or "").strip()
+            if not text:
+                return
+
+            detail_parts = []
+            if tweet_id:
+                detail_parts.append(f"tweet_id={tweet_id}")
+            if tweet_url:
+                detail_parts.append(f"tweet_url={tweet_url}")
+            details = f" ({', '.join(detail_parts)})" if detail_parts else ""
+
+            payload = {
+                "source": "sherpa",
+                "content": f"Sherpa X post success{details}: {text}"[:2000],
+                "weight": 0.7,
+                "meta": {
+                    "kind": "x_post_success",
+                    "tweet_id": tweet_id,
+                    "tweet_url": tweet_url,
+                    "posted_at": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+
+            res = requests.post(f"{_core_base_url()}/memory/ingest", json=payload, timeout=8)
+            if 200 <= res.status_code < 300:
+                print("🧠 Ingested successful X post into app memory.")
+            else:
+                print(f"⚠ Could not ingest X post into app memory: {res.status_code} {res.text[:220]}")
+        except Exception as e:
+            print(f"⚠ Failed to ingest X post into app memory: {e}")
+
     def send_tweet(self, tweet_or_character, topic=None):
         """
         Send a tweet using the configured X client.
@@ -2091,6 +2125,7 @@ class TwitterBot:
                     username = (self.credentials.get("twitter_username") or "").lstrip("@")
                     if username:
                         tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+                self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
                 print(f"✅ Tweet sent successfully: {tweet_id}")
 
             if self.publish_targets.get("telegram", False):
