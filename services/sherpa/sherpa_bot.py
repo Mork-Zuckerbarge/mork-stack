@@ -43,6 +43,8 @@ X_INTERNAL_DRAFT_MAX_CHARS = 520
 LOCAL_MORK_CORE_FALLBACK_URL = os.getenv("LOCAL_MORK_CORE_FALLBACK_URL", "http://localhost:8790").rstrip("/")
 MORK_CORE_SERVICE_FALLBACK_URL = os.getenv("MORK_CORE_SERVICE_FALLBACK_URL", "http://mork-core:8790").rstrip("/")
 MORK_CORE_URL = os.getenv("MORK_CORE_URL", LOCAL_MORK_CORE_FALLBACK_URL).rstrip("/")
+MORK_APP_FALLBACK_URL = os.getenv("MORK_APP_URL", "http://localhost:3000").rstrip("/")
+MORK_APP_SERVICE_FALLBACK_URL = os.getenv("MORK_APP_SERVICE_URL", "http://mork-app:3000").rstrip("/")
 MEME_CORE_REFLECT_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_REFLECT_TIMEOUT_SECONDS", "20"))
 MEME_CORE_COMPOSE_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_COMPOSE_TIMEOUT_SECONDS", "12"))
 USE_OPENAI = str(os.getenv("USE_OPENAI", "0")).strip().lower() in ("1", "true", "yes", "on")
@@ -126,6 +128,24 @@ def _core_retry_bases(base: str) -> list[str]:
             continue
         if c and c not in out:
             out.append(c)
+    return out
+
+def _app_retry_bases(base: str) -> list[str]:
+    """
+    Similar to core retry logic, but for the Next.js app endpoint that owns Moltbook tick memory reads.
+    """
+    candidates = [
+        (base or "").rstrip("/"),
+        MORK_APP_FALLBACK_URL.rstrip("/"),
+        MORK_APP_SERVICE_FALLBACK_URL.rstrip("/"),
+    ]
+    out = []
+    seen = set()
+    for c in candidates:
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        out.append(c)
     return out
 
 def core_reflect(timeout=20) -> bool:
@@ -1832,6 +1852,19 @@ class TwitterBot:
             max_content_length = X_POST_MAX_CHARS - TWITTER_SHORT_URL_LENGTH if article_url else X_POST_MAX_CHARS
             max_chars_for_core = min(X_INTERNAL_DRAFT_MAX_CHARS, max_content_length)
 
+            # Strong grounding path for feed stories: avoid fabricating claims.
+            if article_url or (title and text):
+                source_blurb = " ".join([title.strip(), text.strip()]).strip()
+                source_blurb = re.sub(r"\s+", " ", source_blurb).strip()
+                if not source_blurb:
+                    source_blurb = (title or "Update").strip()
+                grounded = _wrap_280(source_blurb[:max_content_length], max_content_length)
+                if article_url and article_url not in grounded:
+                    grounded = _wrap_280(f"{grounded} {article_url}", X_POST_MAX_CHARS)
+                self.tweet_count += 1
+                self.last_tweet_time = datetime.now()
+                return grounded
+
             # ----------------------------
             # NO-OPENAI MODE: use Mork Core
             # ----------------------------
@@ -2052,6 +2085,61 @@ class TwitterBot:
         print(f"\nUpdated rate limit count: {self.rate_limits['tweets']['current_count']}")
         print(f"Remaining in window: {self.rate_limits['tweets']['max_tweets'] - self.rate_limits['tweets']['current_count']}")
 
+    def _ingest_successful_x_post_to_memory(self, tweet_text, tweet_id=None, tweet_url=None):
+        """Store successful X posts in memory stores so downstream ticks can reuse them."""
+        try:
+            text = (tweet_text or "").strip()
+            if not text:
+                return
+
+            detail_parts = []
+            if tweet_id:
+                detail_parts.append(f"tweet_id={tweet_id}")
+            if tweet_url:
+                detail_parts.append(f"tweet_url={tweet_url}")
+            details = f" ({', '.join(detail_parts)})" if detail_parts else ""
+
+            core_payload = {
+                "source": "sherpa",
+                "content": f"Sherpa X post success{details}: {text}"[:2000],
+                "weight": 0.7,
+                "meta": {
+                    "kind": "x_post_success",
+                    "tweet_id": tweet_id,
+                    "tweet_url": tweet_url,
+                    "posted_at": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+
+            core_res = requests.post(f"{_core_base_url()}/memory/ingest", json=core_payload, timeout=8)
+            if 200 <= core_res.status_code < 300:
+                print("🧠 Ingested successful X post into core memory.")
+            else:
+                print(f"⚠ Could not ingest X post into core memory: {core_res.status_code} {core_res.text[:220]}")
+
+            app_payload = {
+                "type": "fact",
+                "source": "sherpa",
+                "content": f"Sherpa X post success{details}: {text}"[:2000],
+                "importance": 0.7,
+                "entities": ["sherpa", "x", "moltbook"],
+            }
+            app_ingested = False
+            for app_base in _app_retry_bases(MORK_APP_FALLBACK_URL):
+                try:
+                    app_res = requests.post(f"{app_base}/memory/ingest", json=app_payload, timeout=8)
+                    if 200 <= app_res.status_code < 300:
+                        print(f"🧠 Ingested successful X post into app memory via {app_base}.")
+                        app_ingested = True
+                        break
+                    print(f"⚠ App memory ingest failed via {app_base}: {app_res.status_code} {app_res.text[:220]}")
+                except Exception as app_err:
+                    print(f"⚠ App memory ingest error via {app_base}: {app_err}")
+            if not app_ingested:
+                print("⚠ Successful X post was not persisted to app memory; Moltbook tick may not pick it up.")
+        except Exception as e:
+            print(f"⚠ Failed to ingest X post into app memory: {e}")
+
     def send_tweet(self, tweet_or_character, topic=None):
         """
         Send a tweet using the configured X client.
@@ -2091,6 +2179,7 @@ class TwitterBot:
                     username = (self.credentials.get("twitter_username") or "").lstrip("@")
                     if username:
                         tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+                self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
                 print(f"✅ Tweet sent successfully: {tweet_id}")
 
             if self.publish_targets.get("telegram", False):
@@ -2374,6 +2463,13 @@ class TwitterBot:
             
             if response.data:
                 self.last_successful_tweet = datetime.now()
+                tweet_id = response.data.get("id")
+                tweet_url = None
+                if tweet_id:
+                    username = (self.credentials.get("twitter_username") or "").lstrip("@")
+                    if username:
+                        tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+                self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
                 print("\nTweet with media sent successfully")
                 print(f"Tweet ID: {response.data['id']}")
                 
