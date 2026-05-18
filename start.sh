@@ -24,6 +24,47 @@ TELEGRAM_PID=""
 log() { printf "\n[%s] %s\n" "start" "$1"; }
 warn() { printf "\n[%s] %s\n" "warn" "$1"; }
 
+
+wait_for_http() {
+  local url="$1"
+  local timeout_seconds="${2:-20}"
+  local elapsed=0
+  while (( elapsed < timeout_seconds )); do
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+        return 0
+      fi
+    else
+      if node -e 'fetch(process.argv[1]).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' "$url" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  return 1
+}
+
+probe_compose_endpoint() {
+  local base_url="${1:-}"
+  local compose_url="${base_url%/}/x/compose?mode=observation&maxChars=140"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sS --max-time 4 "$compose_url" || true
+  else
+    node -e 'fetch(process.argv[1]).then(async r=>{const t=await r.text();process.stdout.write(t)}).catch(()=>{})' "$compose_url" || true
+  fi
+}
+
+extract_port_from_url() {
+  local url="${1:-}"
+  local default_port="${2:-8790}"
+  if [[ "$url" =~ :([0-9]{2,5})($|/) ]]; then
+    printf "%s" "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  printf "%s" "$default_port"
+}
+
 is_valid_telegram_bot_token() {
   local token="${1:-}"
   token="${token#bot}"
@@ -134,8 +175,14 @@ fi
 
 export MORK_CORE_URL="${MORK_CORE_URL:-http://127.0.0.1:8790}"
 export MORK_APP_URL="${MORK_APP_URL:-http://127.0.0.1:3000}"
+LOCAL_CORE_RUNTIME_URL="${LOCAL_CORE_RUNTIME_URL:-http://127.0.0.1:8790}"
+
+if [[ "${MORK_CORE_URL%/}" == "${MORK_APP_URL%/}" ]]; then
+  warn "MORK_CORE_URL matches MORK_APP_URL (${MORK_CORE_URL}); local services will use ${LOCAL_CORE_RUNTIME_URL} for mork-core checks"
+fi
 log "Using MORK_CORE_URL=$MORK_CORE_URL"
 log "Using MORK_APP_URL=$MORK_APP_URL"
+log "Using LOCAL_CORE_RUNTIME_URL=$LOCAL_CORE_RUNTIME_URL"
 log "Using DATABASE_URL=$DATABASE_URL"
 
 log "Ensuring runtime Prisma schema exists for DATABASE_URL"
@@ -150,10 +197,17 @@ if [[ -d "$MORK_CORE_DIR" ]]; then
     npm --prefix "$MORK_CORE_DIR" install
   fi
 
-  log "Starting mork-core service"
+  log "Ensuring mork-core Prisma client is generated"
   (
     cd "$MORK_CORE_DIR"
-    npm run dev >>"$LOG_DIR/mork-core.log" 2>&1
+    npm exec prisma generate >>"$LOG_DIR/mork-core.log" 2>&1
+  )
+
+  log "Starting mork-core service"
+  MORK_CORE_RUNTIME_PORT="$(extract_port_from_url "$LOCAL_CORE_RUNTIME_URL" "8790")"
+  (
+    cd "$MORK_CORE_DIR"
+    PORT="$MORK_CORE_RUNTIME_PORT" MORK_CORE_PORT="$MORK_CORE_RUNTIME_PORT" npm run dev >>"$LOG_DIR/mork-core.log" 2>&1
   ) &
   MORK_CORE_PID=$!
   sleep 1
@@ -162,6 +216,23 @@ if [[ -d "$MORK_CORE_DIR" ]]; then
   fi
 else
   log "Skipping mork-core service startup (missing $MORK_CORE_DIR)"
+fi
+
+MORK_CORE_HEALTH_URL="${LOCAL_CORE_RUNTIME_URL%/}/health"
+if ! wait_for_http "$MORK_CORE_HEALTH_URL" 25; then
+  warn "mork-core did not become reachable at $MORK_CORE_HEALTH_URL"
+  warn "Sherpa depends on mork-core /x/compose. Check $LOG_DIR/mork-core.log"
+  if [[ -f "$LOG_DIR/mork-core.log" ]]; then
+    warn "Recent mork-core log tail:"
+    tail -n 25 "$LOG_DIR/mork-core.log" || true
+  fi
+else
+  log "mork-core health check passed at $MORK_CORE_HEALTH_URL"
+  compose_probe_json="$(probe_compose_endpoint "$LOCAL_CORE_RUNTIME_URL")"
+  if [[ "$compose_probe_json" == *"Use /api/chat/respond to generate channel output."* ]]; then
+    warn "Compose probe hit app-surface responder instead of mork-core at ${LOCAL_CORE_RUNTIME_URL%/}/x/compose"
+    warn "Check for a port collision/misroute around LOCAL_CORE_RUNTIME_URL and app PORT."
+  fi
 fi
 
 if [[ -d "$ARB_DIR" ]]; then
@@ -237,15 +308,22 @@ else
 fi
 
 if [[ -x "$SHERPA_DIR/.venv/bin/python" ]]; then
-  log "Starting sherpa service"
-  (
-    cd "$SHERPA_DIR"
-    "$SHERPA_DIR/.venv/bin/python" sherpa_bot.py >>"$LOG_DIR/sherpa.log" 2>&1
-  ) &
-  SHERPA_PID=$!
-  sleep 1
-  if ! kill -0 "$SHERPA_PID" >/dev/null 2>&1; then
-    warn "Sherpa exited immediately. Check $LOG_DIR/sherpa.log"
+  if ! wait_for_http "${LOCAL_CORE_RUNTIME_URL%/}/health" 2; then
+    warn "Skipping sherpa startup because mork-core is unreachable at ${LOCAL_CORE_RUNTIME_URL%/}/health"
+  else
+    log "Starting sherpa service"
+    (
+      cd "$SHERPA_DIR"
+      MORK_CORE_URL="$LOCAL_CORE_RUNTIME_URL" \
+      MORK_CORE_SERVICE_FALLBACK_URL="$LOCAL_CORE_RUNTIME_URL" \
+      LOCAL_MORK_CORE_FALLBACK_URL="$LOCAL_CORE_RUNTIME_URL" \
+      "$SHERPA_DIR/.venv/bin/python" sherpa_bot.py >>"$LOG_DIR/sherpa.log" 2>&1
+    ) &
+    SHERPA_PID=$!
+    sleep 1
+    if ! kill -0 "$SHERPA_PID" >/dev/null 2>&1; then
+      warn "Sherpa exited immediately. Check $LOG_DIR/sherpa.log"
+    fi
   fi
 else
   log "Skipping sherpa service startup (.venv python not found at $SHERPA_DIR/.venv/bin/python)"
@@ -263,10 +341,10 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
     fi
 
     if [[ -n "$TELEGRAM_PYTHON" ]]; then
-      log "Starting telegram bridge (MORK_CORE_URL=$MORK_CORE_URL, MORK_APP_URL=$MORK_APP_URL)"
+      log "Starting telegram bridge (MORK_CORE_URL=$LOCAL_CORE_RUNTIME_URL, MORK_APP_URL=$MORK_APP_URL)"
       (
         cd "$TELEGRAM_BRIDGE_DIR"
-        "$TELEGRAM_PYTHON" bridge.py >>"$LOG_DIR/telegram-bridge.log" 2>&1
+        MORK_CORE_URL="$LOCAL_CORE_RUNTIME_URL" "$TELEGRAM_PYTHON" bridge.py >>"$LOG_DIR/telegram-bridge.log" 2>&1
       ) &
       TELEGRAM_PID=$!
       sleep 1
