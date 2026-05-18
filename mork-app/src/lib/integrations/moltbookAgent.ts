@@ -87,14 +87,25 @@ async function moltbookRequest(path: string, options: MoltbookRequestOptions = {
   const apiKey = resolveApiKey(options.apiKey);
   const url = assertMoltbookUrl(path);
 
-  const response = await fetch(url, {
+  const makeHeaders = (authMode: "bearer" | "raw") => ({
+    Authorization: authMode === "bearer" ? `Bearer ${apiKey}` : apiKey,
+    "X-API-Key": apiKey,
+    "Content-Type": "application/json",
+  });
+
+  let response = await fetch(url, {
     method,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: makeHeaders("bearer"),
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
+
+  if (response.status === 401 || response.status === 403) {
+    response = await fetch(url, {
+      method,
+      headers: makeHeaders("raw"),
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  }
 
   const text = await response.text();
   let payload: MoltbookApiResult = {};
