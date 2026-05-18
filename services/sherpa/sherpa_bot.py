@@ -272,7 +272,17 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
             print(f"⚠ core_compose GET failed: {e}")
             if i + 1 < len(compose_bases):
                 print("⚠ core_compose GET retrying local mork-core after exception")
-    return ""
+
+    # 3) Offline fallback so Sherpa can keep producing content when mork-core is unavailable.
+    fallback_text = " ".join(
+        part.strip() for part in [
+            str(payload.get("title") or "").strip(),
+            str(payload.get("text") or "").strip(),
+        ] if part and str(part).strip()
+    )
+    if not fallback_text:
+        fallback_text = str(payload.get("topic") or payload.get("kind") or "observation").strip() or "mork update"
+    return _wrap_280(fallback_text, int(payload.get("maxChars", 260)))
 
 def core_chat_reply(handle: str, message: str, max_chars: int = 260, timeout: int = 10) -> str:
     """
