@@ -49,7 +49,9 @@ probe_compose_endpoint() {
   local base_url="${1:-}"
   local compose_url="${base_url%/}/x/compose?mode=observation&maxChars=140"
   if command -v curl >/dev/null 2>&1; then
-    curl -sS --max-time 4 "$compose_url" || true
+    # Keep probe best-effort and quiet; timeout noise here can be misread as startup failure
+    # even when health already passed.
+    curl -sS --max-time 4 "$compose_url" 2>/dev/null || true
   else
     node -e 'fetch(process.argv[1]).then(async r=>{const t=await r.text();process.stdout.write(t)}).catch(()=>{})' "$compose_url" || true
   fi
