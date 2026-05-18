@@ -2463,6 +2463,13 @@ class TwitterBot:
             
             if response.data:
                 self.last_successful_tweet = datetime.now()
+                tweet_id = response.data.get("id")
+                tweet_url = None
+                if tweet_id:
+                    username = (self.credentials.get("twitter_username") or "").lstrip("@")
+                    if username:
+                        tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+                self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
                 print("\nTweet with media sent successfully")
                 print(f"Tweet ID: {response.data['id']}")
                 
