@@ -24,6 +24,27 @@ TELEGRAM_PID=""
 log() { printf "\n[%s] %s\n" "start" "$1"; }
 warn() { printf "\n[%s] %s\n" "warn" "$1"; }
 
+
+wait_for_http() {
+  local url="$1"
+  local timeout_seconds="${2:-20}"
+  local elapsed=0
+  while (( elapsed < timeout_seconds )); do
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+        return 0
+      fi
+    else
+      if node -e 'fetch(process.argv[1]).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' "$url" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  return 1
+}
+
 is_valid_telegram_bot_token() {
   local token="${1:-}"
   token="${token#bot}"
@@ -134,8 +155,14 @@ fi
 
 export MORK_CORE_URL="${MORK_CORE_URL:-http://127.0.0.1:8790}"
 export MORK_APP_URL="${MORK_APP_URL:-http://127.0.0.1:3000}"
+LOCAL_CORE_RUNTIME_URL="${LOCAL_CORE_RUNTIME_URL:-http://127.0.0.1:8790}"
+
+if [[ "${MORK_CORE_URL%/}" == "${MORK_APP_URL%/}" ]]; then
+  warn "MORK_CORE_URL matches MORK_APP_URL (${MORK_CORE_URL}); local services will use ${LOCAL_CORE_RUNTIME_URL} for mork-core checks"
+fi
 log "Using MORK_CORE_URL=$MORK_CORE_URL"
 log "Using MORK_APP_URL=$MORK_APP_URL"
+log "Using LOCAL_CORE_RUNTIME_URL=$LOCAL_CORE_RUNTIME_URL"
 log "Using DATABASE_URL=$DATABASE_URL"
 
 log "Ensuring runtime Prisma schema exists for DATABASE_URL"
@@ -162,6 +189,14 @@ if [[ -d "$MORK_CORE_DIR" ]]; then
   fi
 else
   log "Skipping mork-core service startup (missing $MORK_CORE_DIR)"
+fi
+
+MORK_CORE_HEALTH_URL="${LOCAL_CORE_RUNTIME_URL%/}/health"
+if ! wait_for_http "$MORK_CORE_HEALTH_URL" 25; then
+  warn "mork-core did not become reachable at $MORK_CORE_HEALTH_URL"
+  warn "Sherpa depends on mork-core /x/compose. Check $LOG_DIR/mork-core.log"
+else
+  log "mork-core health check passed at $MORK_CORE_HEALTH_URL"
 fi
 
 if [[ -d "$ARB_DIR" ]]; then
@@ -237,15 +272,22 @@ else
 fi
 
 if [[ -x "$SHERPA_DIR/.venv/bin/python" ]]; then
-  log "Starting sherpa service"
-  (
-    cd "$SHERPA_DIR"
-    "$SHERPA_DIR/.venv/bin/python" sherpa_bot.py >>"$LOG_DIR/sherpa.log" 2>&1
-  ) &
-  SHERPA_PID=$!
-  sleep 1
-  if ! kill -0 "$SHERPA_PID" >/dev/null 2>&1; then
-    warn "Sherpa exited immediately. Check $LOG_DIR/sherpa.log"
+  if ! wait_for_http "${LOCAL_CORE_RUNTIME_URL%/}/health" 2; then
+    warn "Skipping sherpa startup because mork-core is unreachable at ${LOCAL_CORE_RUNTIME_URL%/}/health"
+  else
+    log "Starting sherpa service"
+    (
+      cd "$SHERPA_DIR"
+      MORK_CORE_URL="$LOCAL_CORE_RUNTIME_URL" \
+      MORK_CORE_SERVICE_FALLBACK_URL="$LOCAL_CORE_RUNTIME_URL" \
+      LOCAL_MORK_CORE_FALLBACK_URL="$LOCAL_CORE_RUNTIME_URL" \
+      "$SHERPA_DIR/.venv/bin/python" sherpa_bot.py >>"$LOG_DIR/sherpa.log" 2>&1
+    ) &
+    SHERPA_PID=$!
+    sleep 1
+    if ! kill -0 "$SHERPA_PID" >/dev/null 2>&1; then
+      warn "Sherpa exited immediately. Check $LOG_DIR/sherpa.log"
+    fi
   fi
 else
   log "Skipping sherpa service startup (.venv python not found at $SHERPA_DIR/.venv/bin/python)"
