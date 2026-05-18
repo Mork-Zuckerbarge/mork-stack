@@ -71,7 +71,11 @@ function fileExtForMime(mimeType: string): string {
   return "bin";
 }
 
-async function persistBytes(bytes: Uint8Array, prompt: string, mimeType: string): Promise<{ filename: string; url: string }> {
+async function persistBytes(
+  bytes: Uint8Array<ArrayBufferLike>,
+  prompt: string,
+  mimeType: string
+): Promise<{ filename: string; url: string }> {
   await mkdir(GENERATED_DIR, { recursive: true });
   const now = new Date();
   const stamp = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, "0")}${String(now.getUTCDate()).padStart(2, "0")}-${String(now.getUTCHours()).padStart(2, "0")}${String(now.getUTCMinutes()).padStart(2, "0")}${String(now.getUTCSeconds()).padStart(2, "0")}`;
@@ -83,7 +87,7 @@ async function persistBytes(bytes: Uint8Array, prompt: string, mimeType: string)
   return { filename, url: `/generated/${filename}` };
 }
 
-async function fetchBinary(url: string, context: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+async function fetchBinary(url: string, context: string): Promise<{ bytes: Uint8Array<ArrayBufferLike>; mimeType: string }> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`${context} failed (${res.status})`);
@@ -327,9 +331,9 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
     throw new Error(`Audio generation failed (${res.status})${detail ? `: ${detail}` : ""}`);
   }
   let mimeType = (res.headers.get("content-type") || "audio/mpeg").toLowerCase();
-  let bytes = new Uint8Array(await res.arrayBuffer());
+  let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(await res.arrayBuffer());
 
-  const retryWithModel = async (model: string): Promise<{ mimeType: string; bytes: Uint8Array } | null> => {
+  const retryWithModel = async (model: string): Promise<{ mimeType: string; bytes: Uint8Array<ArrayBufferLike> } | null> => {
     endpoint.searchParams.set("model", model);
     const modelRes = await requestAudio(endpoint);
     if (!modelRes.ok) return null;
