@@ -197,6 +197,12 @@ if [[ -d "$MORK_CORE_DIR" ]]; then
     npm --prefix "$MORK_CORE_DIR" install
   fi
 
+  log "Ensuring mork-core Prisma client is generated"
+  (
+    cd "$MORK_CORE_DIR"
+    npm exec prisma generate >>"$LOG_DIR/mork-core.log" 2>&1
+  )
+
   log "Starting mork-core service"
   MORK_CORE_RUNTIME_PORT="$(extract_port_from_url "$LOCAL_CORE_RUNTIME_URL" "8790")"
   (
