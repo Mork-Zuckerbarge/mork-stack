@@ -45,6 +45,16 @@ wait_for_http() {
   return 1
 }
 
+probe_compose_endpoint() {
+  local base_url="${1:-}"
+  local compose_url="${base_url%/}/x/compose?mode=observation&maxChars=140"
+  if command -v curl >/dev/null 2>&1; then
+    curl -sS --max-time 4 "$compose_url" || true
+  else
+    node -e 'fetch(process.argv[1]).then(async r=>{const t=await r.text();process.stdout.write(t)}).catch(()=>{})' "$compose_url" || true
+  fi
+}
+
 extract_port_from_url() {
   local url="${1:-}"
   local default_port="${2:-8790}"
@@ -206,8 +216,17 @@ MORK_CORE_HEALTH_URL="${LOCAL_CORE_RUNTIME_URL%/}/health"
 if ! wait_for_http "$MORK_CORE_HEALTH_URL" 25; then
   warn "mork-core did not become reachable at $MORK_CORE_HEALTH_URL"
   warn "Sherpa depends on mork-core /x/compose. Check $LOG_DIR/mork-core.log"
+  if [[ -f "$LOG_DIR/mork-core.log" ]]; then
+    warn "Recent mork-core log tail:"
+    tail -n 25 "$LOG_DIR/mork-core.log" || true
+  fi
 else
   log "mork-core health check passed at $MORK_CORE_HEALTH_URL"
+  compose_probe_json="$(probe_compose_endpoint "$LOCAL_CORE_RUNTIME_URL")"
+  if [[ "$compose_probe_json" == *"Use /api/chat/respond to generate channel output."* ]]; then
+    warn "Compose probe hit app-surface responder instead of mork-core at ${LOCAL_CORE_RUNTIME_URL%/}/x/compose"
+    warn "Check for a port collision/misroute around LOCAL_CORE_RUNTIME_URL and app PORT."
+  fi
 fi
 
 if [[ -d "$ARB_DIR" ]]; then
