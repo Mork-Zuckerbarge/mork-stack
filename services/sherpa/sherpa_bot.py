@@ -40,9 +40,9 @@ MAX_BACKLOG = 20   # store at most this many tweet IDs for tomorrow
 X_POST_MAX_CHARS = 560
 X_INTERNAL_DRAFT_MAX_CHARS = 520
 
-MORK_CORE_SERVICE_FALLBACK_URL = os.getenv("MORK_CORE_SERVICE_FALLBACK_URL", "http://mork-core:8790").rstrip("/")
 LOCAL_MORK_CORE_FALLBACK_URL = os.getenv("LOCAL_MORK_CORE_FALLBACK_URL", "http://localhost:8790").rstrip("/")
-MORK_CORE_URL = os.getenv("MORK_CORE_URL", MORK_CORE_SERVICE_FALLBACK_URL).rstrip("/")
+MORK_CORE_SERVICE_FALLBACK_URL = os.getenv("MORK_CORE_SERVICE_FALLBACK_URL", "http://mork-core:8790").rstrip("/")
+MORK_CORE_URL = os.getenv("MORK_CORE_URL", LOCAL_MORK_CORE_FALLBACK_URL).rstrip("/")
 MEME_CORE_REFLECT_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_REFLECT_TIMEOUT_SECONDS", "20"))
 MEME_CORE_COMPOSE_TIMEOUT_SECONDS = float(os.getenv("MEME_CORE_COMPOSE_TIMEOUT_SECONDS", "12"))
 USE_OPENAI = str(os.getenv("USE_OPENAI", "0")).strip().lower() in ("1", "true", "yes", "on")
@@ -121,6 +121,9 @@ def _core_retry_bases(base: str) -> list[str]:
     out: list[str] = []
     for candidate in (base, MORK_CORE_SERVICE_FALLBACK_URL, LOCAL_MORK_CORE_FALLBACK_URL):
         c = (candidate or "").strip().rstrip("/")
+        if "://mork-core" in c and os.getenv("MORK_CORE_ENABLE_DOCKER_HOSTNAME", "0").strip() != "1":
+            # Local/non-docker runs should avoid noisy DNS retries against container-only hostname.
+            continue
         if c and c not in out:
             out.append(c)
     return out
