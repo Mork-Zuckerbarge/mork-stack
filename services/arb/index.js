@@ -151,6 +151,7 @@ function morkTradeDecision(payload) {
 }
 
 function morkTradeResult(payload) {
+  morkArbEvent({ kind: "trade_result", mint: payload.mint, ok: payload.ok, error: payload.error }).catch(() => {});
   return morkMemory({
     type: "fact",
     content: JSON.stringify({ kind: "trade_result", ...payload }),
@@ -161,6 +162,9 @@ function morkTradeResult(payload) {
 }
 
 function morkRouteResearch(payload) {
+  if (payload.stage === "candidate") {
+    morkArbEvent({ kind: "route_research", mint: payload.mint, edgePct: payload.edgePct, net: payload.netUsd }).catch(() => {});
+  }
   return morkMemory({
     type: "fact",
     content: JSON.stringify({ kind: "route_research", ...payload }),

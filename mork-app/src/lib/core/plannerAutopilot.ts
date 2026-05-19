@@ -13,9 +13,9 @@ declare global {
 }
 
 function getIntervalMs() {
-  const raw = Number(process.env.MORK_PLANNER_TICK_INTERVAL_MS ?? 60_000);
-  if (!Number.isFinite(raw)) return 60_000;
-  return Math.max(15_000, Math.floor(raw));
+  const raw = Number(process.env.MORK_PLANNER_TICK_INTERVAL_MS ?? 120_000);
+  if (!Number.isFinite(raw)) return 120_000;
+  return Math.max(30_000, Math.floor(raw));
 }
 
 async function runTick(state: PlannerAutopilotState) {

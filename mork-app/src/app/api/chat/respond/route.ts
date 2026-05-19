@@ -732,6 +732,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
         outputMint: outputToken.mint,
         slippageBps: 50,
         agentInitiated: true,
+        userCommanded: true,
       }),
     });
   } catch (error) {

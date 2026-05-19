@@ -18,6 +18,7 @@ type SwapBody = {
   inputMint?: string;
   outputMint?: string;
   agentInitiated?: boolean;
+  userCommanded?: boolean;
 };
 
 type SocialExecutionGate = {
@@ -105,7 +106,6 @@ async function evaluateSocialExecutionGate(): Promise<SocialExecutionGate> {
       where: {
         source: "sherpa",
         createdAt: { gte: since },
-        OR: [{ content: { contains: "[feed/" } }, { content: { contains: "feed" } }],
       },
     }),
   ]);
@@ -115,7 +115,20 @@ async function evaluateSocialExecutionGate(): Promise<SocialExecutionGate> {
     return acc + (m ? Number(m[1] ?? 0) : 0);
   }, 0);
 
+  // If moltbook is unreachable (all recent ticks report moltbookReachable=false),
+  // degrade gracefully: sherpa activity alone satisfies the social gate.
+  const moltbookReachableInWindow = moltbookTicks.some(
+    (t) => !String(t.content).includes("moltbookReachable=false")
+  );
+  if (!moltbookReachableInWindow && moltbookTicks.length > 0 && sherpaFeeds >= minSherpaFeeds) {
+    return { pass: true, reason: "moltbook_offline_sherpa_active", socialSignalCount, sherpaFeedCount: sherpaFeeds };
+  }
+
   if (socialSignalCount < minSocialSignals) {
+    // Moltbook signals insufficient — try sherpa as fallback signal source
+    if (sherpaFeeds >= minSherpaFeeds) {
+      return { pass: true, reason: "sherpa_fallback_signal", socialSignalCount, sherpaFeedCount: sherpaFeeds };
+    }
     return {
       pass: false,
       reason: `social_signal_threshold_unmet(${socialSignalCount}<${minSocialSignals})`,
@@ -124,15 +137,7 @@ async function evaluateSocialExecutionGate(): Promise<SocialExecutionGate> {
     };
   }
 
-  if (sherpaFeeds < minSherpaFeeds) {
-    return {
-      pass: false,
-      reason: `sherpa_feed_threshold_unmet(${sherpaFeeds}<${minSherpaFeeds})`,
-      socialSignalCount,
-      sherpaFeedCount: sherpaFeeds,
-    };
-  }
-
+  // Moltbook has sufficient signals — sherpa check is informational only
   return { pass: true, reason: "social_thresholds_met", socialSignalCount, sherpaFeedCount: sherpaFeeds };
 }
 
@@ -143,6 +148,9 @@ export async function POST(req: Request) {
     // Parse body first so we can read agentInitiated before applying guards.
     const body = (await req.json()) as SwapBody;
     const agentInitiated = body.agentInitiated === true;
+    // userCommanded = explicit chat/operator instruction. Bypasses social gate but
+    // still respects emergency_stop. Autonomous planner trades do NOT set this.
+    const userCommanded = body.userCommanded === true;
 
     if (agentInitiated) {
       // Agent-triggered swaps bypass the panel/arb guard (intentional direct commands,
@@ -155,19 +163,22 @@ export async function POST(req: Request) {
         );
       }
 
-      const socialGate = await evaluateSocialExecutionGate();
-      if (!socialGate.pass) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: `Agent execution blocked by social multi-factor gate: ${socialGate.reason}`,
-            decisionMeta: {
-              socialSignalCount: socialGate.socialSignalCount,
-              sherpaFeedCount: socialGate.sherpaFeedCount,
+      // Social gate only applies to autonomous decisions — direct operator commands bypass it.
+      if (!userCommanded) {
+        const socialGate = await evaluateSocialExecutionGate();
+        if (!socialGate.pass) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `Agent execution blocked by social multi-factor gate: ${socialGate.reason}`,
+              decisionMeta: {
+                socialSignalCount: socialGate.socialSignalCount,
+                sherpaFeedCount: socialGate.sherpaFeedCount,
+              },
             },
-          },
-          { status: 403 }
-        );
+            { status: 403 }
+          );
+        }
       }
     } else {
       // Manual UI swap: only block when trade panel is not active.

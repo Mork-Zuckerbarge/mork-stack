@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
 import { ollama } from "@/lib/core/ollama";
@@ -10,9 +11,15 @@ const LAST_PLANNER_TRADE_KEY = "__planner_last_trade_iso_v1__";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
+const RPC_URL = process.env.SOLANA_RPC_URL ?? process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
 // Keep planner sizing aligned with /api/trade/swap guard default.
 // If env is unset/invalid, swap route enforces 0.25 SOL max.
 const AGENT_SWAP_MAX_SOL = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
+const COST_BASIS_KEY_PREFIX = "planner_cost_basis:";
+// Minimum profit % to trigger a sell (e.g. 5 = 5%). Override via env.
+const SELL_PROFIT_THRESHOLD = Number(process.env.MORK_SELL_PROFIT_THRESHOLD_PCT ?? 5) / 100;
+// Minimum estimated SOL value to bother selling (skip dust positions).
+const MIN_SELL_SOL = 0.0001;
 
 type StrategySnapshot = {
   minImbalancePct: number | null;
@@ -22,6 +29,77 @@ type StrategySnapshot = {
   maxHoldMinutes: number | null;
   hardStopLossPct: number | null;
 };
+
+// ── Wallet / token helpers ──────────────────────────────────────────────────
+
+function getPlannerKeypair(): Keypair | null {
+  try {
+    const raw = process.env.MORK_WALLET_SECRET_KEY?.trim();
+    if (!raw) return null;
+    const arr: unknown = JSON.parse(raw);
+    if (!Array.isArray(arr)) return null;
+    return Keypair.fromSecretKey(Uint8Array.from(arr as number[]));
+  } catch { return null; }
+}
+
+type TokenHolding = { mint: string; uiAmount: number; rawAmount: string; decimals: number };
+
+async function getHeldTokens(connection: Connection, owner: PublicKey, mintFilter: Set<string>): Promise<TokenHolding[]> {
+  try {
+    const res = await connection.getParsedTokenAccountsByOwner(owner, {
+      programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+    });
+    return res.value
+      .map((a) => {
+        const info = (a.account?.data as unknown as { parsed?: { info?: { mint?: string; tokenAmount?: { uiAmount?: number; amount?: string; decimals?: number } } } } | undefined)?.parsed?.info;
+        const mint = info?.mint;
+        if (!mint || !mintFilter.has(mint)) return null;
+        const uiAmount = Number(info?.tokenAmount?.uiAmount ?? 0);
+        if (uiAmount <= 0) return null;
+        return { mint, uiAmount, rawAmount: String(info?.tokenAmount?.amount ?? "0"), decimals: Number(info?.tokenAmount?.decimals ?? 0) };
+      })
+      .filter((h): h is TokenHolding => h !== null);
+  } catch { return []; }
+}
+
+async function quoteSellSol(mint: string, rawAmount: string): Promise<number | null> {
+  if (!Number(rawAmount)) return null;
+  const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
+  quoteUrl.searchParams.set("inputMint", mint);
+  quoteUrl.searchParams.set("outputMint", SOL_MINT);
+  quoteUrl.searchParams.set("amount", rawAmount);
+  quoteUrl.searchParams.set("slippageBps", "75");
+  const res = await fetch(quoteUrl.toString(), { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
+  if (!res?.ok) return null;
+  const json = (await res.json()) as { outAmount?: string };
+  const lamports = Number(json.outAmount ?? 0);
+  return Number.isFinite(lamports) && lamports > 0 ? lamports / 1e9 : null;
+}
+
+type CostBasis = { sol: number; ts: string };
+
+async function getCostBasis(mint: string): Promise<CostBasis | null> {
+  const fact = await prisma.memoryFact.findUnique({ where: { key: `${COST_BASIS_KEY_PREFIX}${mint}` } }).catch(() => null);
+  if (!fact?.value) return null;
+  try { return JSON.parse(fact.value) as CostBasis; } catch { return null; }
+}
+
+async function accumulateCostBasis(mint: string, addedSol: number): Promise<void> {
+  const existing = await getCostBasis(mint);
+  const totalSol = (existing?.sol ?? 0) + addedSol;
+  const value = JSON.stringify({ sol: totalSol, ts: new Date().toISOString() });
+  await prisma.memoryFact.upsert({
+    where: { key: `${COST_BASIS_KEY_PREFIX}${mint}` },
+    create: { key: `${COST_BASIS_KEY_PREFIX}${mint}`, value, source: "agent", weight: 8 },
+    update: { value },
+  }).catch(() => {});
+}
+
+async function clearCostBasis(mint: string): Promise<void> {
+  await prisma.memoryFact.deleteMany({ where: { key: `${COST_BASIS_KEY_PREFIX}${mint}` } }).catch(() => {});
+}
+
+// ── End wallet / token helpers ──────────────────────────────────────────────
 
 async function estimateSolForUsd(usd: number): Promise<number> {
   const amountUsdcBase = Math.max(1, Math.floor(usd * 1_000_000));
@@ -230,22 +308,35 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<P
   return { go: false, usd: 0, reason: firstLine || "HOLD", reasonCode: "model_invalid" };
 }
 
+// Process-level lock and caches shared across ticks.
+const WALLET_TOKENS_CACHE_MS = Number(process.env.MORK_WALLET_TOKENS_CACHE_MS ?? 5 * 60_000);
+const _g = globalThis as typeof globalThis & {
+  __plannerRunning?: boolean;
+  __walletTokensCache?: { tokens: TokenHolding[]; ts: number };
+};
+
 export async function POST() {
   const runId = `planner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const logSkip = async (reason: string) => {
-    await prisma.memory.create({
-      data: {
-        type: "reflection",
-        content: `Autonomous planner tick skipped: ${reason} runId=${runId}`,
-        entities: ["planner:skip", `planner:run:${runId}`],
-        importance: 0.45,
-        source: "system",
-      },
-    });
+  const logSkip = (reason: string) => {
+    console.warn(`[planner] tick skipped: ${reason} runId=${runId}`);
   };
 
+  if (_g.__plannerRunning) {
+    logSkip("concurrent_tick");
+    return NextResponse.json({ ok: true, status: "skipped", reason: "concurrent_tick", runId });
+  }
+  _g.__plannerRunning = true;
+
+  try {
+    return await _plannerPost(runId, logSkip);
+  } finally {
+    _g.__plannerRunning = false;
+  }
+}
+
+async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
   if (process.env.MORK_AUTONOMOUS_TRADING_ENABLED !== "1") {
-    await logSkip("autonomous_disabled");
+    logSkip("autonomous_disabled");
     return NextResponse.json({ ok: true, status: "skipped", reason: "autonomous_disabled", runId });
   }
 
@@ -254,80 +345,149 @@ export async function POST() {
   const strategySnapshot = snapshotStrategies(control);
 
   if (!control.controls.plannerEnabled) {
-    await logSkip("planner_disabled");
+    logSkip("planner_disabled");
     return NextResponse.json({ ok: true, status: "skipped", reason: "planner_disabled", runId });
   }
   if (authority.mode === "emergency_stop") {
-    await logSkip("emergency_stop");
+    logSkip("emergency_stop");
     return NextResponse.json({ ok: true, status: "skipped", reason: "emergency_stop", runId });
   }
 
   const allowlist = authority.mintAllowlist.filter((m) => m !== SOL_MINT && m !== USDC_MINT);
   if (allowlist.length === 0) {
-    await logSkip("allowlist_empty");
+    logSkip("allowlist_empty");
     return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty", runId });
   }
 
+  // Read wallet SOL early — used for both the early-exit guard and later sizing.
+  const walletSolMemEarly = await prisma.memory.findFirst({ where: { source: "wallet" }, orderBy: { createdAt: "desc" } });
+  const walletSolMatchEarly = String(walletSolMemEarly?.content ?? "").match(/SOL=([\d.]+)/);
+  const walletSolBalance = walletSolMatchEarly ? Number(walletSolMatchEarly[1]) : null;
+  const walletHasSOL = Number.isFinite(walletSolBalance) && (walletSolBalance ?? 0) > 0.01;
+
+  // ── SELL PHASE ────────────────────────────────────────────────────────────
+  // Token holdings are cached for WALLET_TOKENS_CACHE_MS (default 5 min) to avoid
+  // hitting the Solana RPC on every tick and triggering 429s.
+  const kp = getPlannerKeypair();
+  let heldTokens: TokenHolding[] = [];
+  if (kp) {
+    const mintSet = new Set(allowlist);
+    const cacheEntry = _g.__walletTokensCache;
+    const cacheValid = cacheEntry && Date.now() - cacheEntry.ts < WALLET_TOKENS_CACHE_MS;
+    if (cacheValid) {
+      heldTokens = cacheEntry.tokens.filter((h) => mintSet.has(h.mint));
+    } else {
+      const conn = new Connection(RPC_URL, "processed");
+      heldTokens = await getHeldTokens(conn, kp.publicKey, mintSet);
+      _g.__walletTokensCache = { tokens: heldTokens, ts: Date.now() };
+    }
+
+    if (heldTokens.length > 0) {
+      const now = Date.now();
+      const policies = await prisma.arbPolicy.findMany({ where: { mint: { in: heldTokens.map((h) => h.mint) } } });
+      const blacklistedMints = new Set(
+        policies.filter((r) => Number((r.policy as Record<string, unknown>)?.tempBlacklistUntilMs ?? 0) > now).map((r) => r.mint)
+      );
+
+      for (const h of heldTokens) {
+        const sellSol = await quoteSellSol(h.mint, h.rawAmount);
+        if (sellSol === null || sellSol < MIN_SELL_SOL) continue;
+
+        const basis = await getCostBasis(h.mint);
+        const isBlacklisted = blacklistedMints.has(h.mint);
+        const profitable = basis !== null && sellSol >= basis.sol * (1 + SELL_PROFIT_THRESHOLD);
+
+        if (!profitable && !isBlacklisted) continue;
+
+        const sellReason = isBlacklisted ? "blacklisted_exit" : "take_profit";
+        const sellReq = new Request("http://planner.internal/api/trade/swap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inputMint: h.mint, outputMint: SOL_MINT, amountIn: h.uiAmount, slippageBps: 75, agentInitiated: true }),
+        });
+        const sellResp = await executeSwapRoute(sellReq);
+        const sellJson = (await sellResp.json().catch(() => ({}))) as { ok?: boolean; signature?: string; error?: string };
+
+        if (sellJson.ok) {
+          await clearCostBasis(h.mint);
+          await prisma.memory.create({
+            data: {
+              type: "event",
+              content: `planner_sell reason=${sellReason} mint=${h.mint} uiAmount=${h.uiAmount} estSol=${sellSol.toFixed(6)} basisSol=${basis?.sol?.toFixed(6) ?? "unknown"} sig=${sellJson.signature}`,
+              entities: ["arb:planner_sell", `wallet:${kp.publicKey.toBase58()}`],
+              importance: 0.7,
+              source: "arb",
+            },
+          }).catch(() => {});
+          return NextResponse.json({ ok: true, status: "executed", mode: "planner_sell", runId, mint: h.mint, uiAmount: h.uiAmount, estSol: sellSol, sellReason, signature: sellJson.signature });
+        }
+        console.warn(`[planner] sell failed for ${h.mint}: ${sellJson.error}`);
+      }
+    }
+  }
+  // ── END SELL PHASE ────────────────────────────────────────────────────────
+
+  // Early exit: no SOL to spend and no tokens to sell/rotate — nothing actionable this tick.
+  if (!walletHasSOL && heldTokens.length === 0) {
+    logSkip("no_spendable_sol_or_tokens");
+    return NextResponse.json({ ok: true, status: "skipped", reason: "no_spendable_sol_or_tokens", runId });
+  }
+
   const context = await buildDecisionContext(strategySnapshot);
-  const baseDecision = await getTradeDecision(context.text, authority.maxTradeUsd);
+
+  const configMaxUsd = Number.isFinite(authority.maxTradeUsd) && authority.maxTradeUsd > 0 ? authority.maxTradeUsd : 100;
+  let effectiveMaxUsd = configMaxUsd;
+  // Only fetch the SOL→USD price when the wallet actually has SOL to spend.
+  // Skipping this when dry eliminates one Jupiter call per tick.
+  if (walletHasSOL && walletSolBalance !== null) {
+    try {
+      const solPerDollar = await estimateSolForUsd(1);
+      if (Number.isFinite(solPerDollar) && solPerDollar > 0) {
+        const walletSpendableUsd = (walletSolBalance - 0.01) / solPerDollar;
+        effectiveMaxUsd = Math.min(configMaxUsd, Math.max(0.01, walletSpendableUsd));
+      }
+    } catch { /* keep config max */ }
+  } else if (heldTokens.length > 0) {
+    // Rotating tokens: use a modest cap so the model doesn't overshoot
+    effectiveMaxUsd = Math.min(configMaxUsd, 10);
+  }
+
+  const baseDecision = await getTradeDecision(context.text, effectiveMaxUsd);
   const decision = { ...baseDecision };
   let fallbackApplied = false;
   const positiveSignal = await hasPositivePolicySignal(allowlist);
 
   if (!decision.go) {
     if (positiveSignal) {
-      const fallbackUsdBase = Number.isFinite(authority.maxTradeUsd) && authority.maxTradeUsd > 0 ? authority.maxTradeUsd : 100;
       decision.go = true;
-      decision.usd = Math.max(1, fallbackUsdBase);
+      decision.usd = Math.max(0.01, effectiveMaxUsd);
       decision.reason = `${decision.reason || "HOLD"} -> fallback_trade_on_positive_policy_signal`;
       decision.reasonCode = "fallback_trade_on_positive_policy_signal";
       fallbackApplied = true;
     } else {
-      const lastTradeAtMs = await getLastPlannerTradeAtMs();
-      const cooldownMs = Math.max(1, Number(authority.cooldownMinutes) || 15) * 60_000;
-      const idleMs = lastTradeAtMs ? Date.now() - lastTradeAtMs : Number.POSITIVE_INFINITY;
-      const shouldForceRetry = !Number.isFinite(idleMs) || idleMs >= cooldownMs * 2;
-      if (shouldForceRetry) {
-        decision.go = true;
-        decision.usd = 1;
-        decision.reason = `${decision.reason || "HOLD"} -> fallback_trade_retry`;
-        decision.reasonCode = "fallback_trade_retry";
-        fallbackApplied = true;
-      } else {
-        decision.reasonCode = "no_positive_policy_signal";
-        await prisma.memory.create({
-          data: {
-            type: "reflection",
-            content: `Autonomous planner tick searching_opportunities: no_positive_policy_signal runId=${runId}`,
-            entities: ["planner:searching", `planner:run:${runId}`],
-            importance: 0.5,
-            source: "system",
-          },
-        });
-        return NextResponse.json({
-          ok: true,
-          status: "skipped",
-          reason: "searching_opportunities",
-          runId,
-          decisionMeta: {
-            reasonCode: decision.reasonCode,
-            fallbackApplied,
-            feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount },
-            exitPlan: null,
-          },
-        });
-      }
+      decision.reasonCode = "no_positive_policy_signal";
+      console.log(`[planner] searching_opportunities: no signals runId=${runId}`);
+      return NextResponse.json({
+        ok: true,
+        status: "skipped",
+        reason: "searching_opportunities",
+        runId,
+        decisionMeta: {
+          reasonCode: decision.reasonCode,
+          fallbackApplied,
+          feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount },
+          exitPlan: null,
+        },
+      });
     }
   }
 
 
-  await prisma.memory.create({
-    data: { type: "reflection", content: `Autonomous planner tick decision: ${decision.reason} runId=${runId}`, entities: ["planner:decision", `planner:run:${runId}`], importance: 0.55, source: "system" },
-  });
+  console.log(`[planner] decision: ${decision.reason} runId=${runId}`);
 
   const outputMint = await pickBestTradableMint(allowlist);
   if (!outputMint) {
-    await logSkip("no_tradable_mint");
+    logSkip("no_tradable_mint");
     return NextResponse.json({ ok: true, status: "skipped", reason: "no_tradable_mint", runId });
   }
 
@@ -338,10 +498,47 @@ export async function POST() {
   const maxSol = Number.isFinite(AGENT_SWAP_MAX_SOL) && AGENT_SWAP_MAX_SOL > 0 ? AGENT_SWAP_MAX_SOL : 0.25;
   if (amountSol > maxSol) amountSol = maxSol;
 
+  // Cap to spendable wallet SOL (leave 0.01 SOL for gas) — reuses balance fetched above.
+  const walletSol = walletSolBalance;
+  if (Number.isFinite(walletSol) && walletSol !== null) {
+    const spendableSol = Math.max(0, walletSol - 0.01);
+    if (amountSol > spendableSol) {
+      if (spendableSol <= 0) {
+        logSkip("insufficient_sol");
+        return NextResponse.json({ ok: true, status: "skipped", reason: "insufficient_sol", runId });
+      }
+      amountSol = spendableSol;
+    }
+  }
+
+  // ── ROTATE: use a held token as input instead of SOL ─────────────────────
+  // If we hold an allowlisted token that isn't the buy target, swap it directly
+  // into outputMint rather than spending more SOL. This rotates stale positions.
+  let swapMode = "sol_buy";
+  let rotateFrom: TokenHolding | null = null;
+  let rotateSolEstimate: number | null = null;
+
+  if (kp && heldTokens.length > 0) {
+    const candidate = heldTokens.find((h) => h.mint !== outputMint);
+    if (candidate) {
+      const estSol = await quoteSellSol(candidate.mint, candidate.rawAmount);
+      if (estSol !== null && estSol >= 0.001) {
+        rotateFrom = candidate;
+        rotateSolEstimate = estSol;
+        swapMode = "rotate";
+      }
+    }
+  }
+  // ── END ROTATE ────────────────────────────────────────────────────────────
+
+  const swapBody = rotateFrom
+    ? { inputMint: rotateFrom.mint, outputMint, amountIn: rotateFrom.uiAmount, slippageBps: 75, agentInitiated: true }
+    : { amountSol, slippageBps: 50, outputMint, agentInitiated: true };
+
   const swapReq = new Request("http://planner.internal/api/trade/swap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ amountSol, slippageBps: 50, outputMint, agentInitiated: true }),
+    body: JSON.stringify(swapBody),
   });
   const swapResponse = await executeSwapRoute(swapReq);
   const swapJson = (await swapResponse.json().catch(() => ({}))) as { ok?: boolean; error?: string; signature?: string };
@@ -350,11 +547,17 @@ export async function POST() {
     return NextResponse.json({ ok: false, status: "error", reason: "swap_failed", runId, decisionMeta: { reasonCode: "swap_failed" }, error: swapJson.error ?? `planner swap failed (${swapResponse.status})` }, { status: swapResponse.status || 500 });
   }
 
+  // Record cost basis — accumulate across multiple buys of the same mint.
+  const solCostForBasis = rotateFrom ? (rotateSolEstimate ?? amountSol) : amountSol;
+  await accumulateCostBasis(outputMint, solCostForBasis);
+  // If rotating, the old position is fully consumed — clear its basis.
+  if (rotateFrom) await clearCostBasis(rotateFrom.mint);
+
   await prisma.memoryFact.upsert({
     where: { key: LAST_PLANNER_TRADE_KEY },
     create: { key: LAST_PLANNER_TRADE_KEY, value: new Date().toISOString(), source: "agent", weight: 8 },
     update: { value: new Date().toISOString(), source: "agent", weight: 8 },
   });
 
-  return NextResponse.json({ ok: true, status: "executed", mode: "planner_ollama_decision", runId, usd: decision.usd, amountSol, outputMint, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: strategySnapshot.exitTrailingStopPct, maxHoldMinutes: strategySnapshot.maxHoldMinutes, hardStopLossPct: strategySnapshot.hardStopLossPct } } });
+  return NextResponse.json({ ok: true, status: "executed", mode: swapMode, runId, usd: decision.usd, amountSol: rotateFrom ? rotateSolEstimate : amountSol, outputMint, rotateFromMint: rotateFrom?.mint ?? null, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: !rotateFrom && amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: strategySnapshot.exitTrailingStopPct, maxHoldMinutes: strategySnapshot.maxHoldMinutes, hardStopLossPct: strategySnapshot.hardStopLossPct } } });
 }

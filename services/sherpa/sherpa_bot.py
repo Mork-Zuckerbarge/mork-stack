@@ -1248,7 +1248,13 @@ class TwitterBot:
                                 print("⚠ No mention-collection method found.")
                                 pending = []
                         except Exception as e:
+                            msg = str(e)
                             print(f"❌ Error fetching mentions: {e}")
+                            if "402" in msg or "CreditsDepleted" in msg:
+                                backoff_until = datetime.now() + timedelta(hours=1)
+                                self.backoff_until = backoff_until
+                                self.rate_limits.setdefault("tweets", {})["backoff_until"] = backoff_until
+                                print(f"⚠ X credits depleted (402) — mention sweep backed off until {backoff_until.strftime('%H:%M')}.")
                             pending = []
 
                     handled = 0
@@ -1852,19 +1858,6 @@ class TwitterBot:
             max_content_length = X_POST_MAX_CHARS - TWITTER_SHORT_URL_LENGTH if article_url else X_POST_MAX_CHARS
             max_chars_for_core = min(X_INTERNAL_DRAFT_MAX_CHARS, max_content_length)
 
-            # Strong grounding path for feed stories: avoid fabricating claims.
-            if article_url or (title and text):
-                source_blurb = " ".join([title.strip(), text.strip()]).strip()
-                source_blurb = re.sub(r"\s+", " ", source_blurb).strip()
-                if not source_blurb:
-                    source_blurb = (title or "Update").strip()
-                grounded = _wrap_280(source_blurb[:max_content_length], max_content_length)
-                if article_url and article_url not in grounded:
-                    grounded = _wrap_280(f"{grounded} {article_url}", X_POST_MAX_CHARS)
-                self.tweet_count += 1
-                self.last_tweet_time = datetime.now()
-                return grounded
-
             # ----------------------------
             # NO-OPENAI MODE: use Mork Core
             # ----------------------------
@@ -2137,6 +2130,21 @@ class TwitterBot:
                     print(f"⚠ App memory ingest error via {app_base}: {app_err}")
             if not app_ingested:
                 print("⚠ Successful X post was not persisted to app memory; Moltbook tick may not pick it up.")
+                return
+
+            # Trigger moltbook cross-post now that app memory is fresh
+            for app_base in _app_retry_bases(MORK_APP_FALLBACK_URL):
+                try:
+                    tick_res = requests.post(f"{app_base}/api/moltbook/tick", json={}, timeout=15)
+                    if tick_res.ok:
+                        data = tick_res.json()
+                        posted = data.get("postedFromSherpa", False)
+                        signals = data.get("tradeSignalCount", 0)
+                        print(f"🌐 Moltbook tick: posted={posted} signals={signals}")
+                        break
+                    print(f"⚠ Moltbook tick non-ok via {app_base}: {tick_res.status_code} {tick_res.text[:120]}")
+                except Exception as tick_err:
+                    print(f"⚠ Moltbook tick error via {app_base}: {tick_err}")
         except Exception as e:
             print(f"⚠ Failed to ingest X post into app memory: {e}")
 
@@ -2203,7 +2211,14 @@ class TwitterBot:
             self.handle_rate_limit_error(e)
             return False
         except Exception as e:
-            print(f"Error sending tweet: {e}")
+            msg = str(e)
+            if "402" in msg or "CreditsDepleted" in msg:
+                backoff_until = datetime.now() + timedelta(hours=1)
+                self.backoff_until = backoff_until
+                self.rate_limits.setdefault("tweets", {})["backoff_until"] = backoff_until
+                print(f"⚠ X credits depleted (402) — backing off until {backoff_until.strftime('%H:%M')}. Check your X developer portal.")
+            else:
+                print(f"Error sending tweet: {e}")
             return False
 
     def send_to_faceboot(self, text):
@@ -3700,12 +3715,6 @@ class TwitterBot:
 
                 pull_app_topic_btn.click(load_app_topic, outputs=[current_topic])
 
-                def send_tweet(character, topic):
-                    success = self.send_tweet(character, topic)
-                    return "Tweet sent successfully!" if success else "Failed to send tweet. Please try again."
-
-                tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
-
                 def toggle_scheduler(enabled, character, subject):
                     if not character:
                         return "Please select a character first", "Scheduler: NOT RUNNING", current_topic.value
@@ -3721,62 +3730,56 @@ class TwitterBot:
                     if enabled:
                         self.scheduler_running = True
                         self.scheduler_character = character
-                        self.scheduler_subject = subject  # <- store normalized subject
+                        self.scheduler_subject = subject
 
-                        # If memes are enabled, start with a meme tweet
+                        seed_story_text = ""
+                        initial_sent = False
+
+                        # Try a meme tweet first if memes are enabled
                         if self.use_memes:
-                            tweet_text, meme_path = self.get_random_meme(character)
-                            if tweet_text and meme_path:
-                                if self.send_tweet_with_media(tweet_text, meme_path):
-                                    # Reset meme counter after successful meme
-                                    self.meme_counter = 0
+                            try:
+                                tweet_text, meme_path = self.get_random_meme(character)
+                                if tweet_text and meme_path:
+                                    if self.send_tweet_with_media(tweet_text, meme_path):
+                                        self.meme_counter = 0
+                                        seed_story_text = tweet_text
+                                        initial_sent = True
+                            except Exception as _me:
+                                print(f"[scheduler] Meme tweet failed: {_me}")
 
-                                    # Queue up news stories for next tweets (seed 2–3 items)
-                                    seeded = 0
-                                    for _ in range(3):
-                                        new_story = self.get_new_story(subject)
-                                        if not new_story:
-                                            break
-                                        story_text = f"{new_story['title']}\n\n{new_story.get('preview','')}\n\nRead more: {new_story['url']}"
-                                        self.tweet_queue.put((character, story_text, subject))
-                                        seeded += 1
-                                    print(f"Seeded {seeded} story(ies) after meme.")
+                        # If no meme sent, try an immediate news tweet
+                        if not initial_sent:
+                            try:
+                                first_story = self.get_new_story(subject)
+                                if first_story:
+                                    story_text = f"{first_story['title']}\n\n{first_story.get('preview','')}\n\nRead more: {first_story['url']}"
+                                    tweet_text = self.generate_tweet(character, story_text)
+                                    if tweet_text:
+                                        if self.send_tweet(tweet_text):
+                                            seed_story_text = story_text
+                                            initial_sent = True
+                                        else:
+                                            print("[scheduler] Initial tweet failed — worker will retry on schedule.")
+                            except Exception as _te:
+                                print(f"[scheduler] Initial tweet error: {_te}")
 
-                                    # Start the worker thread
-                                    threading.Thread(target=self.scheduler_worker, daemon=True).start()
-                                    return f"Scheduler started with meme tweet: {tweet_text}", "Scheduler: RUNNING", current_topic.value
+                        # Seed queue with next stories regardless of initial tweet outcome
+                        seeded = 0
+                        for _ in range(3):
+                            s = self.get_new_story(subject)
+                            if not s:
+                                break
+                            txt = f"{s['title']}\n\n{s.get('preview','')}\n\nRead more: {s['url']}"
+                            self.tweet_queue.put((character, txt, subject))
+                            if not seed_story_text:
+                                seed_story_text = txt
+                            seeded += 1
+                        print(f"[scheduler] Seeded {seeded} story(ies) into queue.")
 
-                            # Only proceed to news if memes are disabled or meme tweet completely failed
-                            print("Meme tweet failed, falling back to news")
-
-                        # If no memes or meme tweet failed, start with news
-                        new_story = self.get_new_story(subject)
-                        if not new_story:
-                            self.scheduler_running = False
-                            return "Failed to fetch news story", "Scheduler: NOT RUNNING", current_topic.value
-
-                        story_text = f"{new_story['title']}\n\n{new_story.get('preview','')}\n\nRead more: {new_story['url']}"
-
-                        # Send first tweet
-                        tweet_text = self.generate_tweet(character, story_text)
-                        if tweet_text and self.send_tweet(tweet_text):
-                            # Queue up next stories before starting worker (seed 2–3 items)
-                            seeded = 0
-                            for _ in range(3):
-                                next_story = self.get_new_story(subject)
-                                if not next_story:
-                                    break
-                                next_story_text = f"{next_story['title']}\n\n{next_story.get('preview','')}\n\nRead more: {next_story['url']}"
-                                self.tweet_queue.put((character, next_story_text, subject))
-                                seeded += 1
-                            print(f"Seeded {seeded} story(ies) after first tweet.")
-
-                            # Start the worker thread
-                            threading.Thread(target=self.scheduler_worker, daemon=True).start()
-                            return f"Scheduler started and first tweet sent: {tweet_text}", "Scheduler: RUNNING", story_text
-                        else:
-                            self.scheduler_running = False
-                            return "Failed to send first tweet", "Scheduler: NOT RUNNING", current_topic.value
+                        # Always start the worker — backoff handles retries if X is down
+                        threading.Thread(target=self.scheduler_worker, daemon=True).start()
+                        status_msg = "Scheduler started" + (" — first tweet sent" if initial_sent else " — initial tweet failed, will retry")
+                        return f"{status_msg} ({seeded} queued)", "Scheduler: RUNNING", seed_story_text or current_topic.value
                     else:
                         self.scheduler_running = False
                         return "Scheduler stopped", "Scheduler: NOT RUNNING", current_topic.value
@@ -3832,20 +3835,7 @@ class TwitterBot:
                         control_character, character_dropdown]
             )
             
-            # Simple helpers that already existed
-            def get_story(subject):
-                story = self.get_new_story(subject)
-                if story:
-                    return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']}"
-                return "Failed to fetch new story. Please try again."
-
-            def send_tweet(character, topic):
-                success = self.send_tweet(character, topic)
-                return "Tweet sent successfully!" if success else "Failed to send tweet. Please try again."
-
-            # Connect button handlers
-            new_story_btn.click(get_story, inputs=[subject_dropdown], outputs=[current_topic])
-            tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
+            # Note: new_story_btn and tweet_btn are already wired above (get_story_dispatch / manual_tweet).
 
 
             # Connect checkbox handlers
