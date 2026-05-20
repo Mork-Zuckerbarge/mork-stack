@@ -1,4 +1,5 @@
 import { POST as runPlannerTickRoute } from "@/app/planner/tick/route";
+import { POST as runMoltbookTickRoute } from "@/app/api/moltbook/tick/route";
 import { getAppControlState } from "@/lib/core/appControl";
 
 type PlannerAutopilotState = {
@@ -29,7 +30,7 @@ async function runTick(state: PlannerAutopilotState) {
       app.controls.plannerEnabled &&
       app.controls.executionAuthority.mode === "agent_assisted";
     if (!shouldRun) return;
-    await runPlannerTickRoute();
+    await Promise.allSettled([runPlannerTickRoute(), runMoltbookTickRoute()]);
   } catch {
     // Keep scheduler alive even when a tick fails.
   } finally {
