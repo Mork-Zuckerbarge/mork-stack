@@ -1121,6 +1121,7 @@ class TwitterBot:
         self.last_mention_sweep_date = getattr(self, "last_mention_sweep_date", None)
         self.daily_replies_sent = getattr(self, "daily_replies_sent", 0)
         self.last_observation_time = getattr(self, "last_observation_time", None)
+        self.mention_backoff_until = getattr(self, "mention_backoff_until", None)
 
         if not getattr(self, "last_successful_tweet", None):
             print("🚀 No previous tweet timestamp found. Setting last_successful_tweet to now.")
@@ -1214,6 +1215,15 @@ class TwitterBot:
                 # (A) Mentions sweep (reply only to mentions; bank overflow)
                 # -------------------------
                 if now >= next_mentions_at:
+                    if getattr(self, "mention_backoff_until", None) and now < self.mention_backoff_until:
+                        wait_minutes = (self.mention_backoff_until - now).total_seconds() / 60
+                        print(f"⛔ Mention sweep paused until {self.mention_backoff_until} (~{wait_minutes:.1f} min left).")
+                        if mention_sweep_mode == "daily":
+                            next_mentions_at = next_daily_mention_sweep(now)
+                        else:
+                            next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=3)
+                        time.sleep(1)
+                        continue
                     if mention_sweep_mode == "daily":
                         self.last_mention_sweep_date = now.date().isoformat()
                         next_mentions_at = next_daily_mention_sweep(now)
@@ -2825,7 +2835,13 @@ class TwitterBot:
 
             resp = requests.get(url, headers=headers, params=params, timeout=15)
             if resp.status_code != 200:
-                print(f"❌ Error fetching mentions: {resp.status_code} {resp.text}")
+                body_text = (resp.text or "")
+                print(f"❌ Error fetching mentions: {resp.status_code} {body_text}")
+                if resp.status_code == 402 and "CreditsDepleted" in body_text:
+                    # X API credits are exhausted for mention reads; pause sweeps so we do not hammer the endpoint.
+                    cooldown_hours = int(os.getenv("X_MENTION_CREDITS_BACKOFF_HOURS", "12"))
+                    self.mention_backoff_until = datetime.now() + timedelta(hours=max(1, cooldown_hours))
+                    print(f"⛔ Mention reads paused (credits depleted). Backing off until {self.mention_backoff_until}.")
                 state["backlog"] = backlog  # keep backlog progress
                 _save_reply_state(state)
                 return
