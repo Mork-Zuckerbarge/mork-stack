@@ -3716,12 +3716,6 @@ class TwitterBot:
 
                 pull_app_topic_btn.click(load_app_topic, outputs=[current_topic])
 
-                def send_tweet(character, topic):
-                    success = self.send_tweet(character, topic)
-                    return "Tweet sent successfully!" if success else "Failed to send tweet. Please try again."
-
-                tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
-
                 def toggle_scheduler(enabled, character, subject):
                     if not character:
                         return "Please select a character first", "Scheduler: NOT RUNNING", current_topic.value
@@ -3848,20 +3842,12 @@ class TwitterBot:
                         control_character, character_dropdown]
             )
             
-            # Simple helpers that already existed
+            # Keep New Story behavior aligned with the dispatch formatter used above.
             def get_story(subject):
-                story = self.get_new_story(subject)
-                if story:
-                    return f"{story['title']}\n\n{story['preview']}\n\nRead more: {story['url']}"
-                return "Failed to fetch new story. Please try again."
+                return get_story_dispatch(subject)
 
-            def send_tweet(character, topic):
-                success = self.send_tweet(character, topic)
-                return "Tweet sent successfully!" if success else "Failed to send tweet. Please try again."
-
-            # Connect button handlers
+            # Connect button handler (manual tweet handler is wired above).
             new_story_btn.click(get_story, inputs=[subject_dropdown], outputs=[current_topic])
-            tweet_btn.click(send_tweet, inputs=[character_dropdown, current_topic], outputs=[tweet_status])
 
 
             # Connect checkbox handlers
