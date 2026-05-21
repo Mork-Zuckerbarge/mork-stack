@@ -1380,6 +1380,17 @@ class TwitterBot:
                                 seeded += 1
                             print(f"📥 Refilled with {seeded} story(ies).")
 
+                            # If we just refilled during an active posting window, publish one immediately.
+                            if seeded > 0 and not self.tweet_queue.empty():
+                                character, story_text, subject = self.tweet_queue.get()
+                                tweet_text = self.generate_tweet(character, story_text)
+                                if tweet_text and self.send_tweet(tweet_text):
+                                    print("✅ Tweet sent immediately after queue refill.")
+                                    self.last_successful_tweet = datetime.now()
+                                    time.sleep(random.uniform(6, 16))
+                                else:
+                                    print("❌ Failed immediate tweet after queue refill.")
+
                 time.sleep(5)
 
             except Exception as e:
