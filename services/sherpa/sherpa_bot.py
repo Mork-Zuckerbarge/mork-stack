@@ -1109,7 +1109,14 @@ class TwitterBot:
         obs_jitter_min = int(getattr(self, "OBS_JITTER_MIN", 60))
         mention_base_min = int(getattr(self, "MENTION_BASE_MIN", 12))
         mention_jitter_min = int(getattr(self, "MENTION_JITTER_MIN", 4))
-        mention_sweep_mode = str(getattr(self, "MENTION_SWEEP_MODE", "jitter")).strip().lower()
+        mention_sweep_mode_raw = str(getattr(self, "MENTION_SWEEP_MODE", "daily")).strip().lower()
+        if mention_sweep_mode_raw in {"daily", "day", "once_daily"}:
+            mention_sweep_mode = "daily"
+        elif mention_sweep_mode_raw in {"jitter", "jittered", "interval"}:
+            mention_sweep_mode = "jitter"
+        else:
+            print(f"⚠ Unknown mention sweep mode '{mention_sweep_mode_raw}'. Falling back to daily mode.")
+            mention_sweep_mode = "daily"
         mention_sweep_hour = int(getattr(self, "MENTION_SWEEP_HOUR", 10))
         mention_sweep_minute = int(getattr(self, "MENTION_SWEEP_MINUTE", 0))
         daily_mention_cap = int(getattr(self, "DAILY_MENTION_CAP", 2))
@@ -1167,8 +1174,8 @@ class TwitterBot:
                 candidate = candidate + timedelta(days=1)
             return candidate
 
-        next_main_at = schedule_next(base_min=45, jitter_min=20, min_gap=min_gap_min)
-        next_obs_at = schedule_next(base_min=60, jitter_min=25, min_gap=min_gap_min)
+        next_main_at = schedule_next(base_min=main_base_min, jitter_min=main_jitter_min, min_gap=min_gap_min)
+        next_obs_at = schedule_next(base_min=obs_base_min, jitter_min=obs_jitter_min, min_gap=min_gap_min)
         now_boot = datetime.now()
         if mention_sweep_mode == "daily":
             already_ran_today = (
