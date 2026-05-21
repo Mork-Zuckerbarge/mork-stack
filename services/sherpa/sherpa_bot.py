@@ -860,6 +860,32 @@ class TwitterBot:
             print("Twitter client initialized.")
         else:
             print("Twitter client NOT initialized (missing X credentials).")
+
+    def consume_app_topic_queue(self):
+        """Consume one queued app topic and post it immediately.
+        Returns True when a queued topic was successfully posted.
+        """
+        queue_file = os.path.join(os.path.dirname(__file__), "current_topic_from_app.txt")
+        if not os.path.exists(queue_file):
+            return False
+        try:
+            with open(queue_file, "r", encoding="utf-8") as f:
+                queued = (f.read() or "").strip()
+            if not queued:
+                return False
+            print("📥 Found queued app topic; sending now...")
+            ok = self.send_tweet(queued)
+            if ok:
+                try:
+                    os.remove(queue_file)
+                except Exception as remove_err:
+                    print(f"⚠ Posted queued app topic but could not delete queue file: {remove_err}")
+                return True
+            print("⚠ Failed to send queued app topic (send_tweet returned false).")
+            return False
+        except Exception as e:
+            print(f"⚠ Failed consuming queued app topic: {e}")
+            return False
             
     def load_credentials(self) -> dict:
         """
@@ -1292,6 +1318,16 @@ class TwitterBot:
                             self.reply_bank.append(m)
 
                     print(f"✅ Mention sweep done. Sent {handled}. Banked {len(self.reply_bank)}. Daily {self.daily_replies_sent}/{daily_mention_cap}.")
+
+                # -------------------------
+                # (A2) Immediate app-queued post handoff
+                # -------------------------
+                try:
+                    if self.consume_app_topic_queue():
+                        self.last_successful_tweet = datetime.now()
+                        time.sleep(random.uniform(2, 6))
+                except Exception as e:
+                    print(f"⚠ App topic queue handoff failed: {e}")
 
                 # -------------------------
                 # (B) Observation tweet (Mork Core) (jittered)
