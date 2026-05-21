@@ -1218,13 +1218,6 @@ class TwitterBot:
                     self.last_daily_reply_date = now.date()
                     self.daily_replies_sent = 0
 
-                # Respect backoff
-                if getattr(self, "backoff_until", None) and now < self.backoff_until:
-                    wait_seconds = (self.backoff_until - now).total_seconds()
-                    print(f"⏳ Backoff active until {self.backoff_until}. Sleeping {wait_seconds/60:.1f} minutes...")
-                    time.sleep(min(60, max(1, wait_seconds)))
-                    continue
-
                 # -------------------------
                 # (A) Mentions sweep (reply only to mentions; bank overflow)
                 # -------------------------
@@ -3781,7 +3774,22 @@ class TwitterBot:
                                     threading.Thread(target=self.scheduler_worker, daemon=True).start()
                                     return f"Scheduler started with meme tweet: {tweet_text}", "Scheduler: RUNNING", current_topic.value
 
-                            # Only proceed to news if memes are disabled or meme tweet completely failed
+                                # Media post can fail with account-credit constraints; fall back to text tweet.
+                                print("Meme media tweet failed, attempting text-only fallback...")
+                                if self.send_tweet(tweet_text):
+                                    seeded = 0
+                                    for _ in range(3):
+                                        new_story = self.get_new_story(subject)
+                                        if not new_story:
+                                            break
+                                        story_text = f"{new_story['title']}\n\n{new_story.get('preview','')}\n\nRead more: {new_story['url']}"
+                                        self.tweet_queue.put((character, story_text, subject))
+                                        seeded += 1
+                                    print(f"Seeded {seeded} story(ies) after text-only meme fallback.")
+                                    threading.Thread(target=self.scheduler_worker, daemon=True).start()
+                                    return f"Scheduler started with text-only meme tweet: {tweet_text}", "Scheduler: RUNNING", current_topic.value
+
+                            # Only proceed to news if memes are disabled or both meme paths failed
                             print("Meme tweet failed, falling back to news")
 
                         # If no memes or meme tweet failed, start with news
