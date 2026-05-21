@@ -51,7 +51,8 @@ USE_OPENAI = str(os.getenv("USE_OPENAI", "0")).strip().lower() in ("1", "true", 
 def _get_core_url():
     u = (os.getenv("MORK_CORE_URL") or "").strip().rstrip("/")
     if not u:
-        return MORK_CORE_SERVICE_FALLBACK_URL
+        # Default local-first so standalone runs always target the local core port.
+        return LOCAL_MORK_CORE_FALLBACK_URL
     if "<" in u or "IP-OF" in u.upper():
         print(f"⚠ MORK_CORE_URL is a placeholder: '{u}'. Please set a real URL.")
         return MORK_CORE_SERVICE_FALLBACK_URL
@@ -1177,15 +1178,21 @@ class TwitterBot:
         next_main_at = schedule_next(base_min=main_base_min, jitter_min=main_jitter_min, min_gap=min_gap_min)
         next_obs_at = schedule_next(base_min=obs_base_min, jitter_min=obs_jitter_min, min_gap=min_gap_min)
         now_boot = datetime.now()
+        run_missed_daily_sweep_on_boot = str(
+            os.getenv("MENTION_SWEEP_RUN_MISSED_ON_BOOT", "0")
+        ).strip().lower() in {"1", "true", "yes", "on"}
+
         if mention_sweep_mode == "daily":
             already_ran_today = (
                 isinstance(self.last_mention_sweep_date, str)
                 and self.last_mention_sweep_date == now_boot.date().isoformat()
             )
-            if (not already_ran_today) and (
+            missed_today_window = (
                 (now_boot.hour > mention_sweep_hour)
                 or (now_boot.hour == mention_sweep_hour and now_boot.minute >= mention_sweep_minute)
-            ):
+            )
+            if (not already_ran_today) and missed_today_window and run_missed_daily_sweep_on_boot:
+                # Opt-in only: avoid surprise mention read bursts right after restarts.
                 next_mentions_at = now_boot
             else:
                 next_mentions_at = next_daily_mention_sweep(now_boot)
@@ -1210,13 +1217,6 @@ class TwitterBot:
                 if self.last_daily_reply_date != now.date():
                     self.last_daily_reply_date = now.date()
                     self.daily_replies_sent = 0
-
-                # Respect backoff
-                if getattr(self, "backoff_until", None) and now < self.backoff_until:
-                    wait_seconds = (self.backoff_until - now).total_seconds()
-                    print(f"⏳ Backoff active until {self.backoff_until}. Sleeping {wait_seconds/60:.1f} minutes...")
-                    time.sleep(min(60, max(1, wait_seconds)))
-                    continue
 
                 # -------------------------
                 # (A) Mentions sweep (reply only to mentions; bank overflow)
@@ -1372,6 +1372,17 @@ class TwitterBot:
                                 self.tweet_queue.put((self.scheduler_character, txt, self.scheduler_subject))
                                 seeded += 1
                             print(f"📥 Refilled with {seeded} story(ies).")
+
+                            # If we just refilled during an active posting window, publish one immediately.
+                            if seeded > 0 and not self.tweet_queue.empty():
+                                character, story_text, subject = self.tweet_queue.get()
+                                tweet_text = self.generate_tweet(character, story_text)
+                                if tweet_text and self.send_tweet(tweet_text):
+                                    print("✅ Tweet sent immediately after queue refill.")
+                                    self.last_successful_tweet = datetime.now()
+                                    time.sleep(random.uniform(6, 16))
+                                else:
+                                    print("❌ Failed immediate tweet after queue refill.")
 
                 time.sleep(5)
 
@@ -3763,7 +3774,22 @@ class TwitterBot:
                                     threading.Thread(target=self.scheduler_worker, daemon=True).start()
                                     return f"Scheduler started with meme tweet: {tweet_text}", "Scheduler: RUNNING", current_topic.value
 
-                            # Only proceed to news if memes are disabled or meme tweet completely failed
+                                # Media post can fail with account-credit constraints; fall back to text tweet.
+                                print("Meme media tweet failed, attempting text-only fallback...")
+                                if self.send_tweet(tweet_text):
+                                    seeded = 0
+                                    for _ in range(3):
+                                        new_story = self.get_new_story(subject)
+                                        if not new_story:
+                                            break
+                                        story_text = f"{new_story['title']}\n\n{new_story.get('preview','')}\n\nRead more: {new_story['url']}"
+                                        self.tweet_queue.put((character, story_text, subject))
+                                        seeded += 1
+                                    print(f"Seeded {seeded} story(ies) after text-only meme fallback.")
+                                    threading.Thread(target=self.scheduler_worker, daemon=True).start()
+                                    return f"Scheduler started with text-only meme tweet: {tweet_text}", "Scheduler: RUNNING", current_topic.value
+
+                            # Only proceed to news if memes are disabled or both meme paths failed
                             print("Meme tweet failed, falling back to news")
 
                         # If no memes or meme tweet failed, start with news
