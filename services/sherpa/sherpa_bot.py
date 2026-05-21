@@ -1235,8 +1235,18 @@ class TwitterBot:
         print(f"🕒 Active hours      : {ACTIVE_START_HOUR:02d}:00–{ACTIVE_END_HOUR:02d}:00")
         print(f"🧾 Daily mention cap  : {daily_mention_cap}")
 
-        while self.scheduler_running:
+        while True:
             try:
+                if not self.scheduler_running:
+                    # Keep app-driven queue handoff alive even when scheduler UI toggle is off.
+                    try:
+                        if self.consume_app_topic_queue():
+                            self.last_successful_tweet = datetime.now()
+                    except Exception as e:
+                        print(f"⚠ App topic queue handoff failed while scheduler idle: {e}")
+                    time.sleep(2)
+                    continue
+
                 now = datetime.now()
 
                 # Reset daily counter when day changes
@@ -2228,23 +2238,23 @@ class TwitterBot:
             if self.publish_targets.get("x", True):
                 if not self.twitter_client:
                     print("❌ Twitter client not initialized.")
-                    return False
-                if not self.check_rate_limit():
-                    return False
-                response = self.twitter_client.create_tweet(text=tweet_text)
-                if not response or not response.data:
-                    print("⚠ Tweet send returned no data.")
-                    return False
-                tweet_id = response.data.get("id")
-                self.last_successful_tweet = datetime.now()
-                self.update_rate_limit()
-                posted_anywhere = True
-                if tweet_id:
-                    username = (self.credentials.get("twitter_username") or "").lstrip("@")
-                    if username:
-                        tweet_url = f"https://x.com/{username}/status/{tweet_id}"
-                self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
-                print(f"✅ Tweet sent successfully: {tweet_id}")
+                elif not self.check_rate_limit():
+                    print("⚠ X rate-limit check blocked posting on X for this attempt.")
+                else:
+                    response = self.twitter_client.create_tweet(text=tweet_text)
+                    if not response or not response.data:
+                        print("⚠ Tweet send returned no data.")
+                    else:
+                        tweet_id = response.data.get("id")
+                        self.last_successful_tweet = datetime.now()
+                        self.update_rate_limit()
+                        posted_anywhere = True
+                        if tweet_id:
+                            username = (self.credentials.get("twitter_username") or "").lstrip("@")
+                            if username:
+                                tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+                        self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
+                        print(f"✅ Tweet sent successfully: {tweet_id}")
 
             if self.publish_targets.get("telegram", False):
                 self.send_to_telegram(tweet_url or tweet_text)
