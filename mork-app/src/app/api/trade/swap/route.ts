@@ -85,7 +85,7 @@ async function getTokenDecimals(mint: string, connection: Connection): Promise<n
 }
 
 async function evaluateSocialExecutionGate(): Promise<SocialExecutionGate> {
-  if (process.env.MOLTBOOK_MULTI_FACTOR_REQUIRED === "0") {
+  if (process.env.MOLTBOOK_MULTI_FACTOR_REQUIRED !== "1") {
     return { pass: true, reason: "multi_factor_disabled", socialSignalCount: 0, sherpaFeedCount: 0 };
   }
 
