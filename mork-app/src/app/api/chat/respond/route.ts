@@ -547,7 +547,18 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
 
   if (command.type === "tweet") {
     const draft = await respondToChat({ channel: "x", handle: "app-user", message: `Draft an X post using this user-provided text. Keep intent and key wording intact unless it violates policy: ${command.text}`, maxChars: 20000 });
-    return { ok: true, routed: "sherpa/x", command: "tweet", response: draft.response || command.text, status: 200, note: "Draft generated for X voice. Sherpa posting remains external unless wired to X credentials." };
+    const tweetText = String(draft.response || command.text).trim();
+    const queueFile = path.join(process.cwd(), "..", "services", "sherpa", "current_topic_from_app.txt");
+    await mkdir(path.dirname(queueFile), { recursive: true });
+    await writeFile(queueFile, tweetText, "utf8");
+    return {
+      ok: true,
+      routed: "sherpa/x",
+      command: "tweet",
+      response: tweetText,
+      status: 200,
+      note: "Tweet queued to Sherpa Current Topic/Story for posting.",
+    };
   }
 
   if (command.type === "trade.autosearch") {

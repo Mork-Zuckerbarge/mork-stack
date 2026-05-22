@@ -860,6 +860,36 @@ class TwitterBot:
             print("Twitter client initialized.")
         else:
             print("Twitter client NOT initialized (missing X credentials).")
+
+    def consume_app_topic_queue(self):
+        """Consume one queued app topic and post it immediately.
+        Returns True when a queued topic was successfully posted.
+        """
+        queue_file = os.path.join(os.path.dirname(__file__), "current_topic_from_app.txt")
+        if not os.path.exists(queue_file):
+            return False
+        try:
+            with open(queue_file, "r", encoding="utf-8") as f:
+                queued = (f.read() or "").strip()
+            if not queued:
+                print("------- SHERPA APP QUEUE EMPTY -------")
+                return False
+            print("+++++++ SHERPA APP QUEUE FOUND +++++++")
+            print("📥 Found queued app topic; sending now...")
+            ok = self.send_tweet(queued)
+            if ok:
+                try:
+                    os.remove(queue_file)
+                except Exception as remove_err:
+                    print(f"⚠ Posted queued app topic but could not delete queue file: {remove_err}")
+                print("+++++++ SHERPA APP QUEUE POSTED +++++++")
+                return True
+            print("⚠ Failed to send queued app topic (send_tweet returned false).")
+            print("------- SHERPA APP QUEUE POST FAILED -------")
+            return False
+        except Exception as e:
+            print(f"⚠ Failed consuming queued app topic: {e}")
+            return False
             
     def load_credentials(self) -> dict:
         """
@@ -1209,8 +1239,18 @@ class TwitterBot:
         print(f"🕒 Active hours      : {ACTIVE_START_HOUR:02d}:00–{ACTIVE_END_HOUR:02d}:00")
         print(f"🧾 Daily mention cap  : {daily_mention_cap}")
 
-        while self.scheduler_running:
+        while True:
             try:
+                if not self.scheduler_running:
+                    # Keep app-driven queue handoff alive even when scheduler UI toggle is off.
+                    try:
+                        if self.consume_app_topic_queue():
+                            self.last_successful_tweet = datetime.now()
+                    except Exception as e:
+                        print(f"⚠ App topic queue handoff failed while scheduler idle: {e}")
+                    time.sleep(2)
+                    continue
+
                 now = datetime.now()
 
                 # Reset daily counter when day changes
@@ -1292,6 +1332,16 @@ class TwitterBot:
                             self.reply_bank.append(m)
 
                     print(f"✅ Mention sweep done. Sent {handled}. Banked {len(self.reply_bank)}. Daily {self.daily_replies_sent}/{daily_mention_cap}.")
+
+                # -------------------------
+                # (A2) Immediate app-queued post handoff
+                # -------------------------
+                try:
+                    if self.consume_app_topic_queue():
+                        self.last_successful_tweet = datetime.now()
+                        time.sleep(random.uniform(2, 6))
+                except Exception as e:
+                    print(f"⚠ App topic queue handoff failed: {e}")
 
                 # -------------------------
                 # (B) Observation tweet (Mork Core) (jittered)
@@ -2192,27 +2242,27 @@ class TwitterBot:
             if self.publish_targets.get("x", True):
                 if not self.twitter_client:
                     print("❌ Twitter client not initialized.")
-                    return False
-                if not self.check_rate_limit():
-                    return False
-                response = self.twitter_client.create_tweet(text=tweet_text)
-                if not response or not response.data:
-                    print("⚠ Tweet send returned no data.")
-                    return False
-                tweet_id = response.data.get("id")
-                self.last_successful_tweet = datetime.now()
-                self.update_rate_limit()
-                posted_anywhere = True
-                if tweet_id:
-                    username = (self.credentials.get("twitter_username") or "").lstrip("@")
-                    if username:
-                        tweet_url = f"https://x.com/{username}/status/{tweet_id}"
-                self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
-                print(f"✅ Tweet sent successfully: {tweet_id}")
+                elif not self.check_rate_limit():
+                    print("⚠ X rate-limit check blocked posting on X for this attempt.")
+                else:
+                    response = self.twitter_client.create_tweet(text=tweet_text)
+                    if not response or not response.data:
+                        print("⚠ Tweet send returned no data.")
+                    else:
+                        tweet_id = response.data.get("id")
+                        self.last_successful_tweet = datetime.now()
+                        self.update_rate_limit()
+                        posted_anywhere = True
+                        if tweet_id:
+                            username = (self.credentials.get("twitter_username") or "").lstrip("@")
+                            if username:
+                                tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+                        self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
+                        print(f"✅ Tweet sent successfully: {tweet_id}")
 
             if self.publish_targets.get("telegram", False):
-                self.send_to_telegram(tweet_url or tweet_text)
-                posted_anywhere = True
+                tg_ok = self.send_to_telegram(tweet_url or tweet_text)
+                posted_anywhere = posted_anywhere or tg_ok
             if self.publish_targets.get("reddit", False):
                 self.send_to_reddit(tweet_text, source_url=tweet_url)
                 posted_anywhere = True
@@ -2517,7 +2567,7 @@ class TwitterBot:
 
         if not bot_token or not chat_id:
             print("⚠️ Telegram credentials missing")
-            return
+            return False
 
         text = f"Mork has tweeted:\n{tweet_url}"
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -2530,8 +2580,10 @@ class TwitterBot:
         try:
             response = requests.post(url, data=payload)
             print("📨 Telegram status:", response.status_code, response.text)
+            return 200 <= response.status_code < 300
         except Exception as e:
             print(f"❌ Telegram send failed: {e}")
+            return False
 
     def _short_post_title(self, text, fallback="Mork update", max_len=250):
         base = (text or "").strip()
