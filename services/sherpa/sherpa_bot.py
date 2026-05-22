@@ -1259,6 +1259,16 @@ class TwitterBot:
                     self.daily_replies_sent = 0
 
                 # -------------------------
+                # (A0) Immediate app-queued post handoff
+                # -------------------------
+                try:
+                    if self.consume_app_topic_queue():
+                        self.last_successful_tweet = datetime.now()
+                        time.sleep(random.uniform(2, 6))
+                except Exception as e:
+                    print(f"⚠ App topic queue handoff failed: {e}")
+
+                # -------------------------
                 # (A) Mentions sweep (reply only to mentions; bank overflow)
                 # -------------------------
                 if now >= next_mentions_at:
@@ -1293,12 +1303,7 @@ class TwitterBot:
                     # Fetch new mentions if none banked
                     if not pending:
                         try:
-                            if hasattr(self, "collect_unreplied_mentions"):
-                                pending = self.collect_unreplied_mentions() or []
-                            elif hasattr(self, "fetch_recent_mentions"):
-                                pending = self.fetch_recent_mentions() or []
-                            elif hasattr(self, "monitor_and_reply_to_mentions"):
-                                print("⚠ Using monitor_and_reply_to_mentions fallback.")
+                            if hasattr(self, "monitor_and_reply_to_mentions"):
                                 self.monitor_and_reply_to_mentions()
                                 pending = []
                             else:
