@@ -807,6 +807,7 @@ class TwitterBot:
             "reddit": False,
             "faceboot": False,
         }
+        self.app_queue_lock = threading.Lock()
 
         if not os.path.exists("memes"):
             os.makedirs("memes")
@@ -868,28 +869,40 @@ class TwitterBot:
         queue_file = os.path.join(os.path.dirname(__file__), "current_topic_from_app.txt")
         if not os.path.exists(queue_file):
             return False
-        try:
-            with open(queue_file, "r", encoding="utf-8") as f:
-                queued = (f.read() or "").strip()
-            if not queued:
-                print("------- SHERPA APP QUEUE EMPTY -------")
+        with self.app_queue_lock:
+            try:
+                with open(queue_file, "r", encoding="utf-8") as f:
+                    queued = (f.read() or "").strip()
+                if not queued:
+                    print("------- SHERPA APP QUEUE EMPTY -------")
+                    return False
+                print("+++++++ SHERPA APP QUEUE FOUND +++++++")
+                print("📥 Found queued app topic; sending now...")
+                ok = self.send_tweet(queued)
+                if ok:
+                    try:
+                        os.remove(queue_file)
+                    except Exception as remove_err:
+                        print(f"⚠ Posted queued app topic but could not delete queue file: {remove_err}")
+                    print("+++++++ SHERPA APP QUEUE POSTED +++++++")
+                    return True
+                print("⚠ Failed to send queued app topic (send_tweet returned false).")
+                print("------- SHERPA APP QUEUE POST FAILED -------")
                 return False
-            print("+++++++ SHERPA APP QUEUE FOUND +++++++")
-            print("📥 Found queued app topic; sending now...")
-            ok = self.send_tweet(queued)
-            if ok:
-                try:
-                    os.remove(queue_file)
-                except Exception as remove_err:
-                    print(f"⚠ Posted queued app topic but could not delete queue file: {remove_err}")
-                print("+++++++ SHERPA APP QUEUE POSTED +++++++")
-                return True
-            print("⚠ Failed to send queued app topic (send_tweet returned false).")
-            print("------- SHERPA APP QUEUE POST FAILED -------")
-            return False
-        except Exception as e:
-            print(f"⚠ Failed consuming queued app topic: {e}")
-            return False
+            except Exception as e:
+                print(f"⚠ Failed consuming queued app topic: {e}")
+                return False
+
+    def app_queue_worker(self):
+        """Lightweight queue worker: consume app-post queue without enabling automation scheduler."""
+        print("📮 Starting app queue worker (automation-independent)...")
+        while True:
+            try:
+                if self.consume_app_topic_queue():
+                    self.last_successful_tweet = datetime.now()
+            except Exception as e:
+                print(f"⚠ App queue worker error: {e}")
+            time.sleep(2)
             
     def load_credentials(self) -> dict:
         """
@@ -4001,6 +4014,7 @@ def main():
         print("⚠️ GitHub prompt fetch failed; keeping existing character prompt.")
 
     interface = bot.create_ui()
+    threading.Thread(target=bot.app_queue_worker, daemon=True).start()
     interface.launch()
 
 
