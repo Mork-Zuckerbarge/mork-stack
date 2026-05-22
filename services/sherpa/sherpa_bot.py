@@ -872,7 +872,9 @@ class TwitterBot:
             with open(queue_file, "r", encoding="utf-8") as f:
                 queued = (f.read() or "").strip()
             if not queued:
+                print("------- SHERPA APP QUEUE EMPTY -------")
                 return False
+            print("+++++++ SHERPA APP QUEUE FOUND +++++++")
             print("📥 Found queued app topic; sending now...")
             ok = self.send_tweet(queued)
             if ok:
@@ -880,8 +882,10 @@ class TwitterBot:
                     os.remove(queue_file)
                 except Exception as remove_err:
                     print(f"⚠ Posted queued app topic but could not delete queue file: {remove_err}")
+                print("+++++++ SHERPA APP QUEUE POSTED +++++++")
                 return True
             print("⚠ Failed to send queued app topic (send_tweet returned false).")
+            print("------- SHERPA APP QUEUE POST FAILED -------")
             return False
         except Exception as e:
             print(f"⚠ Failed consuming queued app topic: {e}")
@@ -2257,8 +2261,8 @@ class TwitterBot:
                         print(f"✅ Tweet sent successfully: {tweet_id}")
 
             if self.publish_targets.get("telegram", False):
-                self.send_to_telegram(tweet_url or tweet_text)
-                posted_anywhere = True
+                tg_ok = self.send_to_telegram(tweet_url or tweet_text)
+                posted_anywhere = posted_anywhere or tg_ok
             if self.publish_targets.get("reddit", False):
                 self.send_to_reddit(tweet_text, source_url=tweet_url)
                 posted_anywhere = True
@@ -2563,7 +2567,7 @@ class TwitterBot:
 
         if not bot_token or not chat_id:
             print("⚠️ Telegram credentials missing")
-            return
+            return False
 
         text = f"Mork has tweeted:\n{tweet_url}"
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -2576,8 +2580,10 @@ class TwitterBot:
         try:
             response = requests.post(url, data=payload)
             print("📨 Telegram status:", response.status_code, response.text)
+            return 200 <= response.status_code < 300
         except Exception as e:
             print(f"❌ Telegram send failed: {e}")
+            return False
 
     def _short_post_title(self, text, fallback="Mork update", max_len=250):
         base = (text or "").strip()
