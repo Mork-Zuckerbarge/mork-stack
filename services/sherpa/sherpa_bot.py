@@ -1252,8 +1252,18 @@ class TwitterBot:
         print(f"🕒 Active hours      : {ACTIVE_START_HOUR:02d}:00–{ACTIVE_END_HOUR:02d}:00")
         print(f"🧾 Daily mention cap  : {daily_mention_cap}")
 
-        while self.scheduler_running:
+        while True:
             try:
+                if not self.scheduler_running:
+                    # Keep app-driven queue handoff alive even when scheduler UI toggle is off.
+                    try:
+                        if self.consume_app_topic_queue():
+                            self.last_successful_tweet = datetime.now()
+                    except Exception as e:
+                        print(f"⚠ App topic queue handoff failed while scheduler idle: {e}")
+                    time.sleep(2)
+                    continue
+
                 now = datetime.now()
 
                 # Reset daily counter when day changes
@@ -1340,6 +1350,16 @@ class TwitterBot:
                             self.reply_bank.append(m)
 
                     print(f"✅ Mention sweep done. Sent {handled}. Banked {len(self.reply_bank)}. Daily {self.daily_replies_sent}/{daily_mention_cap}.")
+
+                # -------------------------
+                # (A2) Immediate app-queued post handoff
+                # -------------------------
+                try:
+                    if self.consume_app_topic_queue():
+                        self.last_successful_tweet = datetime.now()
+                        time.sleep(random.uniform(2, 6))
+                except Exception as e:
+                    print(f"⚠ App topic queue handoff failed: {e}")
 
                 # -------------------------
                 # (B) Observation tweet (Mork Core) (jittered)
