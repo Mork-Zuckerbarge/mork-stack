@@ -4001,7 +4001,6 @@ def main():
         print("⚠️ GitHub prompt fetch failed; keeping existing character prompt.")
 
     interface = bot.create_ui()
-    threading.Thread(target=bot.scheduler_worker, daemon=True).start()
     interface.launch()
 
 
