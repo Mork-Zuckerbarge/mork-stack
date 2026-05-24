@@ -201,7 +201,10 @@ export async function POST(req: Request) {
     const slippageBps = Math.min(Math.max(Number(body.slippageBps ?? 50), 10), 300);
     const maxSol = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
     const inputMint = body.inputMint?.trim() || SOL_MINT;
-    const outputMint = body.outputMint?.trim() || BBQ_MINT;
+    const outputMint = body.outputMint?.trim();
+    if (!outputMint) {
+      return NextResponse.json({ ok: false, error: "outputMint is required" }, { status: 400 });
+    }
 
     if (!Number.isFinite(amountIn) || amountIn <= 0) {
       return NextResponse.json({ ok: false, error: "amountIn must be > 0" }, { status: 400 });

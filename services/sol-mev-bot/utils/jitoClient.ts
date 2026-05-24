@@ -39,17 +39,62 @@ export interface Bundle {
  *
  * Jito docs: https://docs.jito.wtf/
  */
+interface TipFloor {
+  p25: number;
+  p50: number;
+  p75: number;
+  p95: number;
+}
+
 export class JitoClient {
   private config: AgentConfig;
   private connection: Connection;
   private wallet: Keypair;
   private blockEngineUrl: string;
 
+  private cachedTipFloor: TipFloor | null = null;
+  private tipFloorFetchedAt = 0;
+  private readonly TIP_FLOOR_CACHE_MS = 30_000;
+
   constructor(config: AgentConfig, connection: Connection, wallet: Keypair) {
     this.config = config;
     this.connection = connection;
     this.wallet = wallet;
     this.blockEngineUrl = config.jitoBlockEngineUrl;
+  }
+
+  async fetchTipFloor(): Promise<TipFloor> {
+    const now = Date.now();
+    if (this.cachedTipFloor && now - this.tipFloorFetchedAt < this.TIP_FLOOR_CACHE_MS) {
+      return this.cachedTipFloor;
+    }
+    try {
+      const res = await axios.get('https://bundles.jito.wtf/api/v1/bundles/tip_floor', { timeout: 3000 });
+      const d = Array.isArray(res.data) ? res.data[0] : res.data;
+      this.cachedTipFloor = {
+        p25: Math.round(d.landed_tips_25th_percentile ?? 1_000),
+        p50: Math.round(d.landed_tips_50th_percentile ?? 5_000),
+        p75: Math.round(d.landed_tips_75th_percentile ?? 10_000),
+        p95: Math.round(d.landed_tips_95th_percentile ?? 50_000),
+      };
+      this.tipFloorFetchedAt = now;
+      logger.debug('Jito tip floor updated', this.cachedTipFloor);
+      return this.cachedTipFloor;
+    } catch {
+      return { p25: 1_000, p50: 5_000, p75: 10_000, p95: 50_000 };
+    }
+  }
+
+  // Returns tip in lamports scaled to bundle competition level.
+  // Pass 'high' for time-sensitive arb (triangular, liquidation); 'low' for background scans.
+  async computeDynamicTip(urgency: 'low' | 'medium' | 'high' = 'medium'): Promise<number> {
+    if (!this.config.dynamicJitoTip) return this.config.jitoTipLamports;
+    const floor = await this.fetchTipFloor();
+    switch (urgency) {
+      case 'low':    return Math.round(floor.p25 * 1.1);
+      case 'medium': return Math.round(floor.p50 * 1.2);
+      case 'high':   return Math.round(floor.p75 * 1.5);
+    }
   }
 
   /**

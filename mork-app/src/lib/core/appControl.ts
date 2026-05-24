@@ -241,7 +241,8 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function sanitizeExecutionAllowlist(values: Array<string | null | undefined>): string[] {
   const normalized = normalizeMintList(values, STARTUP_ALLOWLIST_LIMIT);
-  return normalized.length > 0 ? normalized : [BBQ_MINT];
+  // BBQ_MINT is the governance/gating token — exclude it from trade allowlists.
+  return normalized.filter((m) => m !== BBQ_MINT);
 }
 
 function applyPersistedState(raw: unknown) {
@@ -448,7 +449,7 @@ async function ensureStateLoaded() {
   if (state.controls.executionAuthority.mintAllowlist.length === 0) {
     const startupMints = readWhitelistMints(STARTUP_ALLOWLIST_LIMIT);
     const fallbackMints = startupMints.length > 0 ? startupMints : await fetchFallbackMints(STARTUP_ALLOWLIST_LIMIT);
-    const finalMints = fallbackMints.length > 0 ? fallbackMints : [BBQ_MINT];
+    const finalMints = fallbackMints.length > 0 ? fallbackMints : [];
     state.controls.executionAuthority.mintAllowlist = sanitizeExecutionAllowlist(finalMints);
     await persistState();
   }

@@ -193,6 +193,86 @@ If The Agent feels slow or “dumber,” tune behavior in these places (ordered 
 
 ---
 
+## Trading strategy env variables
+
+These variables control the MEV/arb strategies in `services/sol-mev-bot` and `services/arb`.  
+Add them to **`mork-app/.env.local`** (picked up by both services via `start.sh`).
+
+### Enabling new strategies
+
+All new strategies are **off by default** — flip to `true` to enable each one independently.
+
+```bash
+# Triangular arb: SOL → B → TOKEN → SOL (sol-mev-bot)
+ENABLE_TRIANGULAR_ARB=true
+
+# Liquidation arb: buy dips caused by MarginFi/Kamino/Solend forced sells
+ENABLE_LIQUIDATION_ARB=true
+
+# Drift funding arb: basis trades when perpetual funding rates are extreme
+ENABLE_DRIFT_FUNDING=true
+
+# Stablecoin depeg: trade USDC/USDT/PYUSD when they deviate from $1.00
+ENABLE_STABLECOIN_DEPEG=true
+
+# Triangular routes in the arb service (backs the “enable triangular routes” UI toggle)
+ENABLE_TRIANGULAR_ROUTES=true
+```
+
+### Dynamic Jito tip sizing
+
+On by default. Fetches Jito's live tip floor every 30 s and scales tips to current bundle competition rather than using a fixed amount. Set to `false` to revert to the fixed `JITO_TIP_LAMPORTS` value.
+
+```bash
+DYNAMIC_JITO_TIP=true   # default — set false to use fixed JITO_TIP_LAMPORTS instead
+```
+
+### Liquidation arb thresholds
+
+```bash
+LIQUIDATION_DIP_THRESHOLD_PCT=3.0   # % price drop from cached baseline to trigger a buy
+                                     # don't go below 1.5 — normal volatility causes false positives
+LIQUIDATION_TRAILING_STOP_PCT=10    # % drawdown from peak price before exiting the position
+```
+
+### Drift funding arb
+
+> **Note:** The spot-side hedge executes immediately via Jupiter. The perp-side (short/long on Drift) is stubbed and requires `@drift-labs/sdk` integration before going live. Don't enable with real funds until the perp side is wired.
+
+```bash
+DRIFT_MIN_FUNDING_RATE_PCT=0.05     # minimum funding rate (%/hr) to trigger a trade
+                                     # 0.05/hr ≈ 1.2%/day carry — a meaningful edge
+```
+
+### Stablecoin depeg
+
+```bash
+STABLECOIN_DEPEG_THRESHOLD_PCT=0.3  # minimum % deviation from $1.00 to trade
+                                     # don't go below 0.2 — USDC/USDT quote ±0.1% normally
+```
+
+### Correlation filter (MomentumRunner)
+
+Prevents entering two highly correlated positions simultaneously (e.g. two dog-themed memecoins). Uses rolling 60-minute Pearson correlation.
+
+```bash
+CORRELATION_THRESHOLD=0.75          # block entry if correlation ≥ this value vs open positions
+                                     # 0.9 = permissive, 0.6 = strict
+```
+
+### Time-of-day profit weighting
+
+Applied automatically to all strategies via the fee simulator — no env var needed. The `minProfitLamports` threshold is multiplied by a UTC-hour factor:
+
+| Window | UTC hours | Multiplier |
+|---|---|---|
+| US market open | 14:00–16:00 | 1.3–1.5× (raise bar — peak competition) |
+| EU market open | 08:00–10:00 | 1.1–1.2× |
+| Post-US close  | 20:00–23:00 | 0.75–0.9× |
+| Overnight APAC | 00:00–06:00 | 0.65–0.7× (lower bar — fewer bots active) |
+
+---
+
 ### Quick fix playbook for “slow + dumber” responses
 
 1. In System panel, switch to a stronger model than `llama3.2:3b` (for example `llama3.1:8b`), then retest.

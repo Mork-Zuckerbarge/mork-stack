@@ -24,6 +24,8 @@ const MIN_SELL_SOL = 0.0001;
 type StrategySnapshot = {
   minImbalancePct: number | null;
   minNetProfitSol: number | null;
+  enableTriangularRoutes: boolean | null;
+  routeVia: string | null;
   entryVolSpikeMultiplier: number | null;
   exitTrailingStopPct: number | null;
   maxHoldMinutes: number | null;
@@ -44,7 +46,7 @@ function getPlannerKeypair(): Keypair | null {
 
 type TokenHolding = { mint: string; uiAmount: number; rawAmount: string; decimals: number };
 
-async function getHeldTokens(connection: Connection, owner: PublicKey, mintFilter: Set<string>): Promise<TokenHolding[]> {
+async function getHeldTokens(connection: Connection, owner: PublicKey, mintFilter?: Set<string>): Promise<TokenHolding[]> {
   try {
     const res = await connection.getParsedTokenAccountsByOwner(owner, {
       programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
@@ -53,7 +55,8 @@ async function getHeldTokens(connection: Connection, owner: PublicKey, mintFilte
       .map((a) => {
         const info = (a.account?.data as unknown as { parsed?: { info?: { mint?: string; tokenAmount?: { uiAmount?: number; amount?: string; decimals?: number } } } } | undefined)?.parsed?.info;
         const mint = info?.mint;
-        if (!mint || !mintFilter.has(mint)) return null;
+        if (!mint) return null;
+        if (mintFilter && mintFilter.size > 0 && !mintFilter.has(mint)) return null;
         const uiAmount = Number(info?.tokenAmount?.uiAmount ?? 0);
         if (uiAmount <= 0) return null;
         return { mint, uiAmount, rawAmount: String(info?.tokenAmount?.amount ?? "0"), decimals: Number(info?.tokenAmount?.decimals ?? 0) };
@@ -183,6 +186,8 @@ function snapshotStrategies(control: Awaited<ReturnType<typeof getAppControlStat
   return {
     minImbalancePct: control.controls.strategyEngines.poolImbalance.minImbalancePct ?? null,
     minNetProfitSol: control.controls.strategyEngines.crossDexArb.minNetProfitSol ?? null,
+    enableTriangularRoutes: control.controls.strategyEngines.crossDexArb.enableTriangularRoutes ?? null,
+    routeVia: control.controls.strategyEngines.crossDexArb.routeVia ?? null,
     entryVolSpikeMultiplier: control.controls.strategyEngines.momentumRunner.entryVolSpikeMultiplier ?? null,
     exitTrailingStopPct: control.controls.strategyEngines.momentumRunner.exitTrailingStopPct ?? null,
     maxHoldMinutes: control.controls.strategyEngines.momentumRunner.maxHoldMinutes ?? null,
@@ -369,33 +374,42 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
   // Token holdings are cached for WALLET_TOKENS_CACHE_MS (default 5 min) to avoid
   // hitting the Solana RPC on every tick and triggering 429s.
   const kp = getPlannerKeypair();
+  // allHeldTokens = every token with nonzero balance (used for sell phase).
+  // heldTokens    = allowlist-filtered subset (used for rotate/buy phase).
+  let allHeldTokens: TokenHolding[] = [];
   let heldTokens: TokenHolding[] = [];
   if (kp) {
     const mintSet = new Set(allowlist);
     const cacheEntry = _g.__walletTokensCache;
     const cacheValid = cacheEntry && Date.now() - cacheEntry.ts < WALLET_TOKENS_CACHE_MS;
     if (cacheValid) {
-      heldTokens = cacheEntry.tokens.filter((h) => mintSet.has(h.mint));
+      allHeldTokens = cacheEntry.tokens;
+      heldTokens = allHeldTokens.filter((h) => mintSet.has(h.mint));
     } else {
       const conn = new Connection(RPC_URL, "processed");
-      heldTokens = await getHeldTokens(conn, kp.publicKey, mintSet);
-      _g.__walletTokensCache = { tokens: heldTokens, ts: Date.now() };
+      // Fetch all token accounts — sell phase needs to see every holding, not just allowlisted.
+      allHeldTokens = await getHeldTokens(conn, kp.publicKey);
+      _g.__walletTokensCache = { tokens: allHeldTokens, ts: Date.now() };
+      heldTokens = allHeldTokens.filter((h) => mintSet.has(h.mint));
     }
 
-    if (heldTokens.length > 0) {
+    if (allHeldTokens.length > 0) {
       const now = Date.now();
-      const policies = await prisma.arbPolicy.findMany({ where: { mint: { in: heldTokens.map((h) => h.mint) } } });
+      const policies = await prisma.arbPolicy.findMany({ where: { mint: { in: allHeldTokens.map((h) => h.mint) } } });
       const blacklistedMints = new Set(
         policies.filter((r) => Number((r.policy as Record<string, unknown>)?.tempBlacklistUntilMs ?? 0) > now).map((r) => r.mint)
       );
 
-      for (const h of heldTokens) {
+      for (const h of allHeldTokens) {
         const sellSol = await quoteSellSol(h.mint, h.rawAmount);
         if (sellSol === null || sellSol < MIN_SELL_SOL) continue;
 
         const basis = await getCostBasis(h.mint);
         const isBlacklisted = blacklistedMints.has(h.mint);
-        const profitable = basis !== null && sellSol >= basis.sol * (1 + SELL_PROFIT_THRESHOLD);
+        // Treat missing cost basis as zero-cost — if we have no record of what we paid,
+        // any nonzero sell value clears the SELL_PROFIT_THRESHOLD.
+        const basisSol = basis?.sol ?? 0;
+        const profitable = sellSol >= basisSol * (1 + SELL_PROFIT_THRESHOLD);
 
         if (!profitable && !isBlacklisted) continue;
 
@@ -413,7 +427,7 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
           await prisma.memory.create({
             data: {
               type: "event",
-              content: `planner_sell reason=${sellReason} mint=${h.mint} uiAmount=${h.uiAmount} estSol=${sellSol.toFixed(6)} basisSol=${basis?.sol?.toFixed(6) ?? "unknown"} sig=${sellJson.signature}`,
+              content: `planner_sell reason=${sellReason} mint=${h.mint} uiAmount=${h.uiAmount} estSol=${sellSol.toFixed(6)} basisSol=${basisSol.toFixed(6)} sig=${sellJson.signature}`,
               entities: ["arb:planner_sell", `wallet:${kp.publicKey.toBase58()}`],
               importance: 0.7,
               source: "arb",
@@ -427,8 +441,8 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
   }
   // ── END SELL PHASE ────────────────────────────────────────────────────────
 
-  // Early exit: no SOL to spend and no tokens to sell/rotate — nothing actionable this tick.
-  if (!walletHasSOL && heldTokens.length === 0) {
+  // Early exit: no SOL to spend and no tokens at all — nothing actionable this tick.
+  if (!walletHasSOL && allHeldTokens.length === 0) {
     logSkip("no_spendable_sol_or_tokens");
     return NextResponse.json({ ok: true, status: "skipped", reason: "no_spendable_sol_or_tokens", runId });
   }

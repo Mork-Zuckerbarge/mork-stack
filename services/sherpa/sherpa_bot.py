@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
-
+load_dotenv(dotenv_path=Path(__file__).parents[2] / "mork-app" / ".env.local")
 load_dotenv()
 
 MAIN_TWEET_BASE_MIN = 240
@@ -1101,14 +1101,14 @@ class TwitterBot:
         print("\n🛠️ Starting scheduler worker (jittered)...")
 
         ACTIVE_START_HOUR = int(getattr(self, "ACTIVE_START_HOUR", 8))
-        ACTIVE_END_HOUR = int(getattr(self, "ACTIVE_END_HOUR", 23))
+        ACTIVE_END_HOUR = int(getattr(self, "ACTIVE_END_HOUR", 24))
         min_gap_min = int(getattr(self, "MIN_GAP_MIN", 35))
         main_base_min = int(getattr(self, "MAIN_BASE_MIN", 240))
         main_jitter_min = int(getattr(self, "MAIN_JITTER_MIN", 70))
         obs_base_min = int(getattr(self, "OBS_BASE_MIN", 180))
         obs_jitter_min = int(getattr(self, "OBS_JITTER_MIN", 60))
-        mention_base_min = int(getattr(self, "MENTION_BASE_MIN", 12))
-        mention_jitter_min = int(getattr(self, "MENTION_JITTER_MIN", 4))
+        mention_base_min = int(getattr(self, "MENTION_BASE_MIN", 60))
+        mention_jitter_min = int(getattr(self, "MENTION_JITTER_MIN", 15))
         mention_sweep_mode = str(getattr(self, "MENTION_SWEEP_MODE", "jitter")).strip().lower()
         mention_sweep_hour = int(getattr(self, "MENTION_SWEEP_HOUR", 10))
         mention_sweep_minute = int(getattr(self, "MENTION_SWEEP_MINUTE", 0))
@@ -1168,6 +1168,7 @@ class TwitterBot:
 
         next_main_at = schedule_next(base_min=45, jitter_min=20, min_gap=min_gap_min)
         next_obs_at = schedule_next(base_min=60, jitter_min=25, min_gap=min_gap_min)
+        next_moltbook_at = schedule_next(base_min=45, jitter_min=15, min_gap=30)
         now_boot = datetime.now()
         if mention_sweep_mode == "daily":
             already_ran_today = (
@@ -1182,11 +1183,12 @@ class TwitterBot:
             else:
                 next_mentions_at = next_daily_mention_sweep(now_boot)
         else:
-            next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=3)
+            next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=30)
 
         print(f"⏱ Next MAIN tweet    : {next_main_at}")
         print(f"⏱ Next OBS tweet     : {next_obs_at}")
         print(f"⏱ Next mention sweep : {next_mentions_at}")
+        print(f"⏱ Next Moltbook tick : {next_moltbook_at}")
         if mention_sweep_mode == "daily":
             print(f"📬 Mention sweep mode: daily @ {mention_sweep_hour:02d}:{mention_sweep_minute:02d}")
         else:
@@ -1203,11 +1205,32 @@ class TwitterBot:
                     self.last_daily_reply_date = now.date()
                     self.daily_replies_sent = 0
 
-                # Respect backoff
+                # -------------------------
+                # (D) Moltbook tick — runs regardless of X backoff
+                # -------------------------
+                if now >= next_moltbook_at:
+                    next_moltbook_at = schedule_next(base_min=45, jitter_min=15, min_gap=30)
+                    print(f"\n🌐 Moltbook tick @ {now.strftime('%H:%M:%S')} — browse/interact/post")
+                    for app_base in _app_retry_bases(MORK_APP_FALLBACK_URL):
+                        try:
+                            mb_res = requests.post(f"{app_base}/api/moltbook/tick", json={}, timeout=30)
+                            if mb_res.ok:
+                                d = mb_res.json()
+                                print(f"🌐 Moltbook: upvoted={d.get('upvoted',0)} commented={d.get('commented',False)} followed={d.get('followed',0)} ingested={d.get('ingested',0)} posted={d.get('postedFromSherpa',False)}")
+                            else:
+                                print(f"⚠ Moltbook tick failed: {mb_res.status_code} {mb_res.text[:120]}")
+                            break
+                        except Exception as mb_err:
+                            print(f"⚠ Moltbook tick error via {app_base}: {mb_err}")
+
+                # Respect backoff (X-only — Moltbook already ran above)
                 if getattr(self, "backoff_until", None) and now < self.backoff_until:
                     wait_seconds = (self.backoff_until - now).total_seconds()
-                    print(f"⏳ Backoff active until {self.backoff_until}. Sleeping {wait_seconds/60:.1f} minutes...")
-                    time.sleep(min(60, max(1, wait_seconds)))
+                    # Sleep in 5-min chunks so we can still respond to shutdown,
+                    # but only log once per chunk to avoid log spam.
+                    chunk = min(300, max(1, wait_seconds))
+                    print(f"⏳ Backoff active until {self.backoff_until.strftime('%H:%M')} (~{wait_seconds/60:.0f} min remaining). Next check in {chunk/60:.0f} min.")
+                    time.sleep(chunk)
                     continue
 
                 # -------------------------
@@ -1218,7 +1241,7 @@ class TwitterBot:
                         self.last_mention_sweep_date = now.date().isoformat()
                         next_mentions_at = next_daily_mention_sweep(now)
                     else:
-                        next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=3)
+                        next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=30)
 
                     if self.daily_replies_sent >= daily_mention_cap:
                         print(f"🧾 Mention sweep: daily cap reached ({self.daily_replies_sent}/{daily_mention_cap}). Banking only.")
@@ -1290,7 +1313,7 @@ class TwitterBot:
                     next_obs_at = schedule_next(obs_base_min, obs_jitter_min, min_gap=min_gap_min)
 
                     if not within_active_hours(now):
-                        print("🌙 Observation skipped (outside active hours).")
+                        print(f"🌙 Observation skipped (outside active hours {ACTIVE_START_HOUR:02d}:00–{ACTIVE_END_HOUR:02d}:00, now {now.strftime('%H:%M')}).")
                     else:
                         try:
                             try:
@@ -1332,7 +1355,7 @@ class TwitterBot:
                     next_main_at = schedule_next(main_base_min, main_jitter_min, min_gap=min_gap_min)
 
                     if not within_active_hours(now):
-                        print("🌙 Main tweet skipped (outside active hours).")
+                        print(f"🌙 Main tweet skipped (outside active hours {ACTIVE_START_HOUR:02d}:00–{ACTIVE_END_HOUR:02d}:00, now {now.strftime('%H:%M')}).")
                     else:
                         print("\n⏰ Main tweet window — sending next tweet...")
 
@@ -1367,7 +1390,7 @@ class TwitterBot:
             except Exception as e:
                 print(f"❌ Error in scheduler worker: {e}")
                 time.sleep(20)
-                
+
     def get_stories_from_feed(self, url, limit: int = 10):
         """
         Fetch RSS/Atom items and return a list of dicts with: title, preview, url.
@@ -2166,6 +2189,23 @@ class TwitterBot:
                 print("⚠ Empty tweet text; skipping send.")
                 return False
 
+            # Write to sherpa memory before attempting X, so Moltbook can pick up
+            # this content even if the X post fails.
+            try:
+                for app_base in _app_retry_bases(MORK_APP_FALLBACK_URL):
+                    try:
+                        r = requests.post(f"{app_base}/memory/ingest", json={
+                            "type": "fact", "source": "sherpa",
+                            "content": tweet_text[:2000], "importance": 0.65,
+                            "entities": ["sherpa", "content"],
+                        }, timeout=5)
+                        if 200 <= r.status_code < 300:
+                            break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             posted_anywhere = False
             tweet_url = None
 
@@ -2212,11 +2252,19 @@ class TwitterBot:
             return False
         except Exception as e:
             msg = str(e)
+            api_body = ""
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    api_body = e.response.text
+                except Exception:
+                    pass
             if "402" in msg or "CreditsDepleted" in msg:
                 backoff_until = datetime.now() + timedelta(hours=1)
                 self.backoff_until = backoff_until
                 self.rate_limits.setdefault("tweets", {})["backoff_until"] = backoff_until
-                print(f"⚠ X credits depleted (402) — backing off until {backoff_until.strftime('%H:%M')}. Check your X developer portal.")
+                print(f"⚠ Tweet send got 402 — backing off until {backoff_until.strftime('%H:%M')}.")
+                print(f"  Raw error : {msg}")
+                print(f"  API body  : {api_body or '(no response body)'}")
             else:
                 print(f"Error sending tweet: {e}")
             return False
@@ -2495,7 +2543,20 @@ class TwitterBot:
             return False
             
         except Exception as e:
-            print(f"Error sending tweet with media: {e}")
+            msg = str(e)
+            api_body = ""
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    api_body = e.response.text
+                except Exception:
+                    pass
+            if "402" in msg or "CreditsDepleted" in msg:
+                self.use_memes = False
+                print(f"⚠ Media upload got 402 — disabling memes.")
+                print(f"  Raw error : {msg}")
+                print(f"  API body  : {api_body or '(no response body)'}")
+            else:
+                print(f"Error sending tweet with media: {e}")
             return False
             
     def send_to_telegram(self, tweet_url):
@@ -3899,7 +3960,6 @@ def main():
         print("⚠️ GitHub prompt fetch failed; keeping existing character prompt.")
 
     interface = bot.create_ui()
-    threading.Thread(target=bot.scheduler_worker, daemon=True).start()
     interface.launch()
 
 
