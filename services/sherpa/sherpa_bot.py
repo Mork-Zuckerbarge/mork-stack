@@ -51,7 +51,8 @@ USE_OPENAI = str(os.getenv("USE_OPENAI", "0")).strip().lower() in ("1", "true", 
 def _get_core_url():
     u = (os.getenv("MORK_CORE_URL") or "").strip().rstrip("/")
     if not u:
-        return MORK_CORE_SERVICE_FALLBACK_URL
+        # Default local-first so standalone runs always target the local core port.
+        return LOCAL_MORK_CORE_FALLBACK_URL
     if "<" in u or "IP-OF" in u.upper():
         print(f"⚠ MORK_CORE_URL is a placeholder: '{u}'. Please set a real URL.")
         return MORK_CORE_SERVICE_FALLBACK_URL
@@ -806,6 +807,7 @@ class TwitterBot:
             "reddit": False,
             "faceboot": False,
         }
+        self.app_queue_lock = threading.Lock()
 
         if not os.path.exists("memes"):
             os.makedirs("memes")
@@ -859,6 +861,48 @@ class TwitterBot:
             print("Twitter client initialized.")
         else:
             print("Twitter client NOT initialized (missing X credentials).")
+
+    def consume_app_topic_queue(self):
+        """Consume one queued app topic and post it immediately.
+        Returns True when a queued topic was successfully posted.
+        """
+        queue_file = os.path.join(os.path.dirname(__file__), "current_topic_from_app.txt")
+        if not os.path.exists(queue_file):
+            return False
+        with self.app_queue_lock:
+            try:
+                with open(queue_file, "r", encoding="utf-8") as f:
+                    queued = (f.read() or "").strip()
+                if not queued:
+                    print("------- SHERPA APP QUEUE EMPTY -------")
+                    return False
+                print("+++++++ SHERPA APP QUEUE FOUND +++++++")
+                print("📥 Found queued app topic; sending now...")
+                ok = self.send_tweet(queued)
+                if ok:
+                    try:
+                        os.remove(queue_file)
+                    except Exception as remove_err:
+                        print(f"⚠ Posted queued app topic but could not delete queue file: {remove_err}")
+                    print("+++++++ SHERPA APP QUEUE POSTED +++++++")
+                    return True
+                print("⚠ Failed to send queued app topic (send_tweet returned false).")
+                print("------- SHERPA APP QUEUE POST FAILED -------")
+                return False
+            except Exception as e:
+                print(f"⚠ Failed consuming queued app topic: {e}")
+                return False
+
+    def app_queue_worker(self):
+        """Lightweight queue worker: consume app-post queue without enabling automation scheduler."""
+        print("📮 Starting app queue worker (automation-independent)...")
+        while True:
+            try:
+                if self.consume_app_topic_queue():
+                    self.last_successful_tweet = datetime.now()
+            except Exception as e:
+                print(f"⚠ App queue worker error: {e}")
+            time.sleep(2)
             
     def load_credentials(self) -> dict:
         """
@@ -1121,6 +1165,7 @@ class TwitterBot:
         self.last_mention_sweep_date = getattr(self, "last_mention_sweep_date", None)
         self.daily_replies_sent = getattr(self, "daily_replies_sent", 0)
         self.last_observation_time = getattr(self, "last_observation_time", None)
+        self.mention_backoff_until = getattr(self, "mention_backoff_until", None)
 
         if not getattr(self, "last_successful_tweet", None):
             print("🚀 No previous tweet timestamp found. Setting last_successful_tweet to now.")
@@ -1170,15 +1215,21 @@ class TwitterBot:
         next_obs_at = schedule_next(base_min=60, jitter_min=25, min_gap=min_gap_min)
         next_moltbook_at = schedule_next(base_min=45, jitter_min=15, min_gap=30)
         now_boot = datetime.now()
+        run_missed_daily_sweep_on_boot = str(
+            os.getenv("MENTION_SWEEP_RUN_MISSED_ON_BOOT", "0")
+        ).strip().lower() in {"1", "true", "yes", "on"}
+
         if mention_sweep_mode == "daily":
             already_ran_today = (
                 isinstance(self.last_mention_sweep_date, str)
                 and self.last_mention_sweep_date == now_boot.date().isoformat()
             )
-            if (not already_ran_today) and (
+            missed_today_window = (
                 (now_boot.hour > mention_sweep_hour)
                 or (now_boot.hour == mention_sweep_hour and now_boot.minute >= mention_sweep_minute)
-            ):
+            )
+            if (not already_ran_today) and missed_today_window and run_missed_daily_sweep_on_boot:
+                # Opt-in only: avoid surprise mention read bursts right after restarts.
                 next_mentions_at = now_boot
             else:
                 next_mentions_at = next_daily_mention_sweep(now_boot)
@@ -1196,8 +1247,18 @@ class TwitterBot:
         print(f"🕒 Active hours      : {ACTIVE_START_HOUR:02d}:00–{ACTIVE_END_HOUR:02d}:00")
         print(f"🧾 Daily mention cap  : {daily_mention_cap}")
 
-        while self.scheduler_running:
+        while True:
             try:
+                if not self.scheduler_running:
+                    # Keep app-driven queue handoff alive even when scheduler UI toggle is off.
+                    try:
+                        if self.consume_app_topic_queue():
+                            self.last_successful_tweet = datetime.now()
+                    except Exception as e:
+                        print(f"⚠ App topic queue handoff failed while scheduler idle: {e}")
+                    time.sleep(2)
+                    continue
+
                 now = datetime.now()
 
                 # Reset daily counter when day changes
@@ -1237,6 +1298,15 @@ class TwitterBot:
                 # (A) Mentions sweep (reply only to mentions; bank overflow)
                 # -------------------------
                 if now >= next_mentions_at:
+                    if getattr(self, "mention_backoff_until", None) and now < self.mention_backoff_until:
+                        wait_minutes = (self.mention_backoff_until - now).total_seconds() / 60
+                        print(f"⛔ Mention sweep paused until {self.mention_backoff_until} (~{wait_minutes:.1f} min left).")
+                        if mention_sweep_mode == "daily":
+                            next_mentions_at = next_daily_mention_sweep(now)
+                        else:
+                            next_mentions_at = schedule_next(base_min=mention_base_min, jitter_min=mention_jitter_min, min_gap=3)
+                        time.sleep(1)
+                        continue
                     if mention_sweep_mode == "daily":
                         self.last_mention_sweep_date = now.date().isoformat()
                         next_mentions_at = next_daily_mention_sweep(now)
@@ -1259,12 +1329,7 @@ class TwitterBot:
                     # Fetch new mentions if none banked
                     if not pending:
                         try:
-                            if hasattr(self, "collect_unreplied_mentions"):
-                                pending = self.collect_unreplied_mentions() or []
-                            elif hasattr(self, "fetch_recent_mentions"):
-                                pending = self.fetch_recent_mentions() or []
-                            elif hasattr(self, "monitor_and_reply_to_mentions"):
-                                print("⚠ Using monitor_and_reply_to_mentions fallback.")
+                            if hasattr(self, "monitor_and_reply_to_mentions"):
                                 self.monitor_and_reply_to_mentions()
                                 pending = []
                             else:
@@ -1304,6 +1369,16 @@ class TwitterBot:
                             self.reply_bank.append(m)
 
                     print(f"✅ Mention sweep done. Sent {handled}. Banked {len(self.reply_bank)}. Daily {self.daily_replies_sent}/{daily_mention_cap}.")
+
+                # -------------------------
+                # (A2) Immediate app-queued post handoff
+                # -------------------------
+                try:
+                    if self.consume_app_topic_queue():
+                        self.last_successful_tweet = datetime.now()
+                        time.sleep(random.uniform(2, 6))
+                except Exception as e:
+                    print(f"⚠ App topic queue handoff failed: {e}")
 
                 # -------------------------
                 # (B) Observation tweet (Mork Core) (jittered)
@@ -1384,6 +1459,17 @@ class TwitterBot:
                                 self.tweet_queue.put((self.scheduler_character, txt, self.scheduler_subject))
                                 seeded += 1
                             print(f"📥 Refilled with {seeded} story(ies).")
+
+                            # If we just refilled during an active posting window, publish one immediately.
+                            if seeded > 0 and not self.tweet_queue.empty():
+                                character, story_text, subject = self.tweet_queue.get()
+                                tweet_text = self.generate_tweet(character, story_text)
+                                if tweet_text and self.send_tweet(tweet_text):
+                                    print("✅ Tweet sent immediately after queue refill.")
+                                    self.last_successful_tweet = datetime.now()
+                                    time.sleep(random.uniform(6, 16))
+                                else:
+                                    print("❌ Failed immediate tweet after queue refill.")
 
                 time.sleep(5)
 
@@ -2212,27 +2298,27 @@ class TwitterBot:
             if self.publish_targets.get("x", True):
                 if not self.twitter_client:
                     print("❌ Twitter client not initialized.")
-                    return False
-                if not self.check_rate_limit():
-                    return False
-                response = self.twitter_client.create_tweet(text=tweet_text)
-                if not response or not response.data:
-                    print("⚠ Tweet send returned no data.")
-                    return False
-                tweet_id = response.data.get("id")
-                self.last_successful_tweet = datetime.now()
-                self.update_rate_limit()
-                posted_anywhere = True
-                if tweet_id:
-                    username = (self.credentials.get("twitter_username") or "").lstrip("@")
-                    if username:
-                        tweet_url = f"https://x.com/{username}/status/{tweet_id}"
-                self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
-                print(f"✅ Tweet sent successfully: {tweet_id}")
+                elif not self.check_rate_limit():
+                    print("⚠ X rate-limit check blocked posting on X for this attempt.")
+                else:
+                    response = self.twitter_client.create_tweet(text=tweet_text)
+                    if not response or not response.data:
+                        print("⚠ Tweet send returned no data.")
+                    else:
+                        tweet_id = response.data.get("id")
+                        self.last_successful_tweet = datetime.now()
+                        self.update_rate_limit()
+                        posted_anywhere = True
+                        if tweet_id:
+                            username = (self.credentials.get("twitter_username") or "").lstrip("@")
+                            if username:
+                                tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+                        self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
+                        print(f"✅ Tweet sent successfully: {tweet_id}")
 
             if self.publish_targets.get("telegram", False):
-                self.send_to_telegram(tweet_url or tweet_text)
-                posted_anywhere = True
+                tg_ok = self.send_to_telegram(tweet_url or tweet_text)
+                posted_anywhere = posted_anywhere or tg_ok
             if self.publish_targets.get("reddit", False):
                 self.send_to_reddit(tweet_text, source_url=tweet_url)
                 posted_anywhere = True
@@ -2565,7 +2651,7 @@ class TwitterBot:
 
         if not bot_token or not chat_id:
             print("⚠️ Telegram credentials missing")
-            return
+            return False
 
         text = f"Mork has tweeted:\n{tweet_url}"
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -2578,8 +2664,10 @@ class TwitterBot:
         try:
             response = requests.post(url, data=payload)
             print("📨 Telegram status:", response.status_code, response.text)
+            return 200 <= response.status_code < 300
         except Exception as e:
             print(f"❌ Telegram send failed: {e}")
+            return False
 
     def _short_post_title(self, text, fallback="Mork update", max_len=250):
         base = (text or "").strip()
@@ -2901,7 +2989,13 @@ class TwitterBot:
 
             resp = requests.get(url, headers=headers, params=params, timeout=15)
             if resp.status_code != 200:
-                print(f"❌ Error fetching mentions: {resp.status_code} {resp.text}")
+                body_text = (resp.text or "")
+                print(f"❌ Error fetching mentions: {resp.status_code} {body_text}")
+                if resp.status_code == 402 and "CreditsDepleted" in body_text:
+                    # X API credits are exhausted for mention reads; pause sweeps so we do not hammer the endpoint.
+                    cooldown_hours = int(os.getenv("X_MENTION_CREDITS_BACKOFF_HOURS", "12"))
+                    self.mention_backoff_until = datetime.now() + timedelta(hours=max(1, cooldown_hours))
+                    print(f"⛔ Mention reads paused (credits depleted). Backing off until {self.mention_backoff_until}.")
                 state["backlog"] = backlog  # keep backlog progress
                 _save_reply_state(state)
                 return
@@ -3960,6 +4054,7 @@ def main():
         print("⚠️ GitHub prompt fetch failed; keeping existing character prompt.")
 
     interface = bot.create_ui()
+    threading.Thread(target=bot.app_queue_worker, daemon=True).start()
     interface.launch()
 
 
