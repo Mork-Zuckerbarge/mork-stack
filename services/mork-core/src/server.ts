@@ -540,16 +540,7 @@ async function forwardToAppPlanner(): Promise<void> {
 }
 
 async function plannerTick() {
-  const now = new Date();
-  await prisma.memory.create({
-    data: {
-      type: "reflection",
-      content: `Tick @ ${now.toISOString()}: I exist, therefore I worry, therefore I improve.`,
-      entities: ["system:planner"],
-      importance: 0.1,
-      source: "system",
-    },
-  });
+  console.log(`[plannerTick] ${new Date().toISOString()}`);
   // Forward to mork-app autonomous trading planner (fire-and-forget)
   forwardToAppPlanner().catch(() => {});
 }
@@ -773,6 +764,9 @@ app.post("/chat/respond_v2", async (req, res) => {
 
 async function runBrainReflect() {
   const recent = await prisma.memory.findMany({
+    where: {
+      source: { notIn: ["ollama", "system"] },
+    },
     orderBy: { createdAt: "desc" },
     take: 120,
   });
@@ -1028,4 +1022,4 @@ setInterval(async () => {
   } catch (e) {
     console.error("brain reflect loop failed", e);
   }
-}, 5 * 60 * 1000);
+}, 60 * 60 * 1000);

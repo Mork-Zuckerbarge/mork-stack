@@ -55,6 +55,17 @@ const ARMED = process.env.ARMED === "true";
 const CANDIDATE_WINDOW_MS = Number(process.env.CANDIDATE_WINDOW_MS || 10 * 60_000); // 10 minutes
 const CANDIDATE_THRESHOLD = Number(process.env.CANDIDATE_THRESHOLD || 3);          // 3 hits in window
 const candidateHits = new Map(); // mint -> [timestamps]
+const ENABLE_TRIANGULAR_ROUTES = parseEnvBool(process.env.ENABLE_TRIANGULAR_ROUTES, false);
+
+// Intermediary tokens for USDC → B → TOKEN → USDC triangular routes.
+// Both SOL and ETH are valid here since the base currency is USDC, not SOL.
+const TRIANGULAR_INTERMEDIARIES = [
+  { mint: SOL_MINT,                                          symbol: "SOL"  },
+  { mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", symbol: "ETH"  },
+  { mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",  symbol: "JUP"  },
+  { mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", symbol: "BONK" },
+  { mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  symbol: "USDT" },
+];
 const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 const MIN_BBQ_REQUIRED = Number(process.env.MIN_BBQ_REQUIRED || 1000);
 
@@ -151,6 +162,7 @@ function morkTradeDecision(payload) {
 }
 
 function morkTradeResult(payload) {
+  morkArbEvent({ kind: "trade_result", mint: payload.mint, ok: payload.ok, error: payload.error }).catch(() => {});
   return morkMemory({
     type: "fact",
     content: JSON.stringify({ kind: "trade_result", ...payload }),
@@ -161,6 +173,9 @@ function morkTradeResult(payload) {
 }
 
 function morkRouteResearch(payload) {
+  if (payload.stage === "candidate") {
+    morkArbEvent({ kind: "route_research", mint: payload.mint, edgePct: payload.edgePct, net: payload.netUsd }).catch(() => {});
+  }
   return morkMemory({
     type: "fact",
     content: JSON.stringify({ kind: "route_research", ...payload }),
@@ -638,6 +653,126 @@ function filterTokens(tokens) {
 
   filtered.sort((a, b) => a.symbol.length - b.symbol.length);
   return filtered;
+}
+
+// Three-leg scan: USDC → INTER → TOKEN → USDC
+async function scanMarketTriangular(m, intermediary) {
+  const maxTrade = getEffectiveMaxTradeUsdc();
+  if (!maxTrade || maxTrade <= 0) return null;
+
+  const TX_COST_USD = Number(process.env.TX_COST_USD || 0.01);
+  const MIN_NET = Number(process.env.MIN_NET_PROFIT_USD || 0);
+  const spendUsd = Math.min(Number(m.probeUsd || 5), maxTrade);
+  const inUsdcUnits = BigInt(Math.floor(spendUsd * 1e6));
+  if (inUsdcUnits <= 0n) return null;
+  if (intermediary.mint === m.inMint) return null; // skip degenerate routes
+
+  let q1, q2, q3;
+  try {
+    q1 = await getQuote(USDC_MINT, intermediary.mint, inUsdcUnits, SLIPPAGE_BPS);
+  } catch (e) { if (isSkippableJupError(e)) return null; throw e; }
+  if (!q1?.outAmount) return null;
+
+  const interOut = BigInt(q1.outAmount);
+  if (interOut <= 0n) return null;
+
+  try {
+    q2 = await getQuote(intermediary.mint, m.inMint, interOut, SLIPPAGE_BPS);
+  } catch (e) { if (isSkippableJupError(e)) return null; throw e; }
+  if (!q2?.outAmount) return null;
+
+  const tokenOut = BigInt(q2.outAmount);
+  if (tokenOut <= 0n) return null;
+
+  try {
+    q3 = await getQuote(m.inMint, USDC_MINT, tokenOut, SLIPPAGE_BPS);
+  } catch (e) { if (isSkippableJupError(e)) return null; throw e; }
+  if (!q3?.outAmount) return null;
+
+  const outUsdc = Number(q3.outAmount) / 1e6;
+  const gross = outUsdc - spendUsd;
+  const net = gross - TX_COST_USD;
+  const edgePct = (gross / spendUsd) * 100;
+  const good = net > MIN_NET && edgePct >= MIN_EDGE_PCT;
+
+  return {
+    good, edgePct, usdNotional: spendUsd, approxUsdProfit: gross, netUsdProfit: net, spendUsd,
+    route: `USDC → ${intermediary.symbol} → ${m.symbol || m.inMint.slice(0,6)} → USDC`,
+    legs: { q1, q2, q3 },
+    intermediary,
+  };
+}
+
+async function executeRouteTriangular(m, scan) {
+  let spendUsd = 0, net = NaN, edgePct = NaN;
+  try {
+    if (!PAPER && !ARMED) return { ok: false, dryRun: true, reason: "ARMED=false" };
+
+    const sol = (await connection.getBalance(wallet.publicKey)) / 1e9;
+    if (sol < 0.005) return { ok: false, reason: `Not enough SOL for fees (${sol.toFixed(4)})` };
+
+    const usdcBal = await getUsdcBalance(connection, wallet.publicKey);
+    if (usdcBal <= 0) return { ok: false, reason: "No USDC balance" };
+
+    const maxTrade = getEffectiveMaxTradeUsdc();
+    if (!maxTrade || maxTrade <= 0) return { ok: false, reason: "Max trade gate blocked" };
+
+    spendUsd = Math.min(usdcBal, maxTrade);
+    if (spendUsd <= 0.01) return { ok: false, reason: `Spend too small (${spendUsd})` };
+
+    const TX_COST_USD = Number(process.env.TX_COST_USD || 0.01);
+    const MIN_NET = Number(process.env.MIN_NET_PROFIT_USD || 0);
+
+    const slippageBps = Number(m?._slippageBpsOverride ?? SLIPPAGE_BPS);
+    const inUsdcUnits = BigInt(Math.floor(spendUsd * 1e6));
+
+    const inter = scan.intermediary;
+    const q1 = await getQuote(USDC_MINT, inter.mint, inUsdcUnits, slippageBps);
+    if (!q1?.outAmount) return { ok: false, reason: "No quote (USDC→inter)" };
+
+    const q2 = await getQuote(inter.mint, m.inMint, BigInt(q1.outAmount), slippageBps);
+    if (!q2?.outAmount) return { ok: false, reason: "No quote (inter→token)" };
+
+    const q3 = await getQuote(m.inMint, USDC_MINT, BigInt(q2.outAmount), slippageBps);
+    if (!q3?.outAmount) return { ok: false, reason: "No quote (token→USDC)" };
+
+    const outUsdc = Number(q3.outAmount) / 1e6;
+    const gross = outUsdc - spendUsd;
+    net = gross - TX_COST_USD;
+    edgePct = (gross / spendUsd) * 100;
+    if (net < MIN_NET) return { ok: false, reason: `Triangular net $${net.toFixed(4)} < min` };
+
+    const [ins1, ins2, ins3] = await Promise.all([
+      getSwapInstructions(q1, wallet.publicKey.toBase58()),
+      getSwapInstructions(q2, wallet.publicKey.toBase58()),
+      getSwapInstructions(q3, wallet.publicKey.toBase58()),
+    ]);
+
+    const ixs = [];
+    for (const ix of (ins1.computeBudgetInstructions || [])) ixs.push(deserializeInstruction(ix));
+    for (const ix of (ins1.setupInstructions || [])) ixs.push(deserializeInstruction(ix));
+    ixs.push(deserializeInstruction(ins1.swapInstruction));
+    for (const ix of (ins2.setupInstructions || [])) ixs.push(deserializeInstruction(ix));
+    ixs.push(deserializeInstruction(ins2.swapInstruction));
+    for (const ix of (ins3.setupInstructions || [])) ixs.push(deserializeInstruction(ix));
+    ixs.push(deserializeInstruction(ins3.swapInstruction));
+    if (ins3.cleanupInstruction) ixs.push(deserializeInstruction(ins3.cleanupInstruction));
+
+    const altKeys = Array.from(new Set([
+      ...(ins1.addressLookupTableAddresses || []),
+      ...(ins2.addressLookupTableAddresses || []),
+      ...(ins3.addressLookupTableAddresses || []),
+    ].filter(Boolean)));
+
+    if (PAPER) return { ok: true, sig: `paper-tri-${Date.now()}`, spendUsd, net, edgePct, dryRun: true };
+
+    const sig = await sendV0Tx(connection, wallet, ixs.filter(Boolean), altKeys);
+    return { ok: true, sig, spendUsd, net, edgePct, dryRun: false };
+  } catch (e) {
+    const msg = String(e?.message || e);
+    try { recordTradeResult?.({ ok: false, realizedPnlUsd: 0 }); } catch {}
+    return { ok: false, reason: `executeRouteTriangular exception: ${msg}` };
+  }
 }
 
 async function scanMarketA(m) {
@@ -1268,31 +1403,41 @@ async function main() {
     for (const m of batch) {
       if (!m?.inMint || blacklist.has(m.inMint)) continue;
 
-      let scan = null;
-      try {
-        scan = await Promise.race([
-          scanMarketA(m),
-          sleep(SCAN_TIMEOUT_MS).then(() => ({ __timedOut: true })),
-        ]);
-      } catch (e) {
-        if (isSkippableJupError(e)) continue;
-        if (isRpcRateLimitError(e)) {
-          console.log(`⚠️ scan rate-limited for ${m.symbol || m.inMint}: ${e.message}`);
-          continue;
+      // Build scan tasks: always run standard 2-leg, optionally add triangular legs
+      const scanTasks = [scanMarketA(m)];
+      const scanMeta = [{ type: "circular", intermediary: null }];
+      if (ENABLE_TRIANGULAR_ROUTES) {
+        for (const inter of TRIANGULAR_INTERMEDIARIES) {
+          if (inter.mint === m.inMint || inter.mint === USDC_MINT) continue;
+          scanTasks.push(scanMarketTriangular(m, inter));
+          scanMeta.push({ type: "triangular", intermediary: inter });
         }
-        console.log(`⚠️ scan error ${m.symbol || m.inMint}: ${e.message}`);
-        continue;
       }
 
-      if (scan?.__timedOut) {
-        console.log(`⏱️ scan timeout ${m.symbol || m.inMint} after ${SCAN_TIMEOUT_MS}ms`);
-        continue;
+      const scanResults = await Promise.allSettled(
+        scanTasks.map((task) =>
+          Promise.race([task, sleep(SCAN_TIMEOUT_MS).then(() => ({ __timedOut: true }))])
+        )
+      );
+
+      // Find best profitable result across all route types
+      let scan = null;
+      let bestMeta = scanMeta[0];
+      for (let i = 0; i < scanResults.length; i++) {
+        const r = scanResults[i];
+        if (r.status !== "fulfilled") continue;
+        const s = r.value;
+        if (s?.__timedOut) { console.log(`⏱️ scan timeout ${m.symbol || m.inMint} (${scanMeta[i].type}) after ${SCAN_TIMEOUT_MS}ms`); continue; }
+        if (!s?.good) continue;
+        if (!scan || s.netUsdProfit > scan.netUsdProfit) { scan = s; bestMeta = scanMeta[i]; }
       }
-      if (!scan || !scan.good) continue;
+
+      if (!scan) continue;
 
       const hits = recordCandidateHit(m.inMint);
+      const routeLabel = bestMeta.type === "triangular" ? ` [tri:${bestMeta.intermediary?.symbol}]` : "";
       console.log(
-        `➡️  CANDIDATE ${m.symbol || m.inMint} edge=${scan.edgePct.toFixed(3)}% net≈$${scan.netUsdProfit.toFixed(4)} hits=${hits}/${CANDIDATE_THRESHOLD}`
+        `➡️  CANDIDATE ${m.symbol || m.inMint}${routeLabel} edge=${scan.edgePct.toFixed(3)}% net≈$${scan.netUsdProfit.toFixed(4)} hits=${hits}/${CANDIDATE_THRESHOLD}`
       );
       morkRouteResearch({
         stage: "candidate",
@@ -1356,7 +1501,9 @@ async function main() {
       }
 
       recordTradeAttempt({ mint: m.inMint });
-      const exec = await executeRouteA(m, scan);
+      const exec = await (bestMeta.type === "triangular"
+        ? executeRouteTriangular(m, scan)
+        : executeRouteA(m, scan));
       if (exec.ok) {
         recordTradeResult({ ok: true, realizedPnlUsd: Number(exec.net) || 0 });
         console.log(`✅ TRADE SENT ${m.symbol || m.inMint} sig=${exec.sig} net≈$${Number(exec.net || 0).toFixed(4)}`);

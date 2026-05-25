@@ -1,5 +1,6 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection } from '@solana/web3.js';
 import { logger } from './logger';
+import { adjustedMinProfit } from './timeWeighting';
 import { AgentConfig, Opportunity } from '../types';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -38,7 +39,7 @@ export class FeeSimulator {
 
     const totalFeeLamports = baseFee + priorityFee + jitoTip;
     const netProfitLamports = opportunity.grossProfitLamports - totalFeeLamports;
-    const isProfitable = netProfitLamports >= this.config.minProfitLamports;
+    const isProfitable = netProfitLamports >= adjustedMinProfit(this.config.minProfitLamports);
 
     const estimate: FeeEstimate = {
       baseFee,
@@ -56,7 +57,7 @@ export class FeeSimulator {
         grossProfit: opportunity.grossProfitLamports,
         fees: totalFeeLamports,
         net: netProfitLamports,
-        minRequired: this.config.minProfitLamports,
+        minRequired: adjustedMinProfit(this.config.minProfitLamports),
       });
     } else {
       logger.debug('Fee simulation: trade PROFITABLE', {

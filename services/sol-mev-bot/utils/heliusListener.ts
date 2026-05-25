@@ -39,6 +39,10 @@ export class HeliusListener extends EventEmitter {
   static readonly ORCA_WHIRLPOOL = 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc';
   static readonly METEORA_DLMM = 'LBUZKhRxPF3XUpBCjp4YzTKgLLjTriggAIVovAL6QKN';
   static readonly PUMP_FUN = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
+  // Lending protocol program IDs
+  static readonly MARGINFI_V2 = 'MFv2hWf31Z9kbCa1snEPdcgp7gMSy6YggXLFCm86sQ';
+  static readonly KAMINO_LENDING = 'KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD';
+  static readonly SOLEND = 'So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo';
 
   constructor(wsUrl: string) {
     super();
@@ -56,6 +60,13 @@ export class HeliusListener extends EventEmitter {
   watchPumpFun(): void {
     this.watchedPrograms.add(HeliusListener.PUMP_FUN);
     logger.info('pump.fun monitoring enabled');
+  }
+
+  watchLendingProtocols(): void {
+    this.watchedPrograms.add(HeliusListener.MARGINFI_V2);
+    this.watchedPrograms.add(HeliusListener.KAMINO_LENDING);
+    this.watchedPrograms.add(HeliusListener.SOLEND);
+    logger.info('Lending protocol liquidation monitoring enabled (MarginFi, Kamino, Solend)');
   }
 
   start(): void {
@@ -173,6 +184,28 @@ export class HeliusListener extends EventEmitter {
     // pump.fun token launch / large buy
     if (logsStr.includes(HeliusListener.PUMP_FUN) && logsStr.includes('buy')) {
       this.emit('pumpfun_buy', { signature, logs });
+    }
+
+    // Lending protocol liquidations — parse collateral token from logs
+    const lendingPrograms = [
+      HeliusListener.MARGINFI_V2,
+      HeliusListener.KAMINO_LENDING,
+      HeliusListener.SOLEND,
+    ];
+    for (const prog of lendingPrograms) {
+      if (
+        logsStr.includes(prog) &&
+        (logsStr.includes('liquidate') || logsStr.includes('Liquidate'))
+      ) {
+        const mintMatch = logsStr.match(/mint[:\s]+([1-9A-HJ-NP-Za-km-z]{32,44})/i);
+        this.emit('liquidation', {
+          program: prog,
+          signature,
+          logs,
+          mint: mintMatch?.[1] ?? null,
+        });
+        break;
+      }
     }
   }
 

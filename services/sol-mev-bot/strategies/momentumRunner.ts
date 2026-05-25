@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { FeeSimulator } from '../utils/feeSimulator';
 import { JitoClient } from '../utils/jitoClient';
 import { HeliusListener } from '../utils/heliusListener';
+import { CorrelationFilter } from '../utils/correlationFilter';
 import { AgentConfig, Opportunity, StrategyType, ExecutionResult } from '../types';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -45,6 +46,7 @@ export class MomentumRunner {
   private volumeBaselines: Map<string, TokenVolumeBaseline> = new Map();
   private activePositions: Map<string, ActivePosition> = new Map();
   private watchlistMints: Set<string> = new Set();
+  private correlationFilter: CorrelationFilter;
 
   private scanning = false;
   private monitorInterval: NodeJS.Timeout | null = null;
@@ -63,6 +65,7 @@ export class MomentumRunner {
     this.feeSimulator = feeSimulator;
     this.jitoClient = jitoClient;
     this.helius = helius;
+    this.correlationFilter = new CorrelationFilter(config.correlationThreshold);
   }
 
   async start(): Promise<void> {
@@ -178,6 +181,17 @@ export class MomentumRunner {
   }
 
   private async enterPosition(mint: string, spikeMultiplier: number): Promise<void> {
+    // Block entry if candidate is too correlated with existing open positions
+    const openMints = Array.from(this.activePositions.keys());
+    if (this.correlationFilter.isTooCorrelated(mint, openMints)) {
+      logger.debug('Momentum entry blocked by correlation filter', {
+        mint: mint.slice(0, 8),
+        openPositions: openMints.length,
+        threshold: this.config.correlationThreshold,
+      });
+      return;
+    }
+
     // Scale position size with spike strength, but cap at maxPositionSol
     const positionSol = Math.min(
       this.config.maxPositionSol * Math.min(spikeMultiplier / 10, 1),
@@ -309,7 +323,10 @@ export class MomentumRunner {
         params: { address: mint },
         timeout: 3000,
       });
-      return res.data?.data?.value ?? null;
+      const price = res.data?.data?.value ?? null;
+      // Feed into correlation filter so it has data before entry decisions
+      if (price != null) this.correlationFilter.recordPrice(mint, price);
+      return price;
     } catch {
       return null;
     }

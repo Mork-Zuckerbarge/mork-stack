@@ -23,12 +23,33 @@ export interface AgentConfig {
   momentumVolSpikeMultiplier: number;
   momentumTrailingStopPct: number;
   watchPumpFun: boolean;
+  // New strategies
+  enableTriangularArb: boolean;
+  enableCrossDexArb: boolean;
+  enableLiquidationArb: boolean;
+  enableDriftFunding: boolean;
+  enableStablecoinDepeg: boolean;
+  // Dynamic Jito tip
+  dynamicJitoTip: boolean;
+  // Cross-DEX arb
+  crossDexMinSpreadPct: number;
+  // Drift funding arb
+  driftMinFundingRatePct: number;
+  // Stablecoin depeg
+  stablecoinDepegThresholdPct: number;
+  // Correlation filter
+  correlationThreshold: number;
 }
 
 export enum StrategyType {
   ARBITRAGE = 'arbitrage',
   AMM_IMBALANCE = 'amm_imbalance',
   MOMENTUM = 'momentum',
+  TRIANGULAR_ARB = 'triangular_arb',
+  CROSS_DEX_ARB = 'cross_dex_arb',
+  LIQUIDATION_ARB = 'liquidation_arb',
+  DRIFT_FUNDING = 'drift_funding',
+  STABLECOIN_DEPEG = 'stablecoin_depeg',
 }
 
 export interface Opportunity {
@@ -70,6 +91,17 @@ export interface JupiterQuote {
 }
 
 export type AnyTransaction = Transaction | VersionedTransaction;
+
+export interface PoolState {
+  address: import('@solana/web3.js').PublicKey;
+  dex: 'raydium' | 'orca' | 'meteora';
+  tokenA: import('@solana/web3.js').PublicKey;
+  tokenB: import('@solana/web3.js').PublicKey;
+  reserveA: bigint;
+  reserveB: bigint;
+  fee: number;
+  lastUpdatedSlot: number;
+}
 
 export interface BundleResult {
   bundleId: string;

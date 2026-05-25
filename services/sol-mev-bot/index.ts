@@ -13,6 +13,9 @@ import { CircuitBreaker } from './utils/circuitBreaker';
 import { ArbScanner } from './strategies/arbScanner';
 import { PoolImbalanceDetector } from './strategies/poolImbalance';
 import { MomentumRunner } from './strategies/momentumRunner';
+import { LiquidationArb } from './strategies/liquidationArb';
+import { DriftFundingArb } from './strategies/driftFundingArb';
+import { StablecoinDepeg } from './strategies/stablecoinDepeg';
 import { AgentConfig } from './types';
 
 function loadEnvFiles(): void {
@@ -69,6 +72,22 @@ function loadConfig(): AgentConfig {
     momentumVolSpikeMultiplier: parseFloat(process.env.MOMENTUM_VOL_SPIKE_MULTIPLIER ?? '5'),
     momentumTrailingStopPct: parseFloat(process.env.MOMENTUM_TRAILING_STOP_PCT ?? '15'),
     watchPumpFun: process.env.WATCH_PUMP_FUN === 'true',
+    // New strategies
+    enableTriangularArb: process.env.ENABLE_TRIANGULAR_ARB === 'true',
+    enableLiquidationArb: process.env.ENABLE_LIQUIDATION_ARB === 'true',
+    enableDriftFunding: process.env.ENABLE_DRIFT_FUNDING === 'true',
+    enableStablecoinDepeg: process.env.ENABLE_STABLECOIN_DEPEG === 'true',
+    enableCrossDexArb: false, // handled by arb/index.js + UI toggle
+    // Dynamic Jito tip
+    dynamicJitoTip: process.env.DYNAMIC_JITO_TIP !== 'false',
+    // Cross-DEX arb
+    crossDexMinSpreadPct: parseFloat(process.env.CROSS_DEX_MIN_SPREAD_PCT ?? '0.5'),
+    // Drift funding arb
+    driftMinFundingRatePct: parseFloat(process.env.DRIFT_MIN_FUNDING_RATE_PCT ?? '0.05'),
+    // Stablecoin depeg
+    stablecoinDepegThresholdPct: parseFloat(process.env.STABLECOIN_DEPEG_THRESHOLD_PCT ?? '0.3'),
+    // Correlation filter
+    correlationThreshold: parseFloat(process.env.CORRELATION_THRESHOLD ?? '0.75'),
   };
 }
 
@@ -109,8 +128,13 @@ async function main(): Promise<void> {
   logger.info('Mode', { dryRun: config.dryRun });
   logger.info('Strategies', {
     arb: config.enableArb,
+    triangularArb: config.enableTriangularArb,
     ammImbalance: config.enableAmmImbalance,
     momentum: config.enableMomentum,
+    liquidationArb: config.enableLiquidationArb,
+    driftFunding: config.enableDriftFunding,
+    stablecoinDepeg: config.enableStablecoinDepeg,
+    dynamicJitoTip: config.dynamicJitoTip,
   });
 
   if (config.dryRun) {
@@ -200,6 +224,24 @@ async function main(): Promise<void> {
     );
     await momentum.start();
     stoppables.push({ name: 'MomentumRunner', stop: () => momentum.stop() });
+  }
+
+  if (config.enableLiquidationArb) {
+    const liqArb = new LiquidationArb(config, connection, wallet, feeSimulator, jitoClient, helius);
+    liqArb.start();
+    stoppables.push({ name: 'LiquidationArb', stop: () => liqArb.stop() });
+  }
+
+  if (config.enableDriftFunding) {
+    const driftArb = new DriftFundingArb(config, connection, wallet, feeSimulator, jitoClient);
+    driftArb.start();
+    stoppables.push({ name: 'DriftFundingArb', stop: () => driftArb.stop() });
+  }
+
+  if (config.enableStablecoinDepeg) {
+    const depeg = new StablecoinDepeg(config, connection, wallet, feeSimulator, jitoClient);
+    depeg.start();
+    stoppables.push({ name: 'StablecoinDepeg', stop: () => depeg.stop() });
   }
 
   logger.info('═'.repeat(60));

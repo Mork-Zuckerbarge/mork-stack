@@ -197,6 +197,20 @@ export async function commentOnMoltbook(
   });
 }
 
+export async function upvoteOnMoltbook(postId: string, apiKey?: string): Promise<MoltbookApiResult> {
+  return moltbookRequest(`/posts/${encodeURIComponent(postId)}/upvote`, {
+    method: "POST",
+    apiKey,
+  });
+}
+
+export async function followMoltbookUser(userId: string, apiKey?: string): Promise<MoltbookApiResult> {
+  return moltbookRequest(`/users/${encodeURIComponent(userId)}/follow`, {
+    method: "POST",
+    apiKey,
+  });
+}
+
 export async function verifyMoltbookChallenge(
   verificationCode: string,
   answer: string,
