@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { FeeSimulator } from '../utils/feeSimulator';
 import { JitoClient } from '../utils/jitoClient';
 import { HeliusListener } from '../utils/heliusListener';
+import { StatsTracker } from '../utils/statsTracker';
 import { AgentConfig, Opportunity, StrategyType, ExecutionResult } from '../types';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -39,13 +40,17 @@ export class LiquidationArb {
   private feeSimulator: FeeSimulator;
   private jitoClient: JitoClient;
   private helius: HeliusListener;
+  private stats: StatsTracker;
 
   private priceCache: Map<string, CachedPrice> = new Map();
   private activePositions: Map<string, ActivePosition> = new Map();
   private cooldowns: Map<string, number> = new Map();
   private monitorInterval: NodeJS.Timeout | null = null;
+  private aliveInterval: NodeJS.Timeout | null = null;
   private readonly dipThresholdPct: number;
   private readonly cooldownMs = 60_000;
+  private liquidationsSeen = 0;
+  private positionsEntered = 0;
 
   constructor(
     config: AgentConfig,
@@ -53,7 +58,8 @@ export class LiquidationArb {
     wallet: Keypair,
     feeSimulator: FeeSimulator,
     jitoClient: JitoClient,
-    helius: HeliusListener
+    helius: HeliusListener,
+    stats: StatsTracker,
   ) {
     this.config = config;
     this.connection = connection;
@@ -61,11 +67,20 @@ export class LiquidationArb {
     this.feeSimulator = feeSimulator;
     this.jitoClient = jitoClient;
     this.helius = helius;
+    this.stats = stats;
     this.dipThresholdPct = parseFloat(process.env.LIQUIDATION_DIP_THRESHOLD_PCT ?? String(DEFAULT_DIP_THRESHOLD_PCT));
   }
 
   start(): void {
     logger.info('LiquidationArb started', { dipThresholdPct: this.dipThresholdPct });
+    this.aliveInterval = setInterval(() => {
+      logger.info('LiquidationArb alive', {
+        liquidationsSeen: this.liquidationsSeen,
+        positionsEntered: this.positionsEntered,
+        openPositions: this.activePositions.size,
+        openMints: [...this.activePositions.keys()].map((m) => m.slice(0, 8)),
+      });
+    }, 30 * 60_000);
     this.helius.watchLendingProtocols();
 
     this.helius.on('liquidation', async (event: { program: string; signature: string; mint: string | null }) => {
@@ -87,6 +102,7 @@ export class LiquidationArb {
   stop(): void {
     this.helius.removeAllListeners('liquidation');
     if (this.monitorInterval) clearInterval(this.monitorInterval);
+    if (this.aliveInterval) clearInterval(this.aliveInterval);
     logger.info('LiquidationArb stopped', { openPositions: this.activePositions.size });
   }
 
@@ -103,10 +119,12 @@ export class LiquidationArb {
     const coolUntil = this.cooldowns.get(mint) ?? 0;
     if (Date.now() < coolUntil) return;
 
+    this.liquidationsSeen++;
     logger.debug('Liquidation event detected', {
       program: event.program.slice(0, 8),
       mint: mint.slice(0, 8),
       sig: event.signature.slice(0, 8),
+      totalSeen: this.liquidationsSeen,
     });
 
     // Get current and cached price to measure the dip
@@ -164,11 +182,13 @@ export class LiquidationArb {
       meta: { mint, quote, entryPriceUsd },
     };
 
+    this.positionsEntered++;
     if (this.config.dryRun) {
       logger.info('[DRY RUN] Would enter liquidation recovery position', {
         mint: mint.slice(0, 8),
         sol: amountSol.toFixed(3),
       });
+      this.stats.record({ opportunityId: opp.id, success: true, dryRun: true }, StrategyType.LIQUIDATION_ARB);
     } else {
       logger.info('Entering liquidation recovery position', { mint: mint.slice(0, 8), sol: amountSol });
     }
@@ -226,13 +246,18 @@ export class LiquidationArb {
   private async exitPosition(mint: string, pos: ActivePosition): Promise<ExecutionResult> {
     this.activePositions.delete(mint);
 
+    const exitId = uuidv4();
     if (this.config.dryRun) {
       logger.info('[DRY RUN] Would exit liquidation position', { mint: mint.slice(0, 8) });
-      return { opportunityId: uuidv4(), success: true, dryRun: true };
+      const result: ExecutionResult = { opportunityId: exitId, success: true, dryRun: true };
+      this.stats.record(result, StrategyType.LIQUIDATION_ARB);
+      return result;
     }
 
     logger.info('Executing liquidation exit', { mint: mint.slice(0, 8) });
-    return { opportunityId: uuidv4(), success: true, dryRun: false };
+    const result: ExecutionResult = { opportunityId: exitId, success: true, dryRun: false };
+    this.stats.record(result, StrategyType.LIQUIDATION_ARB);
+    return result;
   }
 
   private async fetchJupiterPrice(mint: string): Promise<number | null> {

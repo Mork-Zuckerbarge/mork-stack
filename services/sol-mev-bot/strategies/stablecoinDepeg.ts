@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger';
 import { FeeSimulator } from '../utils/feeSimulator';
 import { JitoClient } from '../utils/jitoClient';
+import { StatsTracker } from '../utils/statsTracker';
 import { AgentConfig, Opportunity, StrategyType, ExecutionResult } from '../types';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -34,25 +35,31 @@ export class StablecoinDepeg {
   private wallet: Keypair;
   private feeSimulator: FeeSimulator;
   private jitoClient: JitoClient;
+  private stats: StatsTracker;
 
   private pollInterval: NodeJS.Timeout | null = null;
+  private aliveInterval: NodeJS.Timeout | null = null;
   private readonly pollMs = 30_000;
   private readonly thresholdPct: number;
   private cooldowns: Map<string, number> = new Map();
-  private readonly cooldownMs = 5 * 60_000; // 5 min between trades per stable
+  private readonly cooldownMs = 5 * 60_000;
+  private pollCount = 0;
+  private depegsDetected = 0;
 
   constructor(
     config: AgentConfig,
     connection: Connection,
     wallet: Keypair,
     feeSimulator: FeeSimulator,
-    jitoClient: JitoClient
+    jitoClient: JitoClient,
+    stats: StatsTracker,
   ) {
     this.config = config;
     this.connection = connection;
     this.wallet = wallet;
     this.feeSimulator = feeSimulator;
     this.jitoClient = jitoClient;
+    this.stats = stats;
     this.thresholdPct = config.stablecoinDepegThresholdPct;
   }
 
@@ -64,14 +71,23 @@ export class StablecoinDepeg {
     });
     this.poll();
     this.pollInterval = setInterval(() => this.poll(), this.pollMs);
+    this.aliveInterval = setInterval(() => {
+      logger.info('StablecoinDepeg alive', {
+        polls: this.pollCount,
+        depegsDetected: this.depegsDetected,
+        thresholdPct: this.thresholdPct,
+      });
+    }, 30 * 60_000);
   }
 
   stop(): void {
     if (this.pollInterval) clearInterval(this.pollInterval);
+    if (this.aliveInterval) clearInterval(this.aliveInterval);
     logger.info('StablecoinDepeg stopped');
   }
 
   private async poll(): Promise<void> {
+    this.pollCount++;
     const mints = STABLECOINS.map((s) => s.mint).join(',');
     let prices: Record<string, number>;
 
@@ -96,6 +112,7 @@ export class StablecoinDepeg {
       const coolUntil = this.cooldowns.get(stable.mint) ?? 0;
       if (Date.now() < coolUntil) continue;
 
+      this.depegsDetected++;
       logger.info('Stablecoin depeg detected', {
         symbol: stable.symbol,
         price: price.toFixed(6),
@@ -161,14 +178,18 @@ export class StablecoinDepeg {
         sol: amountSol.toFixed(3),
         price: currentPrice.toFixed(6),
       });
-      return { opportunityId: id, success: true, dryRun: true };
+      const result: ExecutionResult = { opportunityId: id, success: true, dryRun: true };
+      this.stats.record(result, StrategyType.STABLECOIN_DEPEG);
+      return result;
     }
 
     logger.info('Executing stablecoin depeg trade', {
       symbol: stable.symbol,
       side: isBuy ? 'buy' : 'sell',
     });
-    return { opportunityId: id, success: true, dryRun: false };
+    const result: ExecutionResult = { opportunityId: id, success: true, dryRun: false };
+    this.stats.record(result, StrategyType.STABLECOIN_DEPEG);
+    return result;
   }
 
   private async fetchSolPrice(): Promise<number | null> {

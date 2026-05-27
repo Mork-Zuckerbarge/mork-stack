@@ -67,6 +67,10 @@ export class StatsTracker {
         [StrategyType.ARBITRAGE]: emptyStrategyStats(),
         [StrategyType.AMM_IMBALANCE]: emptyStrategyStats(),
         [StrategyType.MOMENTUM]: emptyStrategyStats(),
+        [StrategyType.TRIANGULAR_ARB]: emptyStrategyStats(),
+        [StrategyType.LIQUIDATION_ARB]: emptyStrategyStats(),
+        [StrategyType.DRIFT_FUNDING]: emptyStrategyStats(),
+        [StrategyType.STABLECOIN_DEPEG]: emptyStrategyStats(),
       },
       recentTrades: [],
     };

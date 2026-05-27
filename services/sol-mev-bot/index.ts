@@ -227,19 +227,19 @@ async function main(): Promise<void> {
   }
 
   if (config.enableLiquidationArb) {
-    const liqArb = new LiquidationArb(config, connection, wallet, feeSimulator, jitoClient, helius);
+    const liqArb = new LiquidationArb(config, connection, wallet, feeSimulator, jitoClient, helius, stats);
     liqArb.start();
     stoppables.push({ name: 'LiquidationArb', stop: () => liqArb.stop() });
   }
 
   if (config.enableDriftFunding) {
-    const driftArb = new DriftFundingArb(config, connection, wallet, feeSimulator, jitoClient);
+    const driftArb = new DriftFundingArb(config, connection, wallet, feeSimulator, jitoClient, stats);
     driftArb.start();
     stoppables.push({ name: 'DriftFundingArb', stop: () => driftArb.stop() });
   }
 
   if (config.enableStablecoinDepeg) {
-    const depeg = new StablecoinDepeg(config, connection, wallet, feeSimulator, jitoClient);
+    const depeg = new StablecoinDepeg(config, connection, wallet, feeSimulator, jitoClient, stats);
     depeg.start();
     stoppables.push({ name: 'StablecoinDepeg', stop: () => depeg.stop() });
   }
@@ -263,11 +263,15 @@ async function main(): Promise<void> {
       uptime: Math.floor(process.uptime() / 60) + 'm',
       totalTrades: session.totalTrades,
       dryRunTrades: session.dryRunTrades,
-      strategyEnabled: {
-        arb: config.enableArb,
-        ammImbalance: config.enableAmmImbalance,
-        momentum: config.enableMomentum,
-      },
+      enabled: [
+        config.enableArb && 'arb',
+        config.enableAmmImbalance && 'ammImbalance',
+        config.enableMomentum && 'momentum',
+        config.enableTriangularArb && 'triangularArb',
+        config.enableLiquidationArb && 'liquidationArb',
+        config.enableDriftFunding && 'driftFunding',
+        config.enableStablecoinDepeg && 'stablecoinDepeg',
+      ].filter(Boolean),
       dryRun: config.dryRun,
     });
   }, 60_000);
