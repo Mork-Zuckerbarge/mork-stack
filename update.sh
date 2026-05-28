@@ -35,6 +35,11 @@ if [[ -z "$current_branch" || "$current_branch" == "HEAD" ]]; then
   err "Unable to determine current branch."
 fi
 
+target_branch="${1:-$current_branch}"
+if [[ -z "$target_branch" || "$target_branch" == "HEAD" ]]; then
+  err "Invalid update target branch: '$target_branch'"
+fi
+
 if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
   err "Local changes detected. Commit/stash them before running update.sh so the preview diff is accurate."
 fi
@@ -45,40 +50,47 @@ if ! git -C "$ROOT_DIR" fetch --prune origin; then
   exit 1
 fi
 
-upstream="origin/$current_branch"
+upstream="origin/$target_branch"
 if ! git -C "$ROOT_DIR" rev-parse --verify --quiet "$upstream" >/dev/null; then
-  err "No upstream branch found at $upstream"
+  err "No remote branch found at $upstream"
 fi
 
 read -r local_only remote_only < <(git -C "$ROOT_DIR" rev-list --left-right --count HEAD..."$upstream")
 merge_base="$(git -C "$ROOT_DIR" merge-base HEAD "$upstream")"
 
-log "Branch status for $current_branch vs $upstream"
+log "Branch status"
+printf "Current branch     : %s\n" "$current_branch"
+printf "Update target      : %s\n" "$upstream"
 printf "Local-only commits : %s\n" "$local_only"
 printf "Remote-only commits: %s\n" "$remote_only"
+if [[ "$current_branch" != "$target_branch" ]]; then
+  warn "You are on '$current_branch' but updating against '$upstream'."
+  warn "This updates/rebases the current branch; it does not switch branches."
+fi
 
 if [[ "$remote_only" -eq 0 ]]; then
   log "No incoming commits from $upstream"
   if [[ "$local_only" -gt 0 ]]; then
-    warn "Your branch has local commits that are not on $upstream. Nothing to pull."
+    warn "Your current branch has local commits that are not on $upstream. Nothing to pull."
+    warn "If you meant to update local main, run: git switch main && ./update.sh main"
   fi
   start_stack_if_available
   exit 0
 fi
 
-log "Incoming commits for $current_branch"
+log "Incoming commits from $upstream"
 git -C "$ROOT_DIR" log --oneline --decorate HEAD.."$upstream" || true
 
 log "Full incoming patch ($merge_base..$upstream)"
 git -C "$ROOT_DIR" diff --patch "$merge_base".."$upstream" --
 
 if [[ "$local_only" -eq 0 ]]; then
-  printf "\nApply these changes with git pull --ff-only? [y/N] "
+  printf "\nApply these changes with a fast-forward update? [y/N] "
   read -r answer
   case "$answer" in
     y|Y|yes|YES)
       log "Fast-forwarding $current_branch from $upstream"
-      if ! git -C "$ROOT_DIR" pull --ff-only origin "$current_branch"; then
+      if ! git -C "$ROOT_DIR" merge --ff-only "$upstream"; then
         print_auth_help
         exit 1
       fi
@@ -105,6 +117,7 @@ else
     *)
       warn "Update cancelled because the branch diverged."
       warn "Options: run 'git rebase $upstream', run 'git merge --no-ff $upstream', or inspect with 'git log --oneline --left-right HEAD...$upstream'."
+      warn "If you meant to update local main instead, run: git switch main && ./update.sh main"
       exit 1
       ;;
   esac
