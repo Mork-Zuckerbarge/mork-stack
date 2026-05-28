@@ -27,3 +27,10 @@ services/sherpa/encrypted_credentials.bin
 services/sherpa/encrypted_characters.bin
 services/sherpa/feed_config.json
 services/sherpa/reply_state.json
+# runtime/generated artifacts
+mork-app/data/
+mork-app/public/generated/
+mork-app/public/style-pack/
+services/sherpa/encrypted_feed_config.bin
+services/sherpa/encrypted_knowledge.bin
+services/sherpa/knowledge_config.json
