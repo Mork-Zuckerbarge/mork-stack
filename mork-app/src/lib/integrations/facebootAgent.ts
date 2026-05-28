@@ -7,6 +7,54 @@ export class FacebootAgentError extends Error {
   }
 }
 
+
+const DEFAULT_AGENT_BANNED_PHRASES = [
+  "nanu nanu",
+  "na-nu",
+  "shazbot",
+  "gleeb",
+  "gleek",
+  "ork",
+  "mork and mindy",
+];
+const AGENT_BANNED_PHRASES_STORAGE_KEY = "agent.banned-phrases.v1";
+
+function splitLinesOrCsv(value: string): string[] {
+  return value
+    .split(/[\n,]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function configuredBannedPhrases(): string[] {
+  if (typeof window !== "undefined") {
+    const saved = window.localStorage.getItem(AGENT_BANNED_PHRASES_STORAGE_KEY);
+    if (saved) return splitLinesOrCsv(saved);
+  }
+
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.NEXT_PUBLIC_AGENT_BANNED_PHRASES;
+  return env ? splitLinesOrCsv(env) : DEFAULT_AGENT_BANNED_PHRASES;
+}
+
+function phraseToPattern(phrase: string): string {
+  return phrase
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\\ /g, "\\s+")
+    .replace(/\\-/g, "\\s*-\\s*");
+}
+
+export function sanitizeBannedPhrases(text: string, phrases = configuredBannedPhrases()): string {
+  const parts = phrases.map(phraseToPattern).filter(Boolean);
+  const banned = parts.length ? new RegExp(`\\b(?:${parts.join("|")})\\b`, "gi") : null;
+  return (banned ? text.replace(banned, " ") : text)
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 type FacebootAgentBridge = {
   login?: (email: string, password: string) => Promise<string>;
   post?: (token: string, text: string) => Promise<unknown>;
@@ -122,6 +170,10 @@ export async function loginFacebootAgent(email: string, password: string): Promi
 }
 
 export async function postToFaceboot(text: string, token?: string): Promise<unknown> {
+  const cleaned = sanitizeBannedPhrases(text);
+  if (!cleaned) {
+    throw new FacebootAgentError("Faceboot post is empty after banned phrase sanitization.", "EMPTY_AFTER_SANITIZE");
+  }
   const resolvedToken = token ?? getSavedFacebootToken();
   if (!resolvedToken) {
     throw new FacebootAgentError("No active Faceboot account logged in.", "NO_TOKEN");
@@ -132,7 +184,7 @@ export async function postToFaceboot(text: string, token?: string): Promise<unkn
     if (contract) {
       return await requestViaAgentHttp(contract.method, contract.url, {
         [contract.tokenKey]: resolvedToken,
-        [contract.textKey]: text,
+        [contract.textKey]: cleaned,
       });
     }
 
@@ -141,7 +193,7 @@ export async function postToFaceboot(text: string, token?: string): Promise<unkn
       throw new FacebootAgentError("Faceboot agent post API is unavailable.", "POST_NOT_SUPPORTED");
     }
 
-    return await bridge.post(resolvedToken, text);
+    return await bridge.post(resolvedToken, cleaned);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Faceboot post failed.";
     if (/invalid agent token/i.test(message)) {
@@ -154,6 +206,10 @@ export async function postToFaceboot(text: string, token?: string): Promise<unkn
 }
 
 export function postToFacebootViaMessage(text: string, token?: string) {
+  const cleaned = sanitizeBannedPhrases(text);
+  if (!cleaned) {
+    throw new FacebootAgentError("Faceboot post is empty after banned phrase sanitization.", "EMPTY_AFTER_SANITIZE");
+  }
   if (typeof window === "undefined") {
     throw new FacebootAgentError("Faceboot postMessage publishing is only available in browser.", "NOT_IN_BROWSER");
   }
@@ -167,13 +223,17 @@ export function postToFacebootViaMessage(text: string, token?: string) {
     {
       type: "faceboot:post",
       token: resolvedToken,
-      text,
+      text: cleaned,
     },
     window.location.origin,
   );
 }
 
 export async function commentOnFaceboot(postId: string, text: string, token?: string): Promise<unknown> {
+  const cleaned = sanitizeBannedPhrases(text);
+  if (!cleaned) {
+    throw new FacebootAgentError("Faceboot comment is empty after banned phrase sanitization.", "EMPTY_AFTER_SANITIZE");
+  }
   const resolvedToken = token ?? getSavedFacebootToken();
   if (!resolvedToken) {
     throw new FacebootAgentError("No active Faceboot account logged in.", "NO_TOKEN");
@@ -185,7 +245,7 @@ export async function commentOnFaceboot(postId: string, text: string, token?: st
       return await requestViaAgentHttp(contract.method, contract.url, {
         [contract.tokenKey]: resolvedToken,
         [contract.postIdKey]: postId,
-        [contract.textKey]: text,
+        [contract.textKey]: cleaned,
       });
     }
 
@@ -197,7 +257,7 @@ export async function commentOnFaceboot(postId: string, text: string, token?: st
       );
     }
 
-    return await bridge.comment(resolvedToken, postId, text);
+    return await bridge.comment(resolvedToken, postId, cleaned);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Faceboot comment failed.";
     if (/invalid agent token/i.test(message)) {
