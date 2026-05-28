@@ -79,7 +79,7 @@ async function quoteSellSol(mint: string, rawAmount: string): Promise<number | n
   return Number.isFinite(lamports) && lamports > 0 ? lamports / 1e9 : null;
 }
 
-type CostBasis = { sol: number; ts: string };
+type CostBasis = { sol: number; ts: string; source?: string };
 
 async function getCostBasis(mint: string): Promise<CostBasis | null> {
   const fact = await prisma.memoryFact.findUnique({ where: { key: `${COST_BASIS_KEY_PREFIX}${mint}` } }).catch(() => null);
@@ -87,15 +87,28 @@ async function getCostBasis(mint: string): Promise<CostBasis | null> {
   try { return JSON.parse(fact.value) as CostBasis; } catch { return null; }
 }
 
-async function accumulateCostBasis(mint: string, addedSol: number): Promise<void> {
-  const existing = await getCostBasis(mint);
-  const totalSol = (existing?.sol ?? 0) + addedSol;
-  const value = JSON.stringify({ sol: totalSol, ts: new Date().toISOString() });
+async function setCostBasis(mint: string, sol: number, source: string): Promise<void> {
+  if (!Number.isFinite(sol) || sol <= 0) return;
+  const value = JSON.stringify({ sol, ts: new Date().toISOString(), source });
   await prisma.memoryFact.upsert({
     where: { key: `${COST_BASIS_KEY_PREFIX}${mint}` },
     create: { key: `${COST_BASIS_KEY_PREFIX}${mint}`, value, source: "agent", weight: 8 },
     update: { value },
   }).catch(() => {});
+}
+
+async function accumulateCostBasis(mint: string, addedSol: number, source = "planner_trade"): Promise<void> {
+  if (!Number.isFinite(addedSol) || addedSol <= 0) return;
+  const existing = await getCostBasis(mint);
+  const totalSol = (existing?.sol ?? 0) + addedSol;
+  await setCostBasis(mint, totalSol, source);
+}
+
+async function establishCostBasisIfMissing(mint: string, currentSolValue: number, source = "planner_wallet_snapshot"): Promise<CostBasis> {
+  const existing = await getCostBasis(mint);
+  if (existing && Number.isFinite(existing.sol) && existing.sol > 0) return existing;
+  await setCostBasis(mint, currentSolValue, source);
+  return { sol: currentSolValue, ts: new Date().toISOString(), source };
 }
 
 async function clearCostBasis(mint: string): Promise<void> {
@@ -156,20 +169,25 @@ async function pickBestTradableMint(allowlist: string[]): Promise<string | null>
 }
 
 
+function policyStatsArePositive(policy: Record<string, unknown> | null | undefined, now = Date.now()): boolean {
+  const blacklistTs = Number(policy?.tempBlacklistUntilMs ?? 0);
+  if (blacklistTs > now) return false;
+  const stats = (policy?.stats as Record<string, unknown> | undefined) ?? {};
+  const score = Number(stats.score ?? 0);
+  const ok = Number(stats.ok ?? 0);
+  const fail = Number(stats.fail ?? 0);
+  return Number.isFinite(score) && score > 0 && ok >= fail;
+}
+
 async function hasPositivePolicySignal(allowlist: string[]): Promise<boolean> {
   const now = Date.now();
   const policies = await prisma.arbPolicy.findMany({ where: { mint: { in: allowlist } } });
-  for (const row of policies) {
-    const policy = row.policy as Record<string, unknown>;
-    const blacklistTs = Number(policy?.tempBlacklistUntilMs ?? 0);
-    if (blacklistTs > now) continue;
-    const stats = (policy?.stats as Record<string, unknown> | undefined) ?? {};
-    const score = Number(stats.score ?? 0);
-    const ok = Number(stats.ok ?? 0);
-    const fail = Number(stats.fail ?? 0);
-    if (Number.isFinite(score) && score > 0 && ok >= fail) return true;
-  }
-  return false;
+  return policies.some((row) => policyStatsArePositive(row.policy as Record<string, unknown>, now));
+}
+
+async function hasPositivePolicySignalForMint(mint: string): Promise<boolean> {
+  const row = await prisma.arbPolicy.findUnique({ where: { mint } }).catch(() => null);
+  return policyStatsArePositive(row?.policy as Record<string, unknown> | undefined);
 }
 
 async function getLastPlannerTradeAtMs(): Promise<number | null> {
@@ -370,14 +388,16 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
   const walletSolBalance = walletSolMatchEarly ? Number(walletSolMatchEarly[1]) : null;
   const walletHasSOL = Number.isFinite(walletSolBalance) && (walletSolBalance ?? 0) > 0.01;
 
-  // ── SELL PHASE ────────────────────────────────────────────────────────────
+  // ── HOLDING BASIS SNAPSHOT ────────────────────────────────────────────────
   // Token holdings are cached for WALLET_TOKENS_CACHE_MS (default 5 min) to avoid
   // hitting the Solana RPC on every tick and triggering 429s.
   const kp = getPlannerKeypair();
-  // allHeldTokens = every token with nonzero balance (used for sell phase).
+  // allHeldTokens = every token with nonzero balance (used to establish basis).
   // heldTokens    = allowlist-filtered subset (used for rotate/buy phase).
   let allHeldTokens: TokenHolding[] = [];
   let heldTokens: TokenHolding[] = [];
+  const holdingSolValues = new Map<string, number>();
+  const holdingCostBasis = new Map<string, CostBasis>();
   if (kp) {
     const mintSet = new Set(allowlist);
     const cacheEntry = _g.__walletTokensCache;
@@ -387,59 +407,21 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
       heldTokens = allHeldTokens.filter((h) => mintSet.has(h.mint));
     } else {
       const conn = new Connection(RPC_URL, "processed");
-      // Fetch all token accounts — sell phase needs to see every holding, not just allowlisted.
+      // Fetch all token accounts — basis tracking needs every holding, not just allowlisted.
       allHeldTokens = await getHeldTokens(conn, kp.publicKey);
       _g.__walletTokensCache = { tokens: allHeldTokens, ts: Date.now() };
       heldTokens = allHeldTokens.filter((h) => mintSet.has(h.mint));
     }
 
-    if (allHeldTokens.length > 0) {
-      const now = Date.now();
-      const policies = await prisma.arbPolicy.findMany({ where: { mint: { in: allHeldTokens.map((h) => h.mint) } } });
-      const blacklistedMints = new Set(
-        policies.filter((r) => Number((r.policy as Record<string, unknown>)?.tempBlacklistUntilMs ?? 0) > now).map((r) => r.mint)
-      );
-
-      for (const h of allHeldTokens) {
-        const sellSol = await quoteSellSol(h.mint, h.rawAmount);
-        if (sellSol === null || sellSol < MIN_SELL_SOL) continue;
-
-        const basis = await getCostBasis(h.mint);
-        const isBlacklisted = blacklistedMints.has(h.mint);
-        // Treat missing cost basis as zero-cost — if we have no record of what we paid,
-        // any nonzero sell value clears the SELL_PROFIT_THRESHOLD.
-        const basisSol = basis?.sol ?? 0;
-        const profitable = sellSol >= basisSol * (1 + SELL_PROFIT_THRESHOLD);
-
-        if (!profitable && !isBlacklisted) continue;
-
-        const sellReason = isBlacklisted ? "blacklisted_exit" : "take_profit";
-        const sellReq = new Request("http://planner.internal/api/trade/swap", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputMint: h.mint, outputMint: SOL_MINT, amountIn: h.uiAmount, slippageBps: 75, agentInitiated: true }),
-        });
-        const sellResp = await executeSwapRoute(sellReq);
-        const sellJson = (await sellResp.json().catch(() => ({}))) as { ok?: boolean; signature?: string; error?: string };
-
-        if (sellJson.ok) {
-          await clearCostBasis(h.mint);
-          await prisma.memory.create({
-            data: {
-              type: "event",
-              content: `planner_sell reason=${sellReason} mint=${h.mint} uiAmount=${h.uiAmount} estSol=${sellSol.toFixed(6)} basisSol=${basisSol.toFixed(6)} sig=${sellJson.signature}`,
-              entities: ["arb:planner_sell", `wallet:${kp.publicKey.toBase58()}`],
-              importance: 0.7,
-              source: "arb",
-            },
-          }).catch(() => {});
-          return NextResponse.json({ ok: true, status: "executed", mode: "planner_sell", runId, mint: h.mint, uiAmount: h.uiAmount, estSol: sellSol, sellReason, signature: sellJson.signature });
-        }
-        console.warn(`[planner] sell failed for ${h.mint}: ${sellJson.error}`);
-      }
+    for (const h of allHeldTokens) {
+      const sellSol = await quoteSellSol(h.mint, h.rawAmount);
+      if (sellSol === null || sellSol < MIN_SELL_SOL) continue;
+      holdingSolValues.set(h.mint, sellSol);
+      const basis = await establishCostBasisIfMissing(h.mint, sellSol);
+      holdingCostBasis.set(h.mint, basis);
     }
   }
-  // ── END SELL PHASE ────────────────────────────────────────────────────────
+  // ── END HOLDING BASIS SNAPSHOT ────────────────────────────────────────────
 
   // Early exit: no SOL to spend and no tokens at all — nothing actionable this tick.
   if (!walletHasSOL && allHeldTokens.length === 0) {
@@ -504,6 +486,7 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
     logSkip("no_tradable_mint");
     return NextResponse.json({ ok: true, status: "skipped", reason: "no_tradable_mint", runId });
   }
+  const targetHasPositiveSignal = await hasPositivePolicySignalForMint(outputMint);
 
   let amountSol: number;
   try { amountSol = await estimateSolForUsd(decision.usd); }
@@ -526,21 +509,36 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
   }
 
   // ── ROTATE: use a held token as input instead of SOL ─────────────────────
-  // If we hold an allowlisted token that isn't the buy target, swap it directly
-  // into outputMint rather than spending more SOL. This rotates stale positions.
+  // Selling a held token is only allowed as part of a rotation when the exit is
+  // above recorded cost basis and the target mint has a positive policy signal.
+  // Missing basis is established from the current quote earlier in the tick, so
+  // unknown positions cannot be treated as zero-cost profit.
   let swapMode = "sol_buy";
   let rotateFrom: TokenHolding | null = null;
   let rotateSolEstimate: number | null = null;
+  let rotateBasisSol: number | null = null;
 
-  if (kp && heldTokens.length > 0) {
-    const candidate = heldTokens.find((h) => h.mint !== outputMint);
+  if (kp && heldTokens.length > 0 && targetHasPositiveSignal) {
+    const candidates = heldTokens
+      .filter((h) => h.mint !== outputMint)
+      .map((h) => {
+        const estSol = holdingSolValues.get(h.mint);
+        const basis = holdingCostBasis.get(h.mint);
+        if (!Number.isFinite(estSol) || !basis || !Number.isFinite(basis.sol) || basis.sol <= 0) return null;
+        const minProfitableSol = basis.sol * (1 + SELL_PROFIT_THRESHOLD);
+        return estSol !== undefined && estSol >= Math.max(0.001, minProfitableSol)
+          ? { holding: h, estSol, basisSol: basis.sol }
+          : null;
+      })
+      .filter((item): item is { holding: TokenHolding; estSol: number; basisSol: number } => item !== null)
+      .sort((a, b) => (b.estSol - b.basisSol) - (a.estSol - a.basisSol));
+
+    const candidate = candidates[0];
     if (candidate) {
-      const estSol = await quoteSellSol(candidate.mint, candidate.rawAmount);
-      if (estSol !== null && estSol >= 0.001) {
-        rotateFrom = candidate;
-        rotateSolEstimate = estSol;
-        swapMode = "rotate";
-      }
+      rotateFrom = candidate.holding;
+      rotateSolEstimate = candidate.estSol;
+      rotateBasisSol = candidate.basisSol;
+      swapMode = "rotate";
     }
   }
   // ── END ROTATE ────────────────────────────────────────────────────────────
@@ -561,9 +559,9 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
     return NextResponse.json({ ok: false, status: "error", reason: "swap_failed", runId, decisionMeta: { reasonCode: "swap_failed" }, error: swapJson.error ?? `planner swap failed (${swapResponse.status})` }, { status: swapResponse.status || 500 });
   }
 
-  // Record cost basis — accumulate across multiple buys of the same mint.
+  // Record cost basis for every planner trade — accumulate across multiple buys of the same mint.
   const solCostForBasis = rotateFrom ? (rotateSolEstimate ?? amountSol) : amountSol;
-  await accumulateCostBasis(outputMint, solCostForBasis);
+  await accumulateCostBasis(outputMint, solCostForBasis, rotateFrom ? "planner_profitable_rotation" : "planner_buy");
   // If rotating, the old position is fully consumed — clear its basis.
   if (rotateFrom) await clearCostBasis(rotateFrom.mint);
 
@@ -573,5 +571,5 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
     update: { value: new Date().toISOString(), source: "agent", weight: 8 },
   });
 
-  return NextResponse.json({ ok: true, status: "executed", mode: swapMode, runId, usd: decision.usd, amountSol: rotateFrom ? rotateSolEstimate : amountSol, outputMint, rotateFromMint: rotateFrom?.mint ?? null, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, cappedToMaxSol: !rotateFrom && amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: strategySnapshot.exitTrailingStopPct, maxHoldMinutes: strategySnapshot.maxHoldMinutes, hardStopLossPct: strategySnapshot.hardStopLossPct } } });
+  return NextResponse.json({ ok: true, status: "executed", mode: swapMode, runId, usd: decision.usd, amountSol: rotateFrom ? rotateSolEstimate : amountSol, outputMint, rotateFromMint: rotateFrom?.mint ?? null, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, targetHasPositiveSignal, rotateBasisSol, cappedToMaxSol: !rotateFrom && amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: strategySnapshot.exitTrailingStopPct, maxHoldMinutes: strategySnapshot.maxHoldMinutes, hardStopLossPct: strategySnapshot.hardStopLossPct } } });
 }
