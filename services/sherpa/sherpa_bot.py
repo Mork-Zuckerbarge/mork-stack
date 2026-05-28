@@ -345,6 +345,47 @@ def _wrap_280(s: str, max_len: int = X_INTERNAL_DRAFT_MAX_CHARS) -> str:
     s = re.sub(r"\n{3,}", "\n\n", s)
     return s if len(s) <= max_len else (s[: max_len - 1].rstrip() + "…")
 
+DEFAULT_AGENT_PROJECT_NAME = os.getenv("SHERPA_AGENT_PROJECT_NAME", "$BBQ")
+DEFAULT_AGENT_BANNED_PHRASES = [
+    "nanu nanu",
+    "na-nu",
+    "shazbot",
+    "gleeb",
+    "gleek",
+    "ork",
+    "mork and mindy",
+]
+
+def _split_lines_or_csv(value: str) -> list[str]:
+    return [part.strip() for part in re.split(r"[\n,]+", value or "") if part.strip()]
+
+def _phrase_to_pattern(phrase: str) -> str:
+    escaped = re.escape((phrase or "").strip())
+    escaped = escaped.replace(r"\ ", r"\s+")
+    escaped = escaped.replace(r"\-", r"\s*-\s*")
+    return escaped
+
+def _compile_banned_phrase_re(phrases: list[str] | tuple[str, ...] | None):
+    parts = [_phrase_to_pattern(phrase) for phrase in (phrases or []) if str(phrase or "").strip()]
+    if not parts:
+        return None
+    return re.compile(r"\b(?:" + "|".join(parts) + r")\b", re.IGNORECASE)
+
+def _default_banned_phrases() -> list[str]:
+    configured = _split_lines_or_csv(os.getenv("SHERPA_BANNED_PHRASES", ""))
+    return configured or list(DEFAULT_AGENT_BANNED_PHRASES)
+
+def _sanitize_banned_phrases(text: str, phrases: list[str] | tuple[str, ...] | None = None) -> str:
+    """Remove configured banned phrases and normalize whitespace at final outbound boundaries."""
+    cleaned = text or ""
+    banned_re = _compile_banned_phrase_re(phrases if phrases is not None else _default_banned_phrases())
+    if banned_re:
+        cleaned = banned_re.sub(" ", cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r" *\n *", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
 def morkcore_edge_line() -> str:
     """
     OPTIONAL helper. Only used if you explicitly want to pull raw edge lines.
@@ -500,6 +541,17 @@ CREDENTIALS_FILE = "encrypted_credentials.bin"
 CROSS_SERVICE_ENV_PATH = Path(__file__).resolve().parents[2] / "mork-app" / ".env.local"
 CHARACTERS_FILE = "encrypted_characters.bin"
 FEED_CONFIG_FILE = "encrypted_feed_config.bin"  # New file for feed selection
+KNOWLEDGE_FILE = "encrypted_knowledge.bin"
+KNOWLEDGE_JSON_FILE = "knowledge_config.json"
+MORK_PROJECT_KNOWLEDGE_SOURCES = [
+    "https://x.com/zuckerbarge/status/1831855846747468191?s=20",
+    "https://x.com/zuckerbarge/status/2058594772684562931?s=20",
+    "https://linktr.ee/zuckerbarge",
+]
+
+def _default_project_knowledge_sources() -> list[str]:
+    configured = _split_lines_or_csv(os.getenv("SHERPA_DEFAULT_PROJECT_SOURCES", ""))
+    return configured or list(MORK_PROJECT_KNOWLEDGE_SOURCES)
 MAX_TWEETS_PER_MONTH = 500
 TWEET_INTERVAL_HOURS = 1.5
 FEED_TIMEOUT = 10  # seconds
@@ -767,6 +819,7 @@ class TwitterBot:
         self.credentials = {}
         self.characters = {}
         self.feed_config = {}
+        self.knowledge_config = {}
 
         # Scheduler state
         self.scheduler_running = False
@@ -823,6 +876,7 @@ class TwitterBot:
         print(f"[init] Characters: {sorted(list(self.characters.keys()))}")
 
         self.feed_config = self.load_feed_config()
+        self.knowledge_config = self.load_knowledge_config()
         # Keep legacy behavior: if Telegram credentials exist, default Telegram forwarding ON.
         if self.credentials.get("telegram_bot_token") and self.credentials.get("telegram_chat_id"):
             self.publish_targets["telegram"] = True
@@ -1400,11 +1454,11 @@ class TwitterBot:
 
                             obs = ""
                             try:
-                                obs = core_compose_payload({"kind": "reflection", "maxChars": 260}, timeout=10) or ""
+                                obs = core_compose_payload({"kind": "observation", "maxChars": 260}, timeout=10) or ""
                                 if not obs:
                                     obs = core_compose_payload({"kind": "arb", "maxChars": 260}, timeout=10) or ""
                                 if not obs:
-                                    obs = core_compose_payload({"kind": "observation", "maxChars": 260}, timeout=10) or ""
+                                    obs = core_compose_payload({"kind": "reflection", "maxChars": 260}, timeout=10) or ""
                             except Exception as e:
                                 print(f"⚠ core compose failed: {e}")
                                 obs = ""
@@ -1817,6 +1871,119 @@ class TwitterBot:
         except Exception as e:
             print(f"Error saving feed configuration: {e}")
             return False
+
+    def default_knowledge_config(self):
+        return {
+            "project_name": DEFAULT_AGENT_PROJECT_NAME,
+            "app_persona_guidelines": "code-first; never lie. if you dont know something, admit it.",
+            "telegram_persona_guidelines": "briefing; keep it simple, short, and funny. never lie",
+            "x_persona_guidelines": "poetic; you know everything. be polite.",
+            "faceboot_persona_guidelines": "meme-chaos; you are ecstatic about this project.",
+            "behavior_policy": (
+                "Do NOT act like the TV character from Mork & Mindy.\n"
+                "Never say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\n"
+                "Do not create false information. If you do not know something, say so plainly.\n"
+                "Max response characters example: 4500.\n"
+                "Allow URLs in replies: enabled/disabled by policy.\n"
+                "Allow quoting user messages: disabled."
+            ),
+            "project_sources": _default_project_knowledge_sources(),
+            "banned_phrases": _default_banned_phrases(),
+            "project_faq": "",
+            "bbq_faq": "",  # legacy key; migrated into project_faq on load
+            "updated_at": None,
+        }
+
+    def load_knowledge_config(self):
+        """Load project knowledge config from encrypted storage, with JSON fallback."""
+        defaults = self.default_knowledge_config()
+        try:
+            if os.path.exists(KNOWLEDGE_FILE):
+                with open(KNOWLEDGE_FILE, "rb") as f:
+                    blob = f.read()
+                cfg = self.encryption_manager.decrypt(blob) or {}
+                if isinstance(cfg, dict):
+                    defaults.update(cfg)
+                    if not defaults.get("project_faq") and defaults.get("bbq_faq"):
+                        defaults["project_faq"] = defaults.get("bbq_faq", "")
+                    defaults.setdefault("project_name", DEFAULT_AGENT_PROJECT_NAME)
+                    defaults.setdefault("banned_phrases", _default_banned_phrases())
+                    return defaults
+        except Exception as e:
+            print(f"Error loading encrypted knowledge config: {e}")
+
+        try:
+            if os.path.exists(KNOWLEDGE_JSON_FILE):
+                with open(KNOWLEDGE_JSON_FILE, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                if isinstance(cfg, dict):
+                    defaults.update(cfg)
+        except Exception as e:
+            print(f"Error loading knowledge configuration: {e}")
+
+        if not defaults.get("project_faq") and defaults.get("bbq_faq"):
+            defaults["project_faq"] = defaults.get("bbq_faq", "")
+        defaults.setdefault("project_name", DEFAULT_AGENT_PROJECT_NAME)
+        defaults.setdefault("banned_phrases", _default_banned_phrases())
+        return defaults
+
+    def _configured_banned_phrases(self):
+        cfg = getattr(self, "knowledge_config", {}) if isinstance(getattr(self, "knowledge_config", {}), dict) else {}
+        phrases = cfg.get("banned_phrases")
+        if isinstance(phrases, str):
+            phrases = _split_lines_or_csv(phrases)
+        if isinstance(phrases, (list, tuple)):
+            return [str(phrase).strip() for phrase in phrases if str(phrase).strip()]
+        return _default_banned_phrases()
+
+    def _sanitize_outbound_text(self, text: str, max_len: int | None = None) -> str:
+        cleaned = _sanitize_banned_phrases(text, self._configured_banned_phrases())
+        return _wrap_280(cleaned, max_len) if max_len else cleaned
+
+    def save_knowledge_config(
+        self,
+        project_name,
+        app_persona_guidelines,
+        telegram_persona_guidelines,
+        x_persona_guidelines,
+        faceboot_persona_guidelines,
+        behavior_policy,
+        project_sources,
+        banned_phrases,
+        project_faq,
+    ):
+        sources = [line.strip() for line in (project_sources or "").splitlines() if line.strip()]
+        banned = [line.strip() for line in (banned_phrases or "").splitlines() if line.strip()]
+        config = {
+            "project_name": (project_name or DEFAULT_AGENT_PROJECT_NAME).strip(),
+            "app_persona_guidelines": (app_persona_guidelines or "").strip(),
+            "telegram_persona_guidelines": (telegram_persona_guidelines or "").strip(),
+            "x_persona_guidelines": (x_persona_guidelines or "").strip(),
+            "faceboot_persona_guidelines": (faceboot_persona_guidelines or "").strip(),
+            "behavior_policy": (behavior_policy or "").strip(),
+            "project_sources": sources,
+            "banned_phrases": banned,
+            "project_faq": (project_faq or "").strip(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.knowledge_config = config
+
+        try:
+            encrypted = self.encryption_manager.encrypt(config)
+            if encrypted:
+                with open(KNOWLEDGE_FILE, "wb") as f:
+                    f.write(encrypted)
+                return "Project knowledge saved securely."
+        except Exception as e:
+            print(f"Error saving encrypted knowledge configuration: {e}")
+
+        try:
+            with open(KNOWLEDGE_JSON_FILE, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            return "Project knowledge saved to JSON fallback."
+        except Exception as e:
+            print(f"Error saving knowledge configuration: {e}")
+            return f"Failed to save project knowledge: {e}"
 
     def get_new_story(self, subject=None):
         """
@@ -2258,31 +2425,30 @@ class TwitterBot:
             print(f"⚠ Failed to ingest X post into app memory: {e}")
 
     def send_tweet(self, tweet_or_character, topic=None):
-        """
-        Send a tweet using the configured X client.
-        Supports both call styles:
-          - send_tweet(tweet_text)
-          - send_tweet(character_name, topic)  # generates text first
+        """Send sanitized text through enabled outbound targets.
+
+        Supports send_tweet(tweet_text) and the legacy send_tweet(character, topic) call style.
+        New UI paths should generate first, then call this with the final text.
         """
         try:
             if topic is None:
                 tweet_text = (tweet_or_character or "").strip()
             else:
-                tweet_text = self.generate_tweet(tweet_or_character, topic) or ""
-                tweet_text = tweet_text.strip()
+                tweet_text = (self.generate_tweet(tweet_or_character, topic) or "").strip()
 
-            if not tweet_text:
-                print("⚠ Empty tweet text; skipping send.")
+            cleaned = self._sanitize_outbound_text(tweet_text, 280)
+            if not cleaned:
+                print("⚠ Empty tweet text after sanitization; skipping send.")
                 return False
 
-            # Write to sherpa memory before attempting X, so Moltbook can pick up
-            # this content even if the X post fails.
+            # Write sanitized content to sherpa memory before attempting X, so Moltbook can pick it up
+            # without reintroducing banned phrases if X fails.
             try:
                 for app_base in _app_retry_bases(MORK_APP_FALLBACK_URL):
                     try:
                         r = requests.post(f"{app_base}/memory/ingest", json={
                             "type": "fact", "source": "sherpa",
-                            "content": tweet_text[:2000], "importance": 0.65,
+                            "content": cleaned[:2000], "importance": 0.65,
                             "entities": ["sherpa", "content"],
                         }, timeout=5)
                         if 200 <= r.status_code < 300:
@@ -2301,7 +2467,7 @@ class TwitterBot:
                 elif not self.check_rate_limit():
                     print("⚠ X rate-limit check blocked posting on X for this attempt.")
                 else:
-                    response = self.twitter_client.create_tweet(text=tweet_text)
+                    response = self.twitter_client.create_tweet(text=cleaned)
                     if not response or not response.data:
                         print("⚠ Tweet send returned no data.")
                     else:
@@ -2313,24 +2479,23 @@ class TwitterBot:
                             username = (self.credentials.get("twitter_username") or "").lstrip("@")
                             if username:
                                 tweet_url = f"https://x.com/{username}/status/{tweet_id}"
-                        self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
+                        self._ingest_successful_x_post_to_memory(cleaned, tweet_id=tweet_id, tweet_url=tweet_url)
                         print(f"✅ Tweet sent successfully: {tweet_id}")
 
             if self.publish_targets.get("telegram", False):
-                tg_ok = self.send_to_telegram(tweet_url or tweet_text)
+                tg_ok = self.send_to_telegram(tweet_url or cleaned)
                 posted_anywhere = posted_anywhere or tg_ok
             if self.publish_targets.get("reddit", False):
-                self.send_to_reddit(tweet_text, source_url=tweet_url)
+                self.send_to_reddit(cleaned, source_url=tweet_url)
                 posted_anywhere = True
             if self.publish_targets.get("facebook", False):
-                self.send_to_facebook(tweet_text, source_url=tweet_url)
+                self.send_to_facebook(cleaned, source_url=tweet_url)
                 posted_anywhere = True
             if self.publish_targets.get("instagram", False):
-                self.send_to_instagram(tweet_text)
+                self.send_to_instagram(cleaned)
                 posted_anywhere = True
             if self.publish_targets.get("faceboot", False):
-                self.send_to_faceboot(tweet_text)
-                posted_anywhere = True
+                posted_anywhere = self.send_to_faceboot(cleaned) or posted_anywhere
 
             return posted_anywhere
         except tweepy.TooManyRequests as e:
@@ -2366,9 +2531,13 @@ class TwitterBot:
             if not api_url:
                 print("⚠️ Faceboot skipped: set FACEBOOT_API_URL or faceboot_api_url credential.")
                 return False
+            cleaned = self._sanitize_outbound_text(text)
+            if not cleaned:
+                print("⚠️ Faceboot skipped: empty text after sanitization")
+                return False
             res = requests.post(
                 api_url,
-                json={"token": token, "text": text},
+                json={"token": token, "text": cleaned},
                 timeout=20,
             )
             print("📨 Faceboot status:", res.status_code, res.text[:220])
@@ -2590,9 +2759,19 @@ class TwitterBot:
             return None, None
 
     def send_tweet_with_media(self, tweet_text, media_path):
-        """Send a tweet with media attached"""
+        """Send a sanitized tweet with media attached."""
         try:
-            # Create Twitter API v1.1 instance for media upload
+            cleaned = self._sanitize_outbound_text(tweet_text, 280)
+            if not cleaned:
+                print("⚠ Empty media tweet text after sanitization; skipping send.")
+                return False
+            if not self.twitter_client:
+                print("❌ Twitter client not initialized.")
+                return False
+            if not self.check_rate_limit():
+                print("⚠ X rate-limit check blocked media tweet.")
+                return False
+
             auth = tweepy.OAuth1UserHandler(
                 self.credentials['twitter_api_key'],
                 self.credentials['twitter_api_secret'],
@@ -2600,16 +2779,12 @@ class TwitterBot:
                 self.credentials['twitter_access_token_secret']
             )
             api = tweepy.API(auth)
-            
-            # Upload media
             media = api.media_upload(filename=media_path)
-            
-            # Create tweet with media using v2 client
             response = self.twitter_client.create_tweet(
-                text=tweet_text,
+                text=cleaned,
                 media_ids=[media.media_id]
             )
-            
+
             if response.data:
                 self.last_successful_tweet = datetime.now()
                 tweet_id = response.data.get("id")
@@ -2618,16 +2793,17 @@ class TwitterBot:
                     username = (self.credentials.get("twitter_username") or "").lstrip("@")
                     if username:
                         tweet_url = f"https://x.com/{username}/status/{tweet_id}"
-                self._ingest_successful_x_post_to_memory(tweet_text, tweet_id=tweet_id, tweet_url=tweet_url)
+                self._ingest_successful_x_post_to_memory(cleaned, tweet_id=tweet_id, tweet_url=tweet_url)
                 print("\nTweet with media sent successfully")
                 print(f"Tweet ID: {response.data['id']}")
-                
-                # Update rate limit tracking
                 self.update_rate_limit()
                 return True
-            
+
             return False
-            
+
+        except tweepy.TooManyRequests as e:
+            self.handle_rate_limit_error(e)
+            return False
         except Exception as e:
             msg = str(e)
             api_body = ""
@@ -2644,7 +2820,7 @@ class TwitterBot:
             else:
                 print(f"Error sending tweet with media: {e}")
             return False
-            
+
     def send_to_telegram(self, tweet_url):
         bot_token = self.credentials.get("telegram_bot_token")
         chat_id = self.credentials.get("telegram_chat_id")
@@ -2702,12 +2878,16 @@ class TwitterBot:
                 print("⚠️ Reddit token missing in auth response.")
                 return
 
-            title = self._short_post_title(text)
+            cleaned = self._sanitize_outbound_text(text)
+            if not cleaned:
+                print("⚠️ Reddit skipped: empty text after sanitization")
+                return
+            title = self._short_post_title(cleaned)
             post_data = {"sr": subreddit, "title": title}
             if source_url:
                 post_data.update({"kind": "link", "url": source_url})
             else:
-                post_data.update({"kind": "self", "text": (text or "")[:40000]})
+                post_data.update({"kind": "self", "text": cleaned[:40000]})
 
             submit_res = requests.post(
                 "https://oauth.reddit.com/api/submit",
@@ -2725,7 +2905,11 @@ class TwitterBot:
         if not page_id or not page_token:
             return
 
-        payload = {"message": (text or "").strip()[:5000], "access_token": page_token}
+        cleaned = self._sanitize_outbound_text(text)
+        if not cleaned:
+            print("⚠️ Facebook skipped: empty text after sanitization")
+            return
+        payload = {"message": cleaned[:5000], "access_token": page_token}
         if source_url:
             payload["link"] = source_url
 
@@ -2746,11 +2930,15 @@ class TwitterBot:
             return
 
         try:
+            cleaned = self._sanitize_outbound_text(caption)
+            if not cleaned:
+                print("⚠️ Instagram skipped: empty caption after sanitization")
+                return
             create_res = requests.post(
                 f"https://graph.facebook.com/v22.0/{ig_user_id}/media",
                 data={
                     "image_url": image_url,
-                    "caption": (caption or "").strip()[:2200],
+                    "caption": cleaned[:2200],
                     "access_token": ig_token,
                 },
                 timeout=20,
@@ -3712,6 +3900,73 @@ class TwitterBot:
                 # Initialize feed checkboxes for default subject
                 feed_subject.value = "crypto"
                 update_feed_checkboxes("crypto")
+
+            with gr.Accordion("📚 Project Knowledge", open=False, elem_classes=["compact-section"]):
+                gr.Markdown("Configure persistent persona and project knowledge layers. Saved encrypted when possible.")
+                kc = self.knowledge_config or self.default_knowledge_config()
+                project_name = gr.Textbox(
+                    label="Project / Agent Name",
+                    value=kc.get("project_name", DEFAULT_AGENT_PROJECT_NAME),
+                    lines=1,
+                )
+                app_persona_guidelines = gr.Textbox(
+                    label="App Persona Guidelines",
+                    value=kc.get("app_persona_guidelines", ""),
+                    lines=2,
+                )
+                telegram_persona_guidelines = gr.Textbox(
+                    label="Telegram Persona Guidelines",
+                    value=kc.get("telegram_persona_guidelines", ""),
+                    lines=2,
+                )
+                x_persona_guidelines = gr.Textbox(
+                    label="X Persona Guidelines",
+                    value=kc.get("x_persona_guidelines", ""),
+                    lines=2,
+                )
+                faceboot_persona_guidelines = gr.Textbox(
+                    label="Faceboot Persona Guidelines",
+                    value=kc.get("faceboot_persona_guidelines", ""),
+                    lines=2,
+                )
+                behavior_policy = gr.Textbox(
+                    label="Behavior Policy (All Channels)",
+                    value=kc.get("behavior_policy", ""),
+                    lines=7,
+                )
+                project_sources = gr.Textbox(
+                    label="Project Knowledge Sources (one URL per line)",
+                    value="\n".join(kc.get("project_sources") or _default_project_knowledge_sources()),
+                    lines=4,
+                )
+                banned_phrases = gr.Textbox(
+                    label="Banned Phrases (one per line)",
+                    value="\n".join(kc.get("banned_phrases") or _default_banned_phrases()),
+                    lines=4,
+                )
+                project_faq = gr.Textbox(
+                    label="Canonical Facts / FAQ",
+                    value=kc.get("project_faq") or kc.get("bbq_faq", ""),
+                    lines=6,
+                )
+                with gr.Row():
+                    save_knowledge_btn = gr.Button("Save Project Knowledge", variant="primary")
+                    save_knowledge_status = gr.Textbox(label="Status", interactive=False)
+                save_knowledge_btn.click(
+                    self.save_knowledge_config,
+                    inputs=[
+                        project_name,
+                        app_persona_guidelines,
+                        telegram_persona_guidelines,
+                        x_persona_guidelines,
+                        faceboot_persona_guidelines,
+                        behavior_policy,
+                        project_sources,
+                        banned_phrases,
+                        project_faq,
+                    ],
+                    outputs=[save_knowledge_status],
+                )
 
             with gr.Accordion("🖼️ Meme Drop Zone", open=True, elem_classes=["compact-section"]):
                 gr.Markdown("Drag and drop memes here to upload into `services/sherpa/memes`.")
