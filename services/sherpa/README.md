@@ -90,6 +90,44 @@
 2. Create your character. (Or do it in the python file.)
 3. Click "Begin Automation" to launch autopilot.
 
+
+## Agent Configuration Model (Recommended)
+
+Sherpa is intended to be distributable: operators should be able to create their own agent personalities from the UI without forking code or creating another service. Configure behavior as layered instructions in this order:
+
+1. **Prime Directive** — the top-level purpose and safety boundary for the agent.
+2. **Behavior + Response Policy** — channel-neutral rules for truthfulness, banned phrases, formatting, and quoting.
+3. **App Persona** — the default voice for the app experience. Example default: `code-first`; `never lie. if you dont know something, admit it.`
+4. **Channel Personas** — per-channel tone adapters:
+   - **Telegram Persona:** `briefing`; `keep it simple, short, and funny. never lie`
+   - **X Persona:** `poetic`; `you know everything. be polite.`
+   - **Faceboot Persona:** `meme-chaos`; `you are ecstatic about this project.`
+5. **Project Knowledge Layer** — canonical project references, facts, and FAQs the agent can use when composing or replying.
+6. **Banned Phrase Layer** — configurable final outbound cleanup. Defaults protect this repo's Mork personality, but distributors can replace the list in the UI or with env vars.
+
+Recommended Behavior + Response Policy defaults for this repo:
+
+- Do **NOT** act like the TV character from Mork & Mindy.
+- Never say: `nanu nanu`, `na-nu`, `shazbot`, `gleeb`, `gleek`, `ork`.
+- Do not create false information.
+- If you do not know something, say so plainly.
+- Max response characters example: `4500`.
+- Allow URLs in replies: enabled/disabled by policy.
+- Allow quoting user messages: disabled.
+
+Distributors can override bundled defaults without editing code:
+
+- `SHERPA_AGENT_PROJECT_NAME` — default project/agent name shown in Sherpa.
+- `SHERPA_DEFAULT_PROJECT_SOURCES` — newline- or comma-separated project knowledge source URLs.
+- `SHERPA_BANNED_PHRASES` — newline- or comma-separated Sherpa outbound banned phrases.
+- `NEXT_PUBLIC_AGENT_BANNED_PHRASES` — newline- or comma-separated Moltbook/Faceboot adapter banned phrases for the Next.js app.
+
+Default `$BBQ` project knowledge sources for this repo:
+
+- Thread: https://x.com/zuckerbarge/status/1831855846747468191?s=20
+- Article tweet: https://x.com/zuckerbarge/status/2058594772684562931?s=20
+- Linktree: https://linktr.ee/zuckerbarge
+
 ## Important Notes
 - The bot posts every 1.5 hours
 - Maximum 500 tweets per month
