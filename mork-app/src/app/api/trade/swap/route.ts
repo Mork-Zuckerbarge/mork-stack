@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 import { Connection, Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
+import { APP_DEFAULTS, BBQ_TOKEN } from "@/lib/core/defaults";
 import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
 
 export const runtime = "nodejs";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
 const JUP_TIMEOUT_MS = getJupiterTimeoutMs();
-const RPC = process.env.SOLANA_RPC_URL ?? process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
+const RPC = process.env.SOLANA_RPC_URL || process.env.RPC_URL || APP_DEFAULTS.solanaRpcUrl;
 
 type SwapBody = {
   amountSol?: number;
@@ -29,6 +29,17 @@ type SocialExecutionGate = {
 };
 
 type JupiterTokenMeta = { decimals?: number };
+
+async function getSplBalanceUi(connection: Connection, owner: PublicKey, mint: string): Promise<number> {
+  const accounts = await connection.getParsedTokenAccountsByOwner(owner, { mint: new PublicKey(mint) });
+  return accounts.value.reduce((total, account) => {
+    const amount = Number(
+      (account.account.data as { parsed?: { info?: { tokenAmount?: { uiAmount?: number } } } }).parsed?.info
+        ?.tokenAmount?.uiAmount ?? 0,
+    );
+    return total + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
+}
 
 function parseSecretKey(raw: string): Uint8Array | null {
   try {
@@ -199,7 +210,7 @@ export async function POST(req: Request) {
 
     const amountIn = Number(body.amountIn ?? body.amountSol ?? 0);
     const slippageBps = Math.min(Math.max(Number(body.slippageBps ?? 50), 10), 300);
-    const maxSol = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
+    const maxSol = Number(process.env.MORK_AGENT_SWAP_MAX_SOL || 0.25);
     const inputMint = body.inputMint?.trim() || SOL_MINT;
     const outputMint = body.outputMint?.trim();
     if (!outputMint) {
@@ -226,6 +237,30 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    if (inputMint === BBQ_TOKEN.mint) {
+      const bbqBalance = await getSplBalanceUi(connection, signer.publicKey, BBQ_TOKEN.mint);
+      const bbqSurplus = Math.max(0, bbqBalance - BBQ_TOKEN.requiredBalance);
+      const maxBbqSellAmount = bbqSurplus * BBQ_TOKEN.maxSellSurplusPct;
+      if (bbqBalance - amountIn < BBQ_TOKEN.requiredBalance) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `BBQ sale blocked: this wallet must retain at least ${BBQ_TOKEN.requiredBalance} BBQ after the swap.`,
+          },
+          { status: 400 },
+        );
+      }
+      if (amountIn > maxBbqSellAmount) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `BBQ sale blocked: use DCA tranches of ${maxBbqSellAmount.toFixed(6)} BBQ or less to reduce price impact.`,
+          },
+          { status: 400 },
+        );
+      }
+    }
+
     const inUnits = Math.floor(amountIn * 10 ** inDecimals);
 
     let quoteResponse: Record<string, unknown> | null = null;

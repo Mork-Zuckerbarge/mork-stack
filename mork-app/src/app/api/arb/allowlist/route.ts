@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { BBQ_TOKEN } from "@/lib/core/defaults";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -123,12 +124,12 @@ export async function GET(req: Request) {
   const mode = (searchParams.get("mode") ?? "top1000").toLowerCase();
 
   if (mode === "all") {
-    return NextResponse.json({ ok: true, count: 1, mints: ["ALL"] });
+    return NextResponse.json({ ok: true, count: 2, mints: ["ALL", BBQ_TOKEN.mint] });
   }
 
   const limit = 1000;
   const whitelistMints = readWhitelistMints(limit);
-  const mints = whitelistMints.length > 0 ? whitelistMints : await fetchTopTokenMints(limit);
+  const mints = normalizeMintList([...(whitelistMints.length > 0 ? whitelistMints : await fetchTopTokenMints(limit)), BBQ_TOKEN.mint], limit + 1);
 
   return NextResponse.json({
     ok: true,

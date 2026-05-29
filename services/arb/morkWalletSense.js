@@ -2,6 +2,7 @@ const { PublicKey } = require("@solana/web3.js");
 const BBQ_MINT = new PublicKey(
   "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn"
 );
+const REQUIRED_BBQ_BALANCE = 1000;
 
 function uiAmountFromParsedTokenAccount(parsed) {
   try {
@@ -67,8 +68,9 @@ async function listTokenAccounts(connection, owner) {
 async function enforceBbqGateOrExit(
   connection,
   ownerPubkey,
-  { minBbq = 1000, knownBbqBalance = null } = {}
+  { knownBbqBalance = null } = {}
 ) {
+  const minBbq = REQUIRED_BBQ_BALANCE;
   const bbqBal =
     typeof knownBbqBalance === "number" && Number.isFinite(knownBbqBalance) && knownBbqBalance > 0
       ? knownBbqBalance
@@ -106,6 +108,7 @@ async function getWalletSnapshot(connection, ownerPubkey, { includeTokens = true
 
 module.exports = {
   BBQ_MINT,
+  REQUIRED_BBQ_BALANCE,
   enforceBbqGateOrExit,
   getWalletSnapshot,
   getSplBalanceUi,

@@ -1,10 +1,11 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import type { ParsedAccountData } from "@solana/web3.js";
 import { prisma } from "./prisma";
+import { APP_DEFAULTS, BBQ_TOKEN } from "./defaults";
 import { resolveWalletAddressFromEnv } from "./walletConfig";
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
-const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
+const BBQ_MINT = BBQ_TOKEN.mint;
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 type WalletState = {
@@ -83,7 +84,7 @@ export async function getWalletBalancesForMints(mints: string[]): Promise<Record
     process.env.SOLANA_RPC_URL ||
     process.env.SOLANA_RPC ||
     process.env.RPC_URL ||
-    "https://api.mainnet-beta.solana.com";
+    APP_DEFAULTS.solanaRpcUrl;
   const WALLET = resolveWalletAddressFromEnv();
 
   if (!WALLET) {
@@ -116,7 +117,7 @@ export async function getWalletTokenBalances(): Promise<WalletTokenBalance[]> {
     process.env.SOLANA_RPC_URL ||
     process.env.SOLANA_RPC ||
     process.env.RPC_URL ||
-    "https://api.mainnet-beta.solana.com";
+    APP_DEFAULTS.solanaRpcUrl;
   const WALLET = resolveWalletAddressFromEnv();
 
   if (!WALLET) {
@@ -160,7 +161,7 @@ async function fetchWalletState(): Promise<WalletState> {
     process.env.SOLANA_RPC_URL ||
     process.env.SOLANA_RPC ||
     process.env.RPC_URL ||
-    "https://api.mainnet-beta.solana.com";
+    APP_DEFAULTS.solanaRpcUrl;
   const WALLET = resolveWalletAddressFromEnv();
 
   if (!WALLET) {
@@ -181,7 +182,7 @@ async function fetchWalletState(): Promise<WalletState> {
     sol,
     bbq,
     usdc,
-    requirementMet: bbq >= 1000,
+    requirementMet: bbq >= BBQ_TOKEN.requiredBalance,
   };
 }
 

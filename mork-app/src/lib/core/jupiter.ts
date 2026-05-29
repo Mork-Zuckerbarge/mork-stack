@@ -1,4 +1,6 @@
-const DEFAULT_JUPITER_BASES = ["https://api.jup.ag", "https://lite-api.jup.ag"] as const;
+import { APP_DEFAULTS } from "./defaults";
+
+const DEFAULT_JUPITER_BASES = [APP_DEFAULTS.jupiterBaseUrl, APP_DEFAULTS.jupiterLiteBaseUrl] as const;
 
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
@@ -16,6 +18,6 @@ export function getJupiterBaseCandidates(): string[] {
 }
 
 export function getJupiterTimeoutMs(): number {
-  return Math.max(2500, Number(process.env.JUP_TIMEOUT_MS ?? 10000));
+  return Math.max(2500, Number(process.env.JUP_TIMEOUT_MS || APP_DEFAULTS.jupiterTimeoutMs));
 }
 

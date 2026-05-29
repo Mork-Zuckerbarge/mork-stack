@@ -1,5 +1,6 @@
 import { getAppControlState } from "@/lib/core/appControl";
 import { resolveOllamaHost } from "@/lib/core/ollamaHost";
+import { APP_DEFAULTS } from "@/lib/core/defaults";
 import { resolveWalletAddressFromEnv } from "@/lib/core/walletConfig";
 import { access } from "node:fs/promises";
 import path from "node:path";
@@ -144,7 +145,7 @@ function getCoreCandidates(configuredUrl: string): string[] {
   const cleaned = (configuredUrl || "").trim().replace(/\/+$/, "");
   const candidates = [
     cleaned,
-    process.env.MORK_CORE_SERVICE_FALLBACK_URL || "http://mork-core:8790",
+    process.env.MORK_CORE_SERVICE_FALLBACK_URL || APP_DEFAULTS.morkCoreServiceFallbackUrl,
     "http://127.0.0.1:8790",
     "http://localhost:8790",
     "http://host.docker.internal:8790",
@@ -156,12 +157,12 @@ function getCoreCandidates(configuredUrl: string): string[] {
 
 export async function getPreflightStatus(): Promise<PreflightStatus> {
   const checks: PreflightCheck[] = [];
-  const requestedOllamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const requestedOllamaHost = process.env.OLLAMA_HOST || APP_DEFAULTS.ollamaHost;
   const hostResolution = await resolveOllamaHost(requestedOllamaHost);
   const ollamaHost = hostResolution.host;
 
   const appState = await getAppControlState();
-  const selectedModel = appState.controls.selectedOllamaModel.trim() || process.env.OLLAMA_MODEL || "llama3.2:3b";
+  const selectedModel = appState.controls.selectedOllamaModel.trim() || process.env.OLLAMA_MODEL || APP_DEFAULTS.ollamaModel;
 
   let models: string[] = [];
   try {
@@ -237,7 +238,7 @@ export async function getPreflightStatus(): Promise<PreflightStatus> {
       : "Install python3-venv, then re-run ./setup.sh from repo root. Sherpa powers X posting/replies and uses RSS + memories/reflections. If you do not need Sherpa locally, set MORK_SETUP_SKIP_SHERPA=1.",
   });
 
-  const configuredCoreUrl = process.env.MORK_CORE_URL || "http://127.0.0.1:8790";
+  const configuredCoreUrl = process.env.MORK_CORE_URL || APP_DEFAULTS.morkCoreUrl;
   const coreCandidates = getCoreCandidates(configuredCoreUrl);
   let coreUrl = configuredCoreUrl;
   let core: Awaited<ReturnType<typeof probeCore>> | null = null;

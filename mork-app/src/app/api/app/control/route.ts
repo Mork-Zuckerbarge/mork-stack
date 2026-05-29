@@ -18,6 +18,7 @@ import {
   startRuntime,
   stopRuntime,
 } from "@/lib/core/orchestrator";
+import { APP_DEFAULTS } from "@/lib/core/defaults";
 
 type Action =
   | "orchestrator.start"
@@ -45,12 +46,17 @@ function getArbRuntimeFromEnv() {
   };
 }
 
+function numberFromEnv(value: string | undefined, fallback: number) {
+  const parsed = Number(value || fallback);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function getTradeRuntimeFromEnv() {
   return {
     swapEnabled: process.env.MORK_AGENT_SWAP_ENABLED === "1",
-    maxSwapSol: Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25),
-    jupiterBaseUrl: process.env.JUP_BASE_URL ?? "https://api.jup.ag",
-    jupiterTimeoutMs: Math.max(2500, Number(process.env.JUP_TIMEOUT_MS ?? 10000)),
+    maxSwapSol: numberFromEnv(process.env.MORK_AGENT_SWAP_MAX_SOL, 0.25),
+    jupiterBaseUrl: process.env.JUP_BASE_URL || APP_DEFAULTS.jupiterBaseUrl,
+    jupiterTimeoutMs: Math.max(2500, numberFromEnv(process.env.JUP_TIMEOUT_MS, APP_DEFAULTS.jupiterTimeoutMs)),
   };
 }
 
