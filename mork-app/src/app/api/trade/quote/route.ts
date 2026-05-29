@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getAppControlState } from "@/lib/core/appControl";
+import { BBQ_TOKEN } from "@/lib/core/defaults";
 import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
 
 export const runtime = "nodejs";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
+const BBQ_MINT = BBQ_TOKEN.mint;
 const JUP_TIMEOUT_MS = getJupiterTimeoutMs();
 
 type QuoteBody = {

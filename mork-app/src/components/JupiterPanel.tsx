@@ -921,7 +921,9 @@ function ExecutionControls({
 }) {
   const [mode, setMode] = useState<ExecutionMode>(execution?.mode ?? "user_only");
   const [maxTradeUsd, setMaxTradeUsd] = useState(String(execution?.maxTradeUsd ?? 50));
-  const [allowlist, setAllowlist] = useState(execution?.mintAllowlist.join(",") ?? "ALL");
+  const [allowlist, setAllowlist] = useState(
+    execution && execution.mintAllowlist.length > 0 ? execution.mintAllowlist.join(",") : "ALL"
+  );
   const [allowlistLoadStatus, setAllowlistLoadStatus] = useState("");
   const [allowlistPreset, setAllowlistPreset] = useState<"top1000" | "all">("all");
   const [minImbalancePct, setMinImbalancePct] = useState(String(strategyEngines?.poolImbalance.minImbalancePct ?? 5));
@@ -958,8 +960,10 @@ function ExecutionControls({
     }
   }, [allowlistPreset]);
 
-  const allowlistInputValue =
-    allowlist || (execution && execution.mintAllowlist.length === 0 ? "ALL" : allowlist);
+  const allowlistInputValue = allowlist || "ALL";
+  const savedAllowlist = allowlist.trim().toUpperCase() === "ALL" || !allowlist.trim()
+    ? ["ALL"]
+    : allowlist.split(",").map((item) => item.trim()).filter(Boolean);
 
   return (
     <div className="rounded-2xl border border-white/15 bg-black/35 p-4">
@@ -1102,7 +1106,7 @@ function ExecutionControls({
                 mode,
                 maxTradeUsd: Number(maxTradeUsd) || 0,
                 cooldownMinutes: execution.cooldownMinutes,
-                mintAllowlist: allowlist.split(",").map((item) => item.trim()).filter(Boolean),
+                mintAllowlist: savedAllowlist,
               })
             }
             disabled={busy || arbPaused}

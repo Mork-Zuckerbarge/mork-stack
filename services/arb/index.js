@@ -67,7 +67,6 @@ const TRIANGULAR_INTERMEDIARIES = [
   { mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  symbol: "USDT" },
 ];
 const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
-const MIN_BBQ_REQUIRED = Number(process.env.MIN_BBQ_REQUIRED || 1000);
 
 function parseEnvBool(value, fallback) {
   const raw = String(value ?? "").trim();

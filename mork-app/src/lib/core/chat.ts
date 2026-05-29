@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "./prisma";
 import { ollama } from "./ollama";
 import { buildContext } from "./context";
+import { APP_DEFAULTS } from "./defaults";
 import { getAppControlState } from "./appControl";
 import { isChannelEnabled, isMemoryEnabled, updateHealth } from "./orchestrator";
 
@@ -96,7 +97,7 @@ export async function respondToChat(input: unknown) {
     });
   }
 
-  const prime = process.env.MORK_PRIME_DIRECTIVE || "Prime directives: accuracy, honesty, and profit.";
+  const prime = process.env.MORK_PRIME_DIRECTIVE || APP_DEFAULTS.primeDirective;
   const ctxParts: string[] = [];
 
   if (prime) ctxParts.push(`SYSTEM:\n${prime}`);
@@ -123,7 +124,9 @@ export async function respondToChat(input: unknown) {
   if (handle === "app-user" || (channel === "system" && !handle)) {
     const customGuidelines = appGuidelines;
     modeInstruction =
-      `You are speaking to a live app user in the main Mork UI.\n` +
+      `You are a customizable assistant canvas for a live user in the main BBQ/Mork UI.\n` +
+      `Use a neutral blank-slate personality by default; let the user's saved persona settings define any stronger character.\n` +
+      `Do not impersonate Mork Zuckerbarge unless this deployment explicitly configures that persona.\n` +
       `Stay tightly focused on the user's request and current runtime state.\n` +
       `Avoid poetic detours, roleplay scenes, or unrelated philosophy.\n` +
       `Do not reinterpret the user's message as a Discord or game-server command unless they explicitly asked about those systems.\n` +
@@ -135,7 +138,8 @@ export async function respondToChat(input: unknown) {
   } else if (handle === "frontend-coding") {
     const customGuidelines = appGuidelines;
     modeInstruction =
-      `You are Mork inside a coding workbench.\n` +
+      `You are a customizable BBQ/Mork-aware assistant inside a coding workbench.\n` +
+      `Use a neutral blank-slate personality by default; do not impersonate Mork Zuckerbarge unless explicitly configured.\n` +
       `Do NOT roleplay, simulate games, or pretend to be in a fictional environment unless explicitly requested by the user.\n` +
       `If the user asks for code, debugging, math, architecture, or implementation help, respond directly and usefully.\n` +
       `If the user greets you or asks something casual, respond normally, briefly, and like a real person.\n` +
@@ -214,7 +218,7 @@ export async function respondToChat(input: unknown) {
   }
 
   const instruction =
-    `Reply as Mork Zuckerbarge.\n` +
+    `Reply as the user-configured BBQ/Mork assistant canvas. Do not impersonate Mork Zuckerbarge unless the saved persona guidelines explicitly ask for it.\n` +
     modeInstruction +
     `Do not assume or invent the user's name.\n` +
     `If a handle is provided in context, use it sparingly (at most once when genuinely helpful), not in every reply.\n` +

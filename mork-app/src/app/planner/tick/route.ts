@@ -1,23 +1,34 @@
 import { NextResponse } from "next/server";
+import fs from "node:fs";
+import path from "node:path";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
 import { ollama } from "@/lib/core/ollama";
 import { POST as executeSwapRoute } from "@/app/api/trade/swap/route";
+import { APP_DEFAULTS, BBQ_TOKEN } from "@/lib/core/defaults";
 
 export const runtime = "nodejs";
 
 const LAST_PLANNER_TRADE_KEY = "__planner_last_trade_iso_v1__";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const JUP_BASE = process.env.JUP_BASE_URL ?? "https://api.jup.ag";
-const RPC_URL = process.env.SOLANA_RPC_URL ?? process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
+const ALL_ALLOWLIST_SENTINEL = "ALL";
+const STARTUP_ALLOWLIST_LIMIT = 5000;
+const FALLBACK_TOKEN_CSV =
+  "https://raw.githubusercontent.com/igneous-labs/jup-token-list/main/validated-tokens.csv";
+const numberFromEnv = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value || fallback);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+const JUP_BASE = process.env.JUP_BASE_URL || APP_DEFAULTS.jupiterBaseUrl;
+const RPC_URL = process.env.SOLANA_RPC_URL || process.env.RPC_URL || APP_DEFAULTS.solanaRpcUrl;
 // Keep planner sizing aligned with /api/trade/swap guard default.
 // If env is unset/invalid, swap route enforces 0.25 SOL max.
-const AGENT_SWAP_MAX_SOL = Number(process.env.MORK_AGENT_SWAP_MAX_SOL ?? 0.25);
+const AGENT_SWAP_MAX_SOL = numberFromEnv(process.env.MORK_AGENT_SWAP_MAX_SOL, 0.25);
 const COST_BASIS_KEY_PREFIX = "planner_cost_basis:";
 // Minimum profit % to trigger a sell (e.g. 5 = 5%). Override via env.
-const SELL_PROFIT_THRESHOLD = Number(process.env.MORK_SELL_PROFIT_THRESHOLD_PCT ?? 5) / 100;
+const SELL_PROFIT_THRESHOLD = numberFromEnv(process.env.MORK_SELL_PROFIT_THRESHOLD_PCT, 5) / 100;
 // Minimum estimated SOL value to bother selling (skip dust positions).
 const MIN_SELL_SOL = 0.0001;
 
@@ -31,6 +42,118 @@ type StrategySnapshot = {
   maxHoldMinutes: number | null;
   hardStopLossPct: number | null;
 };
+
+
+function normalizeMintList(values: Array<string | null | undefined>, limit: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const mint = (value || "").trim();
+    if (!mint || seen.has(mint)) continue;
+    seen.add(mint);
+    out.push(mint);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    const next = line[i + 1];
+    if (ch === "\"" && next === "\"") {
+      cur += "\"";
+      i += 1;
+      continue;
+    }
+    if (ch === "\"") {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+function pickHeaderIndex(headers: string[], candidates: string[]): number {
+  const normalized = headers.map((item) => item.toLowerCase());
+  for (const candidate of candidates) {
+    const idx = normalized.indexOf(candidate);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+function readWhitelistMints(limit: number): string[] {
+  const whitelistPath = path.resolve(process.cwd(), "../services/arb/whitelist.json");
+  if (!fs.existsSync(whitelistPath)) return [];
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(whitelistPath, "utf8"));
+    if (!Array.isArray(parsed)) return [];
+    return normalizeMintList(
+      parsed.map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "inMint" in item && typeof item.inMint === "string") return item.inMint;
+        return "";
+      }),
+      limit,
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function fetchFallbackMints(limit: number): Promise<string[]> {
+  try {
+    const response = await fetch(FALLBACK_TOKEN_CSV, { headers: { accept: "text/plain" }, cache: "no-store" });
+    if (!response.ok) return [];
+    const csv = await response.text();
+    const lines = csv.split(/\r?\n/).filter(Boolean);
+    if (lines.length < 2) return [];
+    const headers = parseCsvLine(lines[0]);
+    const mintIdx = pickHeaderIndex(headers, ["address", "mint", "mintaddress", "token_address"]);
+    if (mintIdx < 0) return [];
+    return normalizeMintList(lines.slice(1).map((line) => parseCsvLine(line)[mintIdx] || ""), limit);
+  } catch {
+    return [];
+  }
+}
+
+async function resolvePlannerAllowlist(configuredAllowlist: string[]): Promise<string[]> {
+  const cleaned = normalizeMintList(configuredAllowlist, STARTUP_ALLOWLIST_LIMIT);
+  const allSelected = cleaned.length === 0 || cleaned.some((mint) => mint.toUpperCase() === ALL_ALLOWLIST_SENTINEL);
+  if (!allSelected) return cleaned.filter((mint) => mint !== SOL_MINT && mint !== USDC_MINT);
+
+  const policyRows = await prisma.arbPolicy.findMany({
+    take: STARTUP_ALLOWLIST_LIMIT,
+    orderBy: { updatedAt: "desc" },
+    select: { mint: true },
+  });
+  const policyMints = policyRows.map((row) => row.mint);
+  const diskMints = readWhitelistMints(STARTUP_ALLOWLIST_LIMIT);
+  const fallbackMints = await fetchFallbackMints(STARTUP_ALLOWLIST_LIMIT);
+  return normalizeMintList([...policyMints, ...diskMints, ...fallbackMints, BBQ_TOKEN.mint], STARTUP_ALLOWLIST_LIMIT)
+    .filter((mint) => mint !== SOL_MINT && mint !== USDC_MINT);
+}
+
+function toSellableHolding(holding: TokenHolding): TokenHolding | null {
+  if (holding.mint !== BBQ_TOKEN.mint) return holding;
+  const surplusUiAmount = holding.uiAmount - BBQ_TOKEN.requiredBalance;
+  if (surplusUiAmount <= 0) return null;
+  const sellableUiAmount = surplusUiAmount * BBQ_TOKEN.maxSellSurplusPct;
+  const rawAmount = Math.floor(sellableUiAmount * 10 ** holding.decimals);
+  if (!Number.isFinite(rawAmount) || rawAmount <= 0) return null;
+  return { ...holding, uiAmount: sellableUiAmount, rawAmount: String(rawAmount) };
+}
 
 // ── Wallet / token helpers ──────────────────────────────────────────────────
 
@@ -190,13 +313,6 @@ async function hasPositivePolicySignalForMint(mint: string): Promise<boolean> {
   return policyStatsArePositive(row?.policy as Record<string, unknown> | undefined);
 }
 
-async function getLastPlannerTradeAtMs(): Promise<number | null> {
-  const fact = await prisma.memoryFact.findUnique({ where: { key: LAST_PLANNER_TRADE_KEY } });
-  if (!fact?.value) return null;
-  const ts = Date.parse(String(fact.value));
-  if (!Number.isFinite(ts)) return null;
-  return ts;
-}
 
 type PlannerContext = { text: string; signalCount: number; feedCount: number; policyCount: number };
 
@@ -332,7 +448,7 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<P
 }
 
 // Process-level lock and caches shared across ticks.
-const WALLET_TOKENS_CACHE_MS = Number(process.env.MORK_WALLET_TOKENS_CACHE_MS ?? 5 * 60_000);
+const WALLET_TOKENS_CACHE_MS = numberFromEnv(process.env.MORK_WALLET_TOKENS_CACHE_MS, 5 * 60_000);
 const _g = globalThis as typeof globalThis & {
   __plannerRunning?: boolean;
   __walletTokensCache?: { tokens: TokenHolding[]; ts: number };
@@ -376,10 +492,10 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
     return NextResponse.json({ ok: true, status: "skipped", reason: "emergency_stop", runId });
   }
 
-  const allowlist = authority.mintAllowlist.filter((m) => m !== SOL_MINT && m !== USDC_MINT);
+  const allowlist = await resolvePlannerAllowlist(authority.mintAllowlist);
   if (allowlist.length === 0) {
-    logSkip("allowlist_empty");
-    return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_empty", runId });
+    logSkip("allowlist_unavailable");
+    return NextResponse.json({ ok: true, status: "skipped", reason: "allowlist_unavailable", runId });
   }
 
   // Read wallet SOL early — used for both the early-exit guard and later sizing.
@@ -404,16 +520,16 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
     const cacheValid = cacheEntry && Date.now() - cacheEntry.ts < WALLET_TOKENS_CACHE_MS;
     if (cacheValid) {
       allHeldTokens = cacheEntry.tokens;
-      heldTokens = allHeldTokens.filter((h) => mintSet.has(h.mint));
+      heldTokens = allHeldTokens.filter((h) => mintSet.has(h.mint)).map(toSellableHolding).filter((h): h is TokenHolding => h !== null);
     } else {
       const conn = new Connection(RPC_URL, "processed");
       // Fetch all token accounts — basis tracking needs every holding, not just allowlisted.
       allHeldTokens = await getHeldTokens(conn, kp.publicKey);
       _g.__walletTokensCache = { tokens: allHeldTokens, ts: Date.now() };
-      heldTokens = allHeldTokens.filter((h) => mintSet.has(h.mint));
+      heldTokens = allHeldTokens.filter((h) => mintSet.has(h.mint)).map(toSellableHolding).filter((h): h is TokenHolding => h !== null);
     }
 
-    for (const h of allHeldTokens) {
+    for (const h of heldTokens) {
       const sellSol = await quoteSellSol(h.mint, h.rawAmount);
       if (sellSol === null || sellSol < MIN_SELL_SOL) continue;
       holdingSolValues.set(h.mint, sellSol);

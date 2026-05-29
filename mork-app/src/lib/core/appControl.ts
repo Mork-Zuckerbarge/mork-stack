@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { APP_DEFAULTS, BBQ_TOKEN } from "./defaults";
 import { resolveWalletConfigFromEnv } from "./walletConfig";
 import fs from "node:fs";
 import path from "node:path";
@@ -76,10 +77,10 @@ type BooleanControlKey = "memoryEnabled" | "plannerEnabled" | "telegramEnabled" 
 const nowIso = () => new Date().toISOString();
 const APP_CONTROL_FACT_KEY = "__app_control_state_v1__";
 const AUTO_START_ON_BOOT = process.env.MORK_AUTO_START_ON_BOOT !== "0";
-const STARTUP_ALLOWLIST_LIMIT = 500;
+const STARTUP_ALLOWLIST_LIMIT = 5000;
 const FALLBACK_TOKEN_CSV =
   "https://raw.githubusercontent.com/igneous-labs/jup-token-list/main/validated-tokens.csv";
-const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
+const ALL_ALLOWLIST_SENTINEL = "ALL";
 
 const state: AppControlState = {
   arb: {
@@ -96,15 +97,15 @@ const state: AppControlState = {
     telegramEnabled: true,
     xEnabled: true,
     walletAutoRefreshEnabled: true,
-    appPersonaMode: "code-first",
-    telegramPersonaMode: "ceo-helpful",
-    xPersonaMode: "cynical-banter",
-    facebootPersonaMode: "community-hype",
+    appPersonaMode: "blank-slate",
+    telegramPersonaMode: "blank-slate",
+    xPersonaMode: "blank-slate",
+    facebootPersonaMode: "blank-slate",
     appPersonaGuidelines: "",
     telegramPersonaGuidelines: "",
     xPersonaGuidelines: "",
     facebootPersonaGuidelines: "",
-    selectedOllamaModel: process.env.OLLAMA_MODEL || "llama3.2:3b",
+    selectedOllamaModel: process.env.OLLAMA_MODEL || APP_DEFAULTS.ollamaModel,
     startupCompleted: false,
     executionAuthority: {
       mode: "agent_assisted",
@@ -117,7 +118,7 @@ const state: AppControlState = {
       allowUrls: false,
       allowUserMessageQuotes: false,
       behaviorGuidelines:
-        "Do NOT act like the TV character from Mork & Mindy.\nNever say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\nDo not create false information.\nIf you do not know something, say so plainly.",
+        "Default to a helpful, customizable BBQ/Mork-aware assistant canvas. Do not impersonate Mork Zuckerbarge unless this deployment explicitly configures that persona.\nDo NOT act like the TV character from Mork & Mindy.\nNever say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\nDo not create false information.\nIf you do not know something, say so plainly.",
     },
     activePanel: "arb",
     strategyEngines: {
@@ -241,8 +242,10 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function sanitizeExecutionAllowlist(values: Array<string | null | undefined>): string[] {
   const normalized = normalizeMintList(values, STARTUP_ALLOWLIST_LIMIT);
-  // BBQ_MINT is the governance/gating token — exclude it from trade allowlists.
-  return normalized.filter((m) => m !== BBQ_MINT);
+  if (normalized.some((mint) => mint.toUpperCase() === ALL_ALLOWLIST_SENTINEL)) {
+    return [ALL_ALLOWLIST_SENTINEL, BBQ_TOKEN.mint];
+  }
+  return normalizeMintList([...normalized, BBQ_TOKEN.mint], STARTUP_ALLOWLIST_LIMIT);
 }
 
 function applyPersistedState(raw: unknown) {
@@ -450,7 +453,7 @@ async function ensureStateLoaded() {
     const startupMints = readWhitelistMints(STARTUP_ALLOWLIST_LIMIT);
     const fallbackMints = startupMints.length > 0 ? startupMints : await fetchFallbackMints(STARTUP_ALLOWLIST_LIMIT);
     const finalMints = fallbackMints.length > 0 ? fallbackMints : [];
-    state.controls.executionAuthority.mintAllowlist = sanitizeExecutionAllowlist(finalMints);
+    state.controls.executionAuthority.mintAllowlist = sanitizeExecutionAllowlist([...finalMints, BBQ_TOKEN.mint]);
     await persistState();
   }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getWalletState } from "@/lib/core/wallet";
 import { getOrchestratorState, updateHealth } from "@/lib/core/orchestrator";
 import { getPreflightStatus } from "@/lib/bootstrap/preflight";
+import { APP_DEFAULTS } from "@/lib/core/defaults";
 
 export async function GET(req: NextRequest) {
   const orchestrator = await getOrchestratorState();
@@ -15,9 +16,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       agent: {
-        name: "Mork Zuckerbarge",
+        name: APP_DEFAULTS.agentName,
         status: agentStatus,
-        model: process.env.OLLAMA_MODEL || "llama3.2:3b",
+        model: process.env.OLLAMA_MODEL || APP_DEFAULTS.ollamaModel,
       },
       app: orchestrator.app,
       orchestrator: {
@@ -31,9 +32,9 @@ export async function GET(req: NextRequest) {
     updateHealth("wallet", "degraded", "wallet query failed");
     return NextResponse.json({
       agent: {
-        name: "Mork Zuckerbarge",
+        name: APP_DEFAULTS.agentName,
         status: "offline",
-        model: process.env.OLLAMA_MODEL || "llama3.2:3b",
+        model: process.env.OLLAMA_MODEL || APP_DEFAULTS.ollamaModel,
       },
       app: orchestrator.app,
       orchestrator: {

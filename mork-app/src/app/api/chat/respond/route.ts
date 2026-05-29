@@ -5,6 +5,7 @@ import { getAppControlState } from "@/lib/core/appControl";
 import { prisma } from "@/lib/core/prisma";
 import { generateAudio, generateImage, generateVideo } from "@/lib/core/media";
 import { getWalletBalancesForMints } from "@/lib/core/wallet";
+import { BBQ_TOKEN } from "@/lib/core/defaults";
 import { ensurePlannerAutopilotStarted } from "@/lib/core/plannerAutopilot";
 import { POST as runPlannerTickRoute } from "@/app/planner/tick/route";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -28,7 +29,7 @@ type RoutedCommand =
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const BTC_MINT = "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E";
-const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
+const BBQ_MINT = BBQ_TOKEN.mint;
 const LAST_TRADE_FACT_KEY = "__agent_last_trade_iso_v1__";
 const BASE58_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const JUP_TOKEN_SEARCH_LIMIT = "100";
@@ -705,19 +706,20 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   if (inputToken.mint === outputToken.mint) {
     return { ok: false, status: 400, error: "Input and output tokens resolve to the same mint. Choose two different tokens." };
   }
-  if (inputToken.mint === BBQ_MINT) {
-    return { ok: false, status: 400, error: "Trade blocked: selling $BBQ is disabled by policy." };
-  }
-
   let quantity = requestedQuantity;
   if (command.type === "trade.sellAll") {
     try {
       quantity = await resolveSellAllQuantity(inputToken.mint);
+      if (inputToken.mint === BBQ_MINT) {
+        const surplus = Math.max(0, quantity - BBQ_TOKEN.requiredBalance);
+        quantity = surplus * BBQ_TOKEN.maxSellSurplusPct;
+      }
     } catch (error) {
       return { ok: false, status: 500, error: error instanceof Error ? error.message : "Could not read wallet balance for sell all." };
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      return { ok: false, status: 400, error: `No ${inputToken.symbol} balance available to sell.` };
+      const minimumNote = inputToken.mint === BBQ_MINT ? ` above the required ${BBQ_TOKEN.requiredBalance} BBQ reserve` : "";
+      return { ok: false, status: 400, error: `No ${inputToken.symbol} balance available to sell${minimumNote}.` };
     }
   }
 

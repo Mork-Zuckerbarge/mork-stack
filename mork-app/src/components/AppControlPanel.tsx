@@ -60,10 +60,10 @@ const modelCatalog = [
 ];
 
 const personaModes = {
-  app: ["code-first", "operator", "teacher"],
-  telegram: ["ceo-helpful", "supportive", "briefing"],
-  x: ["cynical-banter", "poetic", "market-snark"],
-  faceboot: ["meme-chaos", "storyteller", "community-hype"],
+  app: ["blank-slate", "operator", "teacher", "code-first"],
+  telegram: ["blank-slate", "supportive", "briefing", "ceo-helpful"],
+  x: ["blank-slate", "community", "poetic", "market-snark"],
+  faceboot: ["blank-slate", "storyteller", "community-hype", "meme-chaos"],
 };
 
 const STYLE_SETUP_IMAGE_TARGET = 7;
@@ -467,7 +467,7 @@ function PersonaEditor({
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder="Tone + guideline instructions"
+        placeholder="Customize tone, goals, boundaries, and personality. Default is a neutral BBQ/Mork-aware blank slate."
         rows={3}
         className="w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs"
       />
