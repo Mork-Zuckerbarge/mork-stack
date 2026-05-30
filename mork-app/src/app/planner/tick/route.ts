@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey, type Connection } from "@solana/web3.js";
 import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
 import { ollama } from "@/lib/core/ollama";
 import { POST as executeSwapRoute } from "@/app/api/trade/swap/route";
 import { APP_DEFAULTS, BBQ_TOKEN } from "@/lib/core/defaults";
+import { createSolanaConnection } from "@/lib/core/solanaRpc";
 
 export const runtime = "nodejs";
 
@@ -522,7 +523,7 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
       allHeldTokens = cacheEntry.tokens;
       heldTokens = allHeldTokens.filter((h) => mintSet.has(h.mint)).map(toSellableHolding).filter((h): h is TokenHolding => h !== null);
     } else {
-      const conn = new Connection(RPC_URL, "processed");
+      const conn = createSolanaConnection(RPC_URL, "processed");
       // Fetch all token accounts — basis tracking needs every holding, not just allowlisted.
       allHeldTokens = await getHeldTokens(conn, kp.publicKey);
       _g.__walletTokensCache = { tokens: allHeldTokens, ts: Date.now() };

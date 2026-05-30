@@ -1,8 +1,9 @@
-import { Connection, PublicKey } from "@solana/web3.js";
-import type { ParsedAccountData } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
+import type { Connection, ParsedAccountData } from "@solana/web3.js";
 import { prisma } from "./prisma";
 import { APP_DEFAULTS, BBQ_TOKEN } from "./defaults";
 import { resolveWalletAddressFromEnv } from "./walletConfig";
+import { createSolanaConnection } from "./solanaRpc";
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 const BBQ_MINT = BBQ_TOKEN.mint;
@@ -91,7 +92,7 @@ export async function getWalletBalancesForMints(mints: string[]): Promise<Record
     throw new Error("Wallet not configured (set MORK_WALLET or MORK_WALLET_SECRET_KEY)");
   }
 
-  const connection = new Connection(RPC);
+  const connection = createSolanaConnection(RPC);
   const owner = new PublicKey(WALLET);
 
   const uniqueMints = Array.from(new Set(mints.map((mint) => mint.trim()).filter(Boolean)));
@@ -124,7 +125,7 @@ export async function getWalletTokenBalances(): Promise<WalletTokenBalance[]> {
     throw new Error("Wallet not configured (set MORK_WALLET or MORK_WALLET_SECRET_KEY)");
   }
 
-  const connection = new Connection(RPC);
+  const connection = createSolanaConnection(RPC);
   const owner = new PublicKey(WALLET);
   const tokenProgramId = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
@@ -168,7 +169,7 @@ async function fetchWalletState(): Promise<WalletState> {
     throw new Error("Wallet not configured (set MORK_WALLET or MORK_WALLET_SECRET_KEY)");
   }
 
-  const connection = new Connection(RPC);
+  const connection = createSolanaConnection(RPC);
   const owner = new PublicKey(WALLET);
 
   const solLamports = await withRpcRetry("getBalance", () => connection.getBalance(owner));
