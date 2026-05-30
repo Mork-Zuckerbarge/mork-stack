@@ -130,7 +130,8 @@ export async function GET(req: Request) {
   const mode = (searchParams.get("mode") ?? "top1000").toLowerCase();
 
   if (mode === "all") {
-    return NextResponse.json({ ok: true, count: 2, mints: ["ALL", BBQ_TOKEN.mint] });
+    const mints = normalizeMintList(["ALL", BBQ_TOKEN.mint], 2);
+    return NextResponse.json({ ok: true, count: mints.length, mints });
   }
 
   const limit = 1000;

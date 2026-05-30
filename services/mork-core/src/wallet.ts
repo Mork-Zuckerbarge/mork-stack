@@ -1,6 +1,6 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 
-const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
+const RESERVE_MINT = process.env.MORK_RESERVE_TOKEN_MINT?.trim() || "";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 async function getSplBalance(
@@ -40,7 +40,7 @@ export async function getWalletState() {
   const sol = solLamports / 1e9;
 
   const [bbq, usdc] = await Promise.all([
-    getSplBalance(connection, owner, BBQ_MINT),
+    RESERVE_MINT ? getSplBalance(connection, owner, RESERVE_MINT) : Promise.resolve(0),
     getSplBalance(connection, owner, USDC_MINT),
   ]);
 
@@ -49,6 +49,6 @@ export async function getWalletState() {
     sol,
     bbq,
     usdc,
-    requirementMet: bbq >= 1000,
+    requirementMet: !RESERVE_MINT || bbq >= Number(process.env.MORK_RESERVE_TOKEN_REQUIRED_BALANCE || 0),
   };
 }

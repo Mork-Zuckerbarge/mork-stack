@@ -66,7 +66,7 @@ export default function WalletPanel() {
               <div className="text-lg">{wallet.sol}</div>
             </div>
             <div className="rounded-2xl bg-black/30 p-3">
-              <div className="text-xs text-white/50">BBQ</div>
+              <div className="text-xs text-white/50">Reserve</div>
               <div className="text-lg">{wallet.bbq}</div>
             </div>
             <div className="rounded-2xl bg-black/30 p-3">
@@ -86,7 +86,7 @@ export default function WalletPanel() {
 
           <div>
             <span className="rounded-full bg-white/10 px-3 py-1 text-xs">
-              {wallet.requirementMet ? "BBQ requirement met ✅" : "Below BBQ threshold"}
+              {wallet.requirementMet ? "Reserve requirement met ✅" : "Below reserve threshold"}
             </span>
           </div>
         </div>

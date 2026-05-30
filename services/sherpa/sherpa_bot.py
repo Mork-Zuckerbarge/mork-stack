@@ -345,7 +345,7 @@ def _wrap_280(s: str, max_len: int = X_INTERNAL_DRAFT_MAX_CHARS) -> str:
     s = re.sub(r"\n{3,}", "\n\n", s)
     return s if len(s) <= max_len else (s[: max_len - 1].rstrip() + "…")
 
-DEFAULT_AGENT_PROJECT_NAME = os.getenv("SHERPA_AGENT_PROJECT_NAME", "$BBQ")
+DEFAULT_AGENT_PROJECT_NAME = os.getenv("SHERPA_AGENT_PROJECT_NAME", "")
 DEFAULT_AGENT_BANNED_PHRASES = [
     "nanu nanu",
     "na-nu",
@@ -543,11 +543,7 @@ CHARACTERS_FILE = "encrypted_characters.bin"
 FEED_CONFIG_FILE = "encrypted_feed_config.bin"  # New file for feed selection
 KNOWLEDGE_FILE = "encrypted_knowledge.bin"
 KNOWLEDGE_JSON_FILE = "knowledge_config.json"
-MORK_PROJECT_KNOWLEDGE_SOURCES = [
-    "https://x.com/zuckerbarge/status/1831855846747468191?s=20",
-    "https://x.com/zuckerbarge/status/2058594772684562931?s=20",
-    "https://linktr.ee/zuckerbarge",
-]
+MORK_PROJECT_KNOWLEDGE_SOURCES = []
 
 def _default_project_knowledge_sources() -> list[str]:
     configured = _split_lines_or_csv(os.getenv("SHERPA_DEFAULT_PROJECT_SOURCES", ""))
@@ -1880,8 +1876,8 @@ class TwitterBot:
             "x_persona_guidelines": "poetic; you know everything. be polite.",
             "faceboot_persona_guidelines": "meme-chaos; you are ecstatic about this project.",
             "behavior_policy": (
-                "Do NOT act like the TV character from Mork & Mindy.\n"
-                "Never say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\n"
+                "Use a clean-slate persona unless this user explicitly configures stronger behavior.\n"
+                "Do not import prior deployment lore, catchphrases, or private agent history.\n"
                 "Do not create false information. If you do not know something, say so plainly.\n"
                 "Max response characters example: 4500.\n"
                 "Allow URLs in replies: enabled/disabled by policy.\n"
@@ -2552,7 +2548,7 @@ class TwitterBot:
         new_story = self.get_new_story("crypto")  # or "ai", depending on your subject
         if new_story:
             story_text = f"{new_story['title']}\n\n{new_story['preview']}\n\nRead more: {new_story['url']}"
-            tweet_text = self.generate_tweet("mork zuckerbarge", story_text)
+            tweet_text = self.generate_tweet("default agent", story_text)
             if tweet_text:
                 if self.send_tweet(tweet_text):
                     self.last_successful_tweet = datetime.now()
@@ -2572,7 +2568,7 @@ class TwitterBot:
         now = datetime.now()
 
         # You need your username for searches; store it once in creds or config.
-        username = self.credentials.get("twitter_username", "zuckerbarge").lstrip("@")
+        username = self.credentials.get("twitter_username", "").lstrip("@")
 
         # Tweepy Client (v2)
         client = tweepy.Client(
@@ -2682,7 +2678,7 @@ class TwitterBot:
                     f"INCOMING (for context only; DO NOT quote):\n{inbound_text}\n"
                 )
 
-                reply = self.generate_tweet("mork zuckerbarge", prompt)
+                reply = self.generate_tweet("default agent", prompt)
 
                 if reply:
                     client.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
@@ -2829,7 +2825,7 @@ class TwitterBot:
             print("⚠️ Telegram credentials missing")
             return False
 
-        text = f"Mork has tweeted:\n{tweet_url}"
+        text = f"Agent has posted:\n{tweet_url}"
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         payload = {
             "chat_id": chat_id,
@@ -2845,7 +2841,7 @@ class TwitterBot:
             print(f"❌ Telegram send failed: {e}")
             return False
 
-    def _short_post_title(self, text, fallback="Mork update", max_len=250):
+    def _short_post_title(self, text, fallback="Agent update", max_len=250):
         base = (text or "").strip()
         if not base:
             return fallback
@@ -3520,7 +3516,7 @@ class TwitterBot:
                         container=True,
                         scale=1,
                         interactive=True,
-                        value=self.credentials.get('reddit_user_agent', 'mork-sherpa/1.0')
+                        value=self.credentials.get('reddit_user_agent', 'agent-sherpa/1.0')
                     )
                 with gr.Row():
                     facebook_page_id = gr.Textbox(
@@ -4286,7 +4282,9 @@ class TwitterBot:
             last_tweet: update_last_tweet()
         }
 
-    def fetch_prompt_from_github(self, repo_url="https://raw.githubusercontent.com/Mork-Zuckerbarge/prime-directive/main/directive"):
+    def fetch_prompt_from_github(self, repo_url=""):
+        if not repo_url:
+            return None
         try:
             response = requests.get(repo_url, timeout=10)
             response.raise_for_status()
@@ -4302,9 +4300,9 @@ def main():
     prompt_text = bot.fetch_prompt_from_github()
     if prompt_text:
         bot.save_characters({
-               "mork zuckerbarge": {"prompt": prompt_text, "model": "gpt-4o"}
+               "default agent": {"prompt": prompt_text, "model": "gpt-4o"}
          })
-        print("✅ Mork has been rewritten using GitHub prompt.")
+        print("✅ Agent prompt has been updated from GitHub.")
     else:
         print("⚠️ GitHub prompt fetch failed; keeping existing character prompt.")
 

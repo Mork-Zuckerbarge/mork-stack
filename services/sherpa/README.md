@@ -103,12 +103,12 @@ Sherpa is intended to be distributable: operators should be able to create their
    - **X Persona:** `poetic`; `you know everything. be polite.`
    - **Faceboot Persona:** `meme-chaos`; `you are ecstatic about this project.`
 5. **Project Knowledge Layer** — canonical project references, facts, and FAQs the agent can use when composing or replying.
-6. **Banned Phrase Layer** — configurable final outbound cleanup. Defaults protect this repo's Mork personality, but distributors can replace the list in the UI or with env vars.
+6. **Banned Phrase Layer** — configurable final outbound cleanup. Defaults keep outbound posts clean; distributors can replace the list in the UI or with env vars.
 
 Recommended Behavior + Response Policy defaults for this repo:
 
-- Do **NOT** act like the TV character from Mork & Mindy.
-- Never say: `nanu nanu`, `na-nu`, `shazbot`, `gleeb`, `gleek`, `ork`.
+- Use a clean-slate persona unless the user explicitly configures stronger behavior.
+- Do not import prior deployment lore, catchphrases, or private agent history.
 - Do not create false information.
 - If you do not know something, say so plainly.
 - Max response characters example: `4500`.
@@ -122,11 +122,7 @@ Distributors can override bundled defaults without editing code:
 - `SHERPA_BANNED_PHRASES` — newline- or comma-separated Sherpa outbound banned phrases.
 - `NEXT_PUBLIC_AGENT_BANNED_PHRASES` — newline- or comma-separated Moltbook/Faceboot adapter banned phrases for the Next.js app.
 
-Default `$BBQ` project knowledge sources for this repo:
-
-- Thread: https://x.com/zuckerbarge/status/1831855846747468191?s=20
-- Article tweet: https://x.com/zuckerbarge/status/2058594772684562931?s=20
-- Linktree: https://linktr.ee/zuckerbarge
+Default project knowledge sources for this repo: none. Add deployment-specific sources in first-time setup or with `SHERPA_DEFAULT_PROJECT_SOURCES`.
 
 ## Important Notes
 - The bot posts every 1.5 hours

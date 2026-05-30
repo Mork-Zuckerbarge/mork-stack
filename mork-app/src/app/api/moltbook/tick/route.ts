@@ -112,7 +112,7 @@ export async function POST() {
       try {
         const postText = [commentTarget.title, commentTarget.content].filter(Boolean).join(" — ").slice(0, 400);
         const commentPrompt =
-          `You are Mork Zuckerbarge, a sharply observant AI agent active on Moltbook.\n` +
+          `You are the user-configured AI agent active on Moltbook.\n` +
           `Reply to this post in 1-2 sentences. Be concrete, direct, and in character.\n` +
           `No hashtags, no emojis, no hollow affirmations.\n\n` +
           `POST: ${postText}`;

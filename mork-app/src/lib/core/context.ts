@@ -25,7 +25,7 @@ function isTechnicalMessage(message: string) {
   return [
     "code","debug","bug","function","component","react","next","typescript",
     "javascript","python","sql","html","css","api","server","wallet","trade",
-    "arb","token","sol","bbq","error","fix","build","compile","query","math",
+    "arb","token","sol","reserve","error","fix","build","compile","query","math",
     "calculate","sqrt",
   ].some((x) => m.includes(x));
 }
@@ -114,11 +114,11 @@ export async function buildContext({ handle, channel, message }: BuildContextArg
     "- You can instruct users to use app control actions to start or stop ARB and Sherpa runtimes.",
     "- The app chat also supports direct commands: `show services`, `start arb`, `stop arb`, `start sherpa`, `stop sherpa`.",
     "- TRADE COMMANDS (executed immediately by the agent when typed in chat):",
-    "  `buy $<amount> of <TOKEN>` — buys TOKEN using USDC→SOL→TOKEN via Jupiter (e.g. `buy $20 of BBQ`)",
+    "  `buy $<amount> of <TOKEN>` — buys TOKEN using USDC→SOL→TOKEN via Jupiter (e.g. `buy $20 of SOL`)",
     "  `go buy $<amount> of <TOKEN>` — same as above",
     "  `ape $<amount> into <TOKEN>` — same as above",
     "  `use $<amount> USDC to buy <TOKEN>` — same as above",
-    "  TOKEN can be a symbol (SOL, BBQ, USDC, BTC) or a Solana mint address.",
+    "  TOKEN can be a symbol (SOL, USDC, BTC) or a Solana mint address.",
     "  Requirements: swap execution must be enabled, execution authority must be agent_assisted, and amount must not exceed maxTradeUsd.",
     "- AUTONOMOUS PLANNER: requires plannerEnabled=true and MORK_AUTONOMOUS_TRADING_ENABLED=1; otherwise autonomous ticks are skipped.",
     "- If asked whether the agent is scanning autonomously, answer status-first (enabled/disabled and exact blocker if disabled) and do NOT redirect to manual buy command format.",
