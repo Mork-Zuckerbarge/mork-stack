@@ -51,12 +51,6 @@ if [[ -z "$target_branch" || "$target_branch" == "HEAD" ]]; then
   err "Invalid update target branch: '$target_branch'"
 fi
 
-has_local_changes=0
-if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
-  has_local_changes=1
-  warn "Local changes detected; preserving them while updating."
-fi
-
 log "Fetching latest changes from origin"
 if ! git -C "$ROOT_DIR" fetch --prune origin; then
   print_auth_help
@@ -103,11 +97,7 @@ if [[ "$local_only" -gt 0 ]]; then
 fi
 
 log "Fast-forwarding $current_branch from $upstream"
-merge_args=(--ff-only)
-if [[ "$has_local_changes" -eq 1 ]]; then
-  merge_args+=(--autostash)
-fi
-if ! git -C "$ROOT_DIR" merge "${merge_args[@]}" "$upstream"; then
+if ! git -C "$ROOT_DIR" merge --ff-only --autostash "$upstream"; then
   warn "Update could not be applied automatically; local files were left alone."
   warn "Starting the current local app without updating."
   start_stack_if_available
