@@ -51,8 +51,10 @@ if [[ -z "$target_branch" || "$target_branch" == "HEAD" ]]; then
   err "Invalid update target branch: '$target_branch'"
 fi
 
+has_local_changes=0
 if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
-  err "Local changes detected. Commit/stash them before running update.sh so the preview diff is accurate."
+  has_local_changes=1
+  warn "Local changes detected; preserving them while updating."
 fi
 
 log "Fetching latest changes from origin"
@@ -94,15 +96,22 @@ if [[ "$local_only" -gt 0 ]]; then
   warn "$current_branch and $upstream have diverged, so this script will not auto-update."
   warn "Local commits:"
   git -C "$ROOT_DIR" log --oneline --decorate "$upstream"..HEAD || true
-  warn "Resolve manually with: git rebase $upstream"
-  warn "Then run ./start.sh when ready."
-  exit 1
+  warn "Resolve manually later with: git rebase $upstream"
+  warn "Starting the current local app without updating."
+  start_stack_if_available
+  exit 0
 fi
 
 log "Fast-forwarding $current_branch from $upstream"
-if ! git -C "$ROOT_DIR" merge --ff-only "$upstream"; then
-  print_auth_help
-  exit 1
+merge_args=(--ff-only)
+if [[ "$has_local_changes" -eq 1 ]]; then
+  merge_args+=(--autostash)
+fi
+if ! git -C "$ROOT_DIR" merge "${merge_args[@]}" "$upstream"; then
+  warn "Update could not be applied automatically; local files were left alone."
+  warn "Starting the current local app without updating."
+  start_stack_if_available
+  exit 0
 fi
 
 start_stack_if_available
