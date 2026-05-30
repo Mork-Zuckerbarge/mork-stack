@@ -72,7 +72,7 @@ export async function POST(req: Request) {
     const amountSol = Number(body.amountSol ?? 0);
     const slippageBps = Math.min(Math.max(Number(body.slippageBps ?? 50), 10), 300);
     const inputMint = body.inputMint?.trim() || SOL_MINT;
-    const outputMint = body.outputMint?.trim() || BBQ_MINT;
+    const outputMint = body.outputMint?.trim() || BBQ_MINT || SOL_MINT;
 
     if (!Number.isFinite(amountSol) || amountSol <= 0) {
       return NextResponse.json({ ok: false, error: "amountSol must be > 0" }, { status: 400 });
@@ -131,7 +131,7 @@ export async function POST(req: Request) {
       otherAmountThreshold: fromRawAmount(quote.otherAmountThreshold, outputDecimals),
       priceImpactPct: quote.priceImpactPct ?? "0",
       routeFeeAmount: fromRawAmount(feeInOutput, outputDecimals),
-      routeFeeSymbol: quote.outputMint === BBQ_MINT ? "BBQ" : quote.outputMint === SOL_MINT ? "SOL" : "token",
+      routeFeeSymbol: BBQ_MINT && quote.outputMint === BBQ_MINT ? BBQ_TOKEN.symbol : quote.outputMint === SOL_MINT ? "SOL" : "token",
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "quote failed";

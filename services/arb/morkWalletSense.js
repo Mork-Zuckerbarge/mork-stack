@@ -1,8 +1,8 @@
 const { PublicKey } = require("@solana/web3.js");
-const BBQ_MINT = new PublicKey(
-  "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn"
-);
-const REQUIRED_BBQ_BALANCE = 1000;
+const RESERVE_TOKEN_MINT = process.env.MORK_RESERVE_TOKEN_MINT?.trim() || "";
+const RESERVE_TOKEN_SYMBOL = process.env.MORK_RESERVE_TOKEN_SYMBOL?.trim() || "RESERVE";
+const BBQ_MINT = RESERVE_TOKEN_MINT ? new PublicKey(RESERVE_TOKEN_MINT) : null;
+const REQUIRED_BBQ_BALANCE = Number(process.env.MORK_RESERVE_TOKEN_REQUIRED_BALANCE || 0);
 
 function uiAmountFromParsedTokenAccount(parsed) {
   try {
@@ -70,6 +70,8 @@ async function enforceBbqGateOrExit(
   ownerPubkey,
   { knownBbqBalance = null } = {}
 ) {
+  if (!BBQ_MINT || REQUIRED_BBQ_BALANCE <= 0) return 0;
+
   const minBbq = REQUIRED_BBQ_BALANCE;
   const bbqBal =
     typeof knownBbqBalance === "number" && Number.isFinite(knownBbqBalance) && knownBbqBalance > 0
@@ -78,7 +80,7 @@ async function enforceBbqGateOrExit(
 
   if (bbqBal < minBbq) {
     console.error(
-      `⛔ BBQ GATE: wallet has ${bbqBal.toFixed(6)} BBQ, needs >= ${minBbq}. Exiting.`
+      `⛔ RESERVE GATE: wallet has ${bbqBal.toFixed(6)} ${RESERVE_TOKEN_SYMBOL}, needs >= ${minBbq}. Exiting.`
     );
     process.exit(2);
   }
@@ -88,7 +90,7 @@ async function enforceBbqGateOrExit(
 async function getWalletSnapshot(connection, ownerPubkey, { includeTokens = true, topN = 20 } = {}) {
   const solLamports = await connection.getBalance(ownerPubkey);
   const sol = solLamports / 1e9;
-  const bbq = await getSplBalanceUi(connection, ownerPubkey, BBQ_MINT);
+  const bbq = BBQ_MINT ? await getSplBalanceUi(connection, ownerPubkey, BBQ_MINT) : 0;
 
   let tokens = [];
   if (includeTokens) {

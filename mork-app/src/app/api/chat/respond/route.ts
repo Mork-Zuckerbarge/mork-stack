@@ -43,7 +43,7 @@ const STATIC_SYMBOL_MINT_MAP: Record<string, string> = {
   USDC: USDC_MINT,
   BTC: BTC_MINT,
   WBTC: BTC_MINT,
-  BBQ: BBQ_MINT,
+  ...(BBQ_MINT ? { [BBQ_TOKEN.symbol.toUpperCase()]: BBQ_MINT } : {}),
 };
 const WORD_NUMBER_USD: Record<string, number> = {
   one: 1, two: 2, three: 3, four: 4, five: 5,
@@ -726,7 +726,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   if (command.type === "trade.sellAll") {
     try {
       quantity = await resolveSellAllQuantity(inputToken.mint);
-      if (inputToken.mint === BBQ_MINT) {
+      if (BBQ_MINT && inputToken.mint === BBQ_MINT) {
         const surplus = Math.max(0, quantity - BBQ_TOKEN.requiredBalance);
         quantity = surplus * BBQ_TOKEN.maxSellSurplusPct;
       }
@@ -734,7 +734,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
       return { ok: false, status: 500, error: error instanceof Error ? error.message : "Could not read wallet balance for sell all." };
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      const minimumNote = inputToken.mint === BBQ_MINT ? ` above the required ${BBQ_TOKEN.requiredBalance} BBQ reserve` : "";
+      const minimumNote = BBQ_MINT && inputToken.mint === BBQ_MINT ? ` above the required ${BBQ_TOKEN.requiredBalance} ${BBQ_TOKEN.symbol} reserve` : "";
       return { ok: false, status: 400, error: `No ${inputToken.symbol} balance available to sell${minimumNote}.` };
     }
   }

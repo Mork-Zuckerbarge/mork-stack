@@ -634,7 +634,7 @@ export default function JupiterPanel() {
           <div className="text-lg font-semibold">{wallet ? wallet.sol.toFixed(4) : "—"}</div>
         </div>
         <div className="rounded-2xl border border-white/15 bg-black/35 p-3">
-          <div className="text-[11px] text-white/55">BBQ balance</div>
+          <div className="text-[11px] text-white/55">Reserve balance</div>
           <div className="text-lg font-semibold">{wallet ? wallet.bbq.toFixed(4) : "—"}</div>
         </div>
         <div className="rounded-2xl border border-white/15 bg-black/35 p-3">

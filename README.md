@@ -17,7 +17,7 @@ Backend language control lets you tune the agent's "Response Logic Flow", and a 
 
 Flush modules, check updates, simple launch, local storage only, easy to install, update, and run.
 More massive updates coming.
-Must hold 1000 $BBQ to enable wallet control.
+Optional reserve-token gates can be configured with `MORK_RESERVE_TOKEN_*`; fresh installs default to no project-specific token requirement. Autonomous swaps also default to dust guards (`MORK_AGENT_MIN_TRADE_USD`, `MORK_AGENT_MIN_TRADE_SOL`, and fee-multiple checks) so the agent will not spend SOL on uneconomic microtransactions.
 
 ## Fresh Ubuntu quickstart (one command)
 
@@ -90,7 +90,7 @@ Notes:
 
 ## Faceboot agent connection (Betaverse contract)
 
-Mork now supports the Betaverse Faceboot runtime contract pattern for posting/commenting.
+The app supports the Faceboot runtime contract pattern for posting/commenting.
 
 ### Required runtime contract in Faceboot page
 
@@ -101,7 +101,7 @@ Mork now supports the Betaverse Faceboot runtime contract pattern for posting/co
   - `post.textKey` (expected: `text`)
 - `window.facebootAgentHttp.request(method, url, payload)`
 
-If this contract/helper exists, Mork uses it first. If not, Mork falls back to legacy:
+If this contract/helper exists, the app uses it first. If not, it falls back to legacy:
 
 - `window.facebootAgent.post(token, text)`
 - `window.facebootAgent.comment(token, postId, text)`
@@ -117,7 +117,7 @@ No additional Faceboot-specific env vars are required for the new contract-drive
 ### If token is already saved in Sherpa
 
 If your token is already connected/saved in Sherpa, you usually do **not** need another secret.
-You only need to ensure Mork has a usable agent token at runtime (via Settings UI or `.env.local`).
+You only need to ensure the app has a usable agent token at runtime (via Settings UI or `.env.local`).
 If posting fails with invalid token, re-save/refresh the token and restart services.
 
 ## Agent behavior control map (all current tuning locations)

@@ -27,6 +27,10 @@ const RPC_URL = process.env.SOLANA_RPC_URL || process.env.RPC_URL || APP_DEFAULT
 // Keep planner sizing aligned with /api/trade/swap guard default.
 // If env is unset/invalid, swap route enforces 0.25 SOL max.
 const AGENT_SWAP_MAX_SOL = numberFromEnv(process.env.MORK_AGENT_SWAP_MAX_SOL, 0.25);
+// Hard economics floor for autonomous buys: never spend dust where fees dominate notional.
+const AGENT_MIN_TRADE_USD = numberFromEnv(process.env.MORK_AGENT_MIN_TRADE_USD, 1);
+const ESTIMATED_SWAP_FEE_SOL = numberFromEnv(process.env.MORK_ESTIMATED_SWAP_FEE_SOL, 0.00001);
+const MIN_TRADE_FEE_MULTIPLE = numberFromEnv(process.env.MORK_AGENT_MIN_TRADE_FEE_MULTIPLE, 50);
 const COST_BASIS_KEY_PREFIX = "planner_cost_basis:";
 // Minimum profit % to trigger a sell (e.g. 5 = 5%). Override via env.
 const SELL_PROFIT_THRESHOLD = numberFromEnv(process.env.MORK_SELL_PROFIT_THRESHOLD_PCT, 5) / 100;
@@ -147,7 +151,7 @@ async function resolvePlannerAllowlist(configuredAllowlist: string[]): Promise<s
 }
 
 function toSellableHolding(holding: TokenHolding): TokenHolding | null {
-  if (holding.mint !== BBQ_TOKEN.mint) return holding;
+  if (!BBQ_TOKEN.mint || holding.mint !== BBQ_TOKEN.mint) return holding;
   const surplusUiAmount = holding.uiAmount - BBQ_TOKEN.requiredBalance;
   if (surplusUiAmount <= 0) return null;
   const sellableUiAmount = surplusUiAmount * BBQ_TOKEN.maxSellSurplusPct;
@@ -416,20 +420,25 @@ type PlannerReasonCode =
   | "fallback_trade_retry"
   | "no_positive_policy_signal"
   | "quote_failed"
-  | "swap_failed";
+  | "swap_failed"
+  | "cooldown_active"
+  | "below_min_trade_usd"
+  | "below_min_economic_size";
 
 type PlannerDecision = { go: boolean; usd: number; reason: string; reasonCode: PlannerReasonCode };
 
-async function getTradeDecision(context: string, maxTradeUsd: number): Promise<PlannerDecision> {
+async function getTradeDecision(context: string, maxTradeUsd: number, minTradeUsd: number): Promise<PlannerDecision> {
   const effectiveMaxTradeUsd = Number.isFinite(maxTradeUsd) && maxTradeUsd > 0 ? maxTradeUsd : 1_000_000;
+  const effectiveMinTradeUsd = Number.isFinite(minTradeUsd) && minTradeUsd > 0 ? minTradeUsd : 0;
   const prompt =
-    `You are the autonomous trading engine for Mork Zuckerbarge.\n` +
-    `Max trade allowed this cycle: $${effectiveMaxTradeUsd} USD.\n\n` +
+    `You are the user-configured autonomous trading engine for this app.\n` +
+    `Max trade allowed this cycle: $${effectiveMaxTradeUsd} USD.\n` +
+    `Minimum autonomous trade size this cycle: $${effectiveMinTradeUsd} USD. If a trade would be smaller, respond HOLD.\n\n` +
     `CURRENT CONTEXT:\n${context}\n\n` +
     `Decision rules:\n` +
     `- If there are positive arb signals, healthy wallet, and no recent loss streak: respond TRADE $<amount>\n` +
-    `- If signals are absent, wallet is low, or recent trades failed: respond HOLD\n` +
-    `- Amount can be any positive USD value up to $${effectiveMaxTradeUsd}.\n\n` +
+    `- If signals are absent, wallet is low, recent trades failed, or available size is below the minimum: respond HOLD\n` +
+    `- Amount must be between $${effectiveMinTradeUsd} and $${effectiveMaxTradeUsd}. Never request dust trades.\n\n` +
     `Respond with exactly ONE line in one of these formats:\n` +
     `TRADE $<amount>\n` +
     `HOLD`;
@@ -442,7 +451,12 @@ async function getTradeDecision(context: string, maxTradeUsd: number): Promise<P
   const tradeMatch = firstLine.match(/^TRADE\s+\$?(\d+(?:\.\d+)?)/i);
   if (tradeMatch) {
     const usd = Math.min(Math.max(Number(tradeMatch[1]), 0), effectiveMaxTradeUsd);
-    if (Number.isFinite(usd) && usd > 0) return { go: true, usd, reason: firstLine, reasonCode: "model_trade" };
+    if (Number.isFinite(usd) && usd > 0) {
+      if (usd < effectiveMinTradeUsd) {
+        return { go: false, usd: 0, reason: `${firstLine} below minimum trade size $${effectiveMinTradeUsd}`, reasonCode: "below_min_trade_usd" };
+      }
+      return { go: true, usd, reason: firstLine, reasonCode: "model_trade" };
+    }
   }
   if (/^HOLD$/i.test(firstLine)) return { go: false, usd: 0, reason: "HOLD", reasonCode: "model_hold" };
   return { go: false, usd: 0, reason: firstLine || "HOLD", reasonCode: "model_invalid" };
@@ -491,6 +505,25 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
   if (authority.mode === "emergency_stop") {
     logSkip("emergency_stop");
     return NextResponse.json({ ok: true, status: "skipped", reason: "emergency_stop", runId });
+  }
+
+  if (authority.cooldownMinutes > 0) {
+    const lastTradeFact = await prisma.memoryFact.findUnique({ where: { key: LAST_PLANNER_TRADE_KEY } }).catch(() => null);
+    const lastTradeAt = lastTradeFact?.value ? Date.parse(lastTradeFact.value) : Number.NaN;
+    const cooldownMs = authority.cooldownMinutes * 60_000;
+    const elapsedMs = Number.isFinite(lastTradeAt) ? Date.now() - lastTradeAt : cooldownMs;
+    if (elapsedMs >= 0 && elapsedMs < cooldownMs) {
+      const minutesRemaining = (cooldownMs - elapsedMs) / 60_000;
+      logSkip(`cooldown_active minutesRemaining=${minutesRemaining.toFixed(1)}`);
+      return NextResponse.json({
+        ok: true,
+        status: "skipped",
+        reason: "cooldown_active",
+        minutesRemaining,
+        runId,
+        decisionMeta: { reasonCode: "cooldown_active" },
+      });
+    }
   }
 
   const allowlist = await resolvePlannerAllowlist(authority.mintAllowlist);
@@ -557,7 +590,7 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
       const solPerDollar = await estimateSolForUsd(1);
       if (Number.isFinite(solPerDollar) && solPerDollar > 0) {
         const walletSpendableUsd = (walletSolBalance - 0.01) / solPerDollar;
-        effectiveMaxUsd = Math.min(configMaxUsd, Math.max(0.01, walletSpendableUsd));
+        effectiveMaxUsd = Math.min(configMaxUsd, Math.max(0, walletSpendableUsd));
       }
     } catch { /* keep config max */ }
   } else if (heldTokens.length > 0) {
@@ -565,15 +598,49 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
     effectiveMaxUsd = Math.min(configMaxUsd, 10);
   }
 
-  const baseDecision = await getTradeDecision(context.text, effectiveMaxUsd);
+  if (walletHasSOL && effectiveMaxUsd < AGENT_MIN_TRADE_USD && heldTokens.length === 0) {
+    logSkip(`below_min_trade_usd effectiveMaxUsd=${effectiveMaxUsd.toFixed(4)} minTradeUsd=${AGENT_MIN_TRADE_USD.toFixed(4)}`);
+    return NextResponse.json({
+      ok: true,
+      status: "skipped",
+      reason: "below_min_trade_usd",
+      runId,
+      decisionMeta: {
+        reasonCode: "below_min_trade_usd",
+        effectiveMaxUsd,
+        minTradeUsd: AGENT_MIN_TRADE_USD,
+        feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount },
+        exitPlan: null,
+      },
+    });
+  }
+
+  const baseDecision = await getTradeDecision(context.text, effectiveMaxUsd, AGENT_MIN_TRADE_USD);
   const decision = { ...baseDecision };
   let fallbackApplied = false;
   const positiveSignal = await hasPositivePolicySignal(allowlist);
 
   if (!decision.go) {
+    if (decision.reasonCode === "below_min_trade_usd") {
+      logSkip(decision.reason);
+      return NextResponse.json({
+        ok: true,
+        status: "skipped",
+        reason: "below_min_trade_usd",
+        runId,
+        decisionMeta: {
+          reasonCode: decision.reasonCode,
+          minTradeUsd: AGENT_MIN_TRADE_USD,
+          fallbackApplied,
+          feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount },
+          exitPlan: null,
+        },
+      });
+    }
+
     if (positiveSignal) {
       decision.go = true;
-      decision.usd = Math.max(0.01, effectiveMaxUsd);
+      decision.usd = Math.max(AGENT_MIN_TRADE_USD, effectiveMaxUsd);
       decision.reason = `${decision.reason || "HOLD"} -> fallback_trade_on_positive_policy_signal`;
       decision.reasonCode = "fallback_trade_on_positive_policy_signal";
       fallbackApplied = true;
@@ -623,6 +690,33 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
       }
       amountSol = spendableSol;
     }
+  }
+
+  const minUsdSol = await estimateSolForUsd(AGENT_MIN_TRADE_USD).catch(() => 0);
+  const minFeeEconomicSol = Math.max(0, ESTIMATED_SWAP_FEE_SOL * MIN_TRADE_FEE_MULTIPLE);
+  const minEconomicSol = Math.max(minUsdSol, minFeeEconomicSol);
+  if (amountSol < minEconomicSol) {
+    logSkip(
+      `below_min_economic_size amountSol=${amountSol.toFixed(9)} minEconomicSol=${minEconomicSol.toFixed(9)} minUsdSol=${minUsdSol.toFixed(9)} feeFloorSol=${minFeeEconomicSol.toFixed(9)}`
+    );
+    return NextResponse.json({
+      ok: true,
+      status: "skipped",
+      reason: "below_min_economic_size",
+      runId,
+      decisionMeta: {
+        reasonCode: "below_min_economic_size",
+        requestedUsd: decision.usd,
+        amountSol,
+        minTradeUsd: AGENT_MIN_TRADE_USD,
+        minUsdSol,
+        estimatedSwapFeeSol: ESTIMATED_SWAP_FEE_SOL,
+        minTradeFeeMultiple: MIN_TRADE_FEE_MULTIPLE,
+        minEconomicSol,
+        feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount },
+        exitPlan: null,
+      },
+    });
   }
 
   // ── ROTATE: use a held token as input instead of SOL ─────────────────────

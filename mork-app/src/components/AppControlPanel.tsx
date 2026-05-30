@@ -67,6 +67,19 @@ const personaModes = {
 };
 
 const STYLE_SETUP_IMAGE_TARGET = 7;
+const requiredPersonaSetupFields = [
+  ["App persona guidelines", (state: AppControlState) => state.controls.appPersonaGuidelines],
+  ["Telegram persona guidelines", (state: AppControlState) => state.controls.telegramPersonaGuidelines],
+  ["X persona guidelines", (state: AppControlState) => state.controls.xPersonaGuidelines],
+  ["Faceboot persona guidelines", (state: AppControlState) => state.controls.facebootPersonaGuidelines],
+  ["Global behavior guidelines", (state: AppControlState) => state.controls.responsePolicy.behaviorGuidelines],
+] as const;
+
+function missingAgentSetupFields(state: AppControlState): string[] {
+  return requiredPersonaSetupFields
+    .filter(([, read]) => !read(state).trim())
+    .map(([label]) => label);
+}
 
 function parseStyleUrls(raw: string): string[] {
   return raw
@@ -206,6 +219,12 @@ export default function AppControlPanel() {
 
   async function completeFirstTimeSetup() {
     const urls = parseStyleUrls(styleSetupUrls);
+    if (!state) return;
+    const missingFields = missingAgentSetupFields(state);
+    if (missingFields.length > 0) {
+      setStatusText(`Save these agent setup fields before completing first-time setup: ${missingFields.join(", ")}.`);
+      return;
+    }
     if (urls.length < STYLE_SETUP_IMAGE_TARGET) {
       setStatusText(`Provide ${STYLE_SETUP_IMAGE_TARGET} style image URLs before completing first-time setup.`);
       return;
@@ -268,7 +287,7 @@ export default function AppControlPanel() {
         <div className="space-y-4 text-sm">
           {!state.controls.startupCompleted ? (
             <div className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-              First startup setup is incomplete. Select a model and provide <strong>{STYLE_SETUP_IMAGE_TARGET} public image URLs</strong> as theme examples for style guidance (not direct source media), then click <strong>Complete First-Time Setup</strong>.
+              First startup setup is incomplete. Select a model, provide <strong>{STYLE_SETUP_IMAGE_TARGET} public image URLs</strong> as theme examples, then fill and save every persona and behavior field below before clicking <strong>Complete First-Time Setup</strong>.
             </div>
           ) : null}
 
@@ -293,6 +312,16 @@ export default function AppControlPanel() {
 
           <div className="rounded-2xl bg-black/35 p-3">
             <div className="mb-2 text-xs uppercase tracking-wide text-white/60">First-Time Agent Setup</div>
+            {!state.controls.startupCompleted ? (
+              <div className="mb-3 rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/70">
+                <div className="mb-1 font-medium text-white/80">Complete these saved setup fields for a clean-slate agent:</div>
+                <ul className="list-disc space-y-1 pl-4">
+                  <li>App, Telegram, X, and Faceboot persona modes.</li>
+                  <li>App, Telegram, X, and Faceboot persona guidelines.</li>
+                  <li>Global behavior policy: max length, URL permission, quote permission, and behavior guidelines.</li>
+                </ul>
+              </div>
+            ) : null}
             <label className="mb-2 block text-xs text-white/70">Ollama model selection</label>
             <select
               value={state.controls.selectedOllamaModel}
@@ -328,10 +357,19 @@ export default function AppControlPanel() {
               <p className="mt-2 text-xs text-white/60">
                 Selected: {parseStyleUrls(styleSetupUrls).length}/{STYLE_SETUP_IMAGE_TARGET}
               </p>
+              {!state.controls.startupCompleted ? (
+                <p className="mt-1 text-xs text-white/60">
+                  Missing saved persona/behavior fields: {missingAgentSetupFields(state).length > 0 ? missingAgentSetupFields(state).join(", ") : "none"}
+                </p>
+              ) : null}
             </div>
             <button
               onClick={completeFirstTimeSetup}
-              disabled={busy || parseStyleUrls(styleSetupUrls).length < STYLE_SETUP_IMAGE_TARGET}
+              disabled={
+                busy ||
+                parseStyleUrls(styleSetupUrls).length < STYLE_SETUP_IMAGE_TARGET ||
+                (!state.controls.startupCompleted && missingAgentSetupFields(state).length > 0)
+              }
               className="mt-3 w-full rounded-xl border border-white/10 px-3 py-2"
             >
               Complete First-Time Setup
@@ -467,7 +505,7 @@ function PersonaEditor({
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder="Customize tone, goals, boundaries, and personality. Default is a neutral BBQ/Mork-aware blank slate."
+        placeholder="Customize tone, goals, boundaries, and personality. Default is a neutral blank slate."
         rows={3}
         className="w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs"
       />
