@@ -6,5 +6,61 @@
     "outMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "outDecimals": 6,
     "probeUsd": 25
+  },
+  {
+    "symbol": "JUP/USDC",
+    "inMint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+    "inDecimals": 6,
+    "outMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "outDecimals": 6,
+    "probeUsd": 25
+  },
+  {
+    "symbol": "JTO/USDC",
+    "inMint": "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
+    "inDecimals": 9,
+    "outMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "outDecimals": 6,
+    "probeUsd": 25
+  },
+  {
+    "symbol": "WIF/USDC",
+    "inMint": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLhQ8H3QKqL8H",
+    "inDecimals": 6,
+    "outMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "outDecimals": 6,
+    "probeUsd": 25
+  },
+  {
+    "symbol": "PYTH/USDC",
+    "inMint": "HZ1JovNiVvGrGNiiYvEozEVgYvU6PhJufXQ43JkMihFG",
+    "inDecimals": 6,
+    "outMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "outDecimals": 6,
+    "probeUsd": 25
+  },
+  {
+    "symbol": "ORCA/USDC",
+    "inMint": "orcaEKTdK7LKz57vaAYvYq6mNsbeavhnzL6tHLM2DkM",
+    "inDecimals": 6,
+    "outMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "outDecimals": 6,
+    "probeUsd": 25
+  },
+  {
+    "symbol": "MPLX/USDC",
+    "inMint": "MPLX4s3cfjJmW6te5YtP8wE3YsYF3qoKekM2Wgs6hjB",
+    "inDecimals": 6,
+    "outMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "outDecimals": 6,
+    "probeUsd": 25
+  },
+  {
+    "symbol": "MEW/USDC",
+    "inMint": "MEW1gQWJ3nEXg2qgERiYzDjp4C6g6A3pRM9dD2dEz3K",
+    "inDecimals": 5,
+    "outMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "outDecimals": 6,
+    "probeUsd": 25
   }
 ]

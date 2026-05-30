@@ -244,11 +244,25 @@ if [[ -d "$ARB_DIR" ]]; then
   fi
 
   if [[ ! -f "$ARB_DIR/whitelist.json" ]]; then
-    if [[ -f "$ARB_DIR/whitelist.example.json" ]]; then
+    log "No arb whitelist.json found; building first-start whitelist with services/arb/build_whitelist.js"
+    if (
+      cd "$ARB_DIR"
+      npm run build:whitelist >>"$LOG_DIR/arb-whitelist.log" 2>&1
+    ); then
+      whitelist_count="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const v=JSON.parse(fs.readFileSync(p,"utf8")); console.log(Array.isArray(v)?v.length:0)' "$ARB_DIR/whitelist.json" 2>/dev/null || printf "0")"
+      if [[ "$whitelist_count" =~ ^[1-9][0-9]*$ ]]; then
+        log "Built arb whitelist.json with ${whitelist_count} markets"
+      elif [[ -f "$ARB_DIR/whitelist.example.json" ]]; then
+        warn "Whitelist build produced no markets; using whitelist.example.json so startup can continue. Check $LOG_DIR/arb-whitelist.log"
+        cp "$ARB_DIR/whitelist.example.json" "$ARB_DIR/whitelist.json"
+      else
+        warn "Whitelist build produced no markets and no whitelist.example.json exists; planner allowlist may be empty. Check $LOG_DIR/arb-whitelist.log"
+      fi
+    elif [[ -f "$ARB_DIR/whitelist.example.json" ]]; then
+      warn "Whitelist build failed; using whitelist.example.json so startup can continue. Check $LOG_DIR/arb-whitelist.log"
       cp "$ARB_DIR/whitelist.example.json" "$ARB_DIR/whitelist.json"
-      log "Seeded arb whitelist from whitelist.example.json (run build_whitelist.js to expand it)"
     else
-      warn "No whitelist.json and no whitelist.example.json found; planner allowlist may be empty"
+      warn "Whitelist build failed and no whitelist.example.json exists; planner allowlist may be empty. Check $LOG_DIR/arb-whitelist.log"
     fi
   fi
 

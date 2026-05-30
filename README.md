@@ -198,6 +198,10 @@ If The Agent feels slow or “dumber,” tune behavior in these places (ordered 
 These variables control the MEV/arb strategies in `services/sol-mev-bot` and `services/arb`.  
 Add them to **`mork-app/.env.local`** (picked up by both services via `start.sh`).
 
+### Arb whitelist generation
+
+On first startup, if `services/arb/whitelist.json` is missing, `start.sh` runs the whitelist generator (`npm --prefix services/arb run build:whitelist`) before launching the arb service. The generator probes Jupiter routes and writes a local `whitelist.json`; if Jupiter/network access fails, startup falls back to `services/arb/whitelist.example.json` so the UI still comes up. Use `WHITELIST_TARGET` to tune the generated list size.
+
 ### Enabling new strategies
 
 All new strategies are **off by default** — flip to `true` to enable each one independently.
