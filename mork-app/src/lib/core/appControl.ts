@@ -81,6 +81,8 @@ const STARTUP_ALLOWLIST_LIMIT = 5000;
 const FALLBACK_TOKEN_CSV =
   "https://raw.githubusercontent.com/igneous-labs/jup-token-list/main/validated-tokens.csv";
 const ALL_ALLOWLIST_SENTINEL = "ALL";
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const MIN_BOOTSTRAP_ALLOWLIST_SIZE = 10;
 
 const state: AppControlState = {
   arb: {
@@ -201,20 +203,24 @@ function pickHeaderIndex(headers: string[], candidates: string[]): number {
 }
 
 function readWhitelistMints(limit: number): string[] {
-  const whitelistPath = path.resolve(process.cwd(), "../services/arb/whitelist.json");
-  if (!fs.existsSync(whitelistPath)) return [];
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(whitelistPath, "utf8"));
-    if (!Array.isArray(parsed)) return [];
-    const mints = parsed.map((item) => {
-      if (typeof item === "string") return item;
-      if (item && typeof item === "object" && "inMint" in item && typeof item.inMint === "string") return item.inMint;
-      return "";
-    });
-    return normalizeMintList(mints, limit);
-  } catch {
-    return [];
+  for (const filename of ["whitelist.json", "whitelist.example.json"]) {
+    const whitelistPath = path.resolve(process.cwd(), "../services/arb", filename);
+    if (!fs.existsSync(whitelistPath)) continue;
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(whitelistPath, "utf8"));
+      if (!Array.isArray(parsed)) continue;
+      const mints = parsed.map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "inMint" in item && typeof item.inMint === "string") return item.inMint;
+        return "";
+      });
+      const normalized = normalizeMintList(mints, limit);
+      if (normalized.length > 0) return normalized;
+    } catch {
+      // Try the next whitelist source.
+    }
   }
+  return [];
 }
 
 async function fetchFallbackMints(limit: number): Promise<string[]> {
@@ -246,6 +252,15 @@ function sanitizeExecutionAllowlist(values: Array<string | null | undefined>): s
     return [ALL_ALLOWLIST_SENTINEL, BBQ_TOKEN.mint];
   }
   return normalizeMintList([...normalized, BBQ_TOKEN.mint], STARTUP_ALLOWLIST_LIMIT);
+}
+
+function shouldBootstrapAllowlist(values: string[]): boolean {
+  if (values.length === 0) return true;
+  if (values.some((mint) => mint.toUpperCase() === ALL_ALLOWLIST_SENTINEL)) return false;
+  if (values.length >= MIN_BOOTSTRAP_ALLOWLIST_SIZE) return false;
+
+  const starterOnly = new Set([SOL_MINT, BBQ_TOKEN.mint]);
+  return values.every((mint) => starterOnly.has(mint));
 }
 
 function applyPersistedState(raw: unknown) {
@@ -449,12 +464,13 @@ async function ensureStateLoaded() {
     }
   }
 
-  if (state.controls.executionAuthority.mintAllowlist.length === 0) {
+  if (shouldBootstrapAllowlist(state.controls.executionAuthority.mintAllowlist)) {
     const startupMints = readWhitelistMints(STARTUP_ALLOWLIST_LIMIT);
     const fallbackMints = startupMints.length > 0 ? startupMints : await fetchFallbackMints(STARTUP_ALLOWLIST_LIMIT);
-    const finalMints = fallbackMints.length > 0 ? fallbackMints : [];
-    state.controls.executionAuthority.mintAllowlist = sanitizeExecutionAllowlist([...finalMints, BBQ_TOKEN.mint]);
-    await persistState();
+    if (fallbackMints.length > 0) {
+      state.controls.executionAuthority.mintAllowlist = sanitizeExecutionAllowlist([...fallbackMints, BBQ_TOKEN.mint]);
+      await persistState();
+    }
   }
 
   hasLoadedPersistedState = true;

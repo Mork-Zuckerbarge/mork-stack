@@ -60,40 +60,46 @@ function normalizeMintList(values: Array<string | null | undefined>, limit: numb
 }
 
 function readWhitelistMints(limit = 1000): string[] {
-  const whitelistPath = path.resolve(process.cwd(), "../services/arb/whitelist.json");
-  if (!fs.existsSync(whitelistPath)) return [];
+  for (const filename of ["whitelist.json", "whitelist.example.json"]) {
+    const whitelistPath = path.resolve(process.cwd(), "../services/arb", filename);
+    if (!fs.existsSync(whitelistPath)) continue;
 
-  try {
-    const raw = fs.readFileSync(whitelistPath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      if (parsed && typeof parsed === "object" && "markets" in parsed && Array.isArray(parsed.markets)) {
-        return normalizeMintList(
-          parsed.markets.map((item) => {
-            if (typeof item === "string") return item;
-            if (item && typeof item === "object" && "inMint" in item && typeof item.inMint === "string") return item.inMint;
+    try {
+      const raw = fs.readFileSync(whitelistPath, "utf8");
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        if (parsed && typeof parsed === "object" && "markets" in parsed && Array.isArray(parsed.markets)) {
+          const mints = normalizeMintList(
+            parsed.markets.map((item) => {
+              if (typeof item === "string") return item;
+              if (item && typeof item === "object" && "inMint" in item && typeof item.inMint === "string") return item.inMint;
+              return "";
+            }),
+            limit,
+          );
+          if (mints.length > 0) return mints;
+        }
+        continue;
+      }
+
+      const mints = normalizeMintList(
+        parsed
+          .map((item) => {
+            if (typeof item === "string") return item.trim();
+            if (item && typeof item === "object" && "inMint" in item && typeof item.inMint === "string") {
+              return item.inMint.trim();
+            }
             return "";
           }),
-          limit,
-        );
-      }
-      return [];
+        limit,
+      );
+      if (mints.length > 0) return mints;
+    } catch {
+      // Try the next whitelist source.
     }
-
-    return normalizeMintList(
-      parsed
-      .map((item) => {
-        if (typeof item === "string") return item.trim();
-        if (item && typeof item === "object" && "inMint" in item && typeof item.inMint === "string") {
-          return item.inMint.trim();
-        }
-        return "";
-      }),
-      limit,
-    );
-  } catch {
-    return [];
   }
+
+  return [];
 }
 
 async function fetchTopTokenMints(limit = 1000): Promise<string[]> {

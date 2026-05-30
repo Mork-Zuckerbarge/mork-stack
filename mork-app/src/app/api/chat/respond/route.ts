@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { PublicKey } from "@solana/web3.js";
 import { respondToChat } from "@/lib/core/chat";
 import { getOrchestratorState, startRuntime, stopRuntime } from "@/lib/core/orchestrator";
 import { getAppControlState } from "@/lib/core/appControl";
 import { prisma } from "@/lib/core/prisma";
 import { generateAudio, generateImage, generateVideo } from "@/lib/core/media";
 import { getWalletBalancesForMints } from "@/lib/core/wallet";
-import { BBQ_TOKEN } from "@/lib/core/defaults";
+import { APP_DEFAULTS, BBQ_TOKEN } from "@/lib/core/defaults";
+import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
+import { createSolanaConnection } from "@/lib/core/solanaRpc";
 import { ensurePlannerAutopilotStarted } from "@/lib/core/plannerAutopilot";
 import { POST as runPlannerTickRoute } from "@/app/planner/tick/route";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -33,6 +36,8 @@ const BBQ_MINT = BBQ_TOKEN.mint;
 const LAST_TRADE_FACT_KEY = "__agent_last_trade_iso_v1__";
 const BASE58_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const JUP_TOKEN_SEARCH_LIMIT = "100";
+const JUP_TIMEOUT_MS = getJupiterTimeoutMs();
+const RPC = process.env.SOLANA_RPC_URL || process.env.RPC_URL || APP_DEFAULTS.solanaRpcUrl;
 const STATIC_SYMBOL_MINT_MAP: Record<string, string> = {
   SOL: SOL_MINT,
   USDC: USDC_MINT,
@@ -58,24 +63,22 @@ function normalizeTokenRef(raw: string): string {
   return trimmed.toUpperCase();
 }
 
-function buildJupiterBaseCandidates() {
-  const candidates = [
-    (process.env.JUP_BASE_URL || "").trim(),
-    "https://api.jup.ag",
-    "https://lite-api.jup.ag",
-  ].filter(Boolean);
-  return [...new Set(candidates)];
-}
-
 async function fetchJsonWithJupiterFallback(path: string, query: Record<string, string>) {
-  const candidates = buildJupiterBaseCandidates();
   let lastError: unknown = null;
-  for (const base of candidates) {
+  for (const base of getJupiterBaseCandidates()) {
     try {
       const url = new URL(`${base}${path}`);
       Object.entries(query).forEach(([k, v]) => url.searchParams.set(k, v));
-      const res = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
-      if (!res.ok) { lastError = new Error(`${path} failed on ${base} (${res.status})`); continue; }
+      const res = await fetch(url.toString(), {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        lastError = new Error(`${path} failed on ${base} (${res.status})${text ? `: ${text.slice(0, 240)}` : ""}`);
+        continue;
+      }
       return await res.json();
     } catch (error) { lastError = error; }
   }
@@ -369,12 +372,25 @@ async function getTokenDecimals(mint: string): Promise<number> {
     if (Number.isFinite(decimals) && decimals >= 0) return decimals;
   } catch { /* fallback below */ }
 
-  const allRes = await fetch("https://token.jup.ag/all", { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
-  if (!allRes?.ok) return 0;
-  const allTokens = (await allRes.json()) as JupiterAllToken[];
-  const token = allTokens.find((item) => item.address === mint);
-  const decimals = Number(token?.decimals);
-  return Number.isFinite(decimals) && decimals >= 0 ? decimals : 0;
+  const allRes = await fetch("https://token.jup.ag/all", {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
+  }).catch(() => null);
+  if (allRes?.ok) {
+    const allTokens = (await allRes.json()) as JupiterAllToken[];
+    const token = allTokens.find((item) => item.address === mint);
+    const decimals = Number(token?.decimals);
+    if (Number.isFinite(decimals) && decimals >= 0) return decimals;
+  }
+
+  try {
+    const parsed = await createSolanaConnection(RPC).getParsedAccountInfo(new PublicKey(mint), "processed").catch(() => null);
+    const decimals = Number((parsed?.value as { data?: { parsed?: { info?: { decimals?: number } } } } | null)?.data?.parsed?.info?.decimals);
+    if (Number.isFinite(decimals) && decimals >= 0) return decimals;
+  } catch { /* use failure below */ }
+
+  throw new Error(`Unable to resolve token decimals for ${mint}. Try again or use a known Jupiter token.`);
 }
 
 async function estimateUsdNotional(inputMint: string, amountIn: number): Promise<number> {
