@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { Connection, Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
+import { Keypair, PublicKey, VersionedTransaction, type Connection } from "@solana/web3.js";
 import { prisma } from "@/lib/core/prisma";
 import { getAppControlState } from "@/lib/core/appControl";
 import { APP_DEFAULTS, BBQ_TOKEN } from "@/lib/core/defaults";
 import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
+import { createSolanaConnection } from "@/lib/core/solanaRpc";
 
 export const runtime = "nodejs";
 
@@ -229,7 +230,7 @@ export async function POST(req: Request) {
     }
 
     const signer = getSigner();
-    const connection = new Connection(RPC, "processed");
+    const connection = createSolanaConnection(RPC, "processed");
     const inDecimals = await getTokenDecimals(inputMint, connection);
     if (inDecimals <= 0 || inDecimals > 12) {
       return NextResponse.json(
