@@ -196,9 +196,9 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
             "Melancholy but composed.",
             "Terse, executive tone with subtle unease.",
             "Literary, but not purple.",
-            "Clinical observation, then one human aside.",
+            "Clinical detail, then one human aside.",
             "Quietly amused, slightly ominous.",
-            "Reflective, grounded, no theatrics.",
+            "Grounded, no theatrics.",
         ])
 
     # A seed that changes over time but isn't obviously periodic.
@@ -211,7 +211,8 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
     # Keep these consistent with your server.ts instruction bans.
     constraints = payload.get("constraints") or {}
     constraints.setdefault("banPhrases", [
-        "nanu nanu", "na-nu", "shazbot", "gleeb", "gleek", "ork", "mork and mindy"
+        "nanu nanu", "na-nu", "shazbot", "gleeb", "gleek", "ork", "mork and mindy",
+        "reflection", "observation"
     ])
     constraints.setdefault("noHashtags", True)
     constraints.setdefault("noEmojis", True)
@@ -305,8 +306,8 @@ def core_compose_payload(payload: dict, timeout=10) -> str:
         ] if part and str(part).strip()
     )
     if not fallback_text:
-        fallback_text = str(payload.get("topic") or payload.get("kind") or "observation").strip() or "mork update"
-    return _wrap_280(fallback_text, int(payload.get("maxChars", 260)))
+        fallback_text = str(payload.get("topic") or "mork update").strip() or "mork update"
+    return _sanitize_banned_phrases(_wrap_280(fallback_text, int(payload.get("maxChars", 260))))
 
 def core_chat_reply(handle: str, message: str, max_chars: int = 260, timeout: int = 10) -> str:
     """
@@ -354,6 +355,8 @@ DEFAULT_AGENT_BANNED_PHRASES = [
     "gleek",
     "ork",
     "mork and mindy",
+    "reflection",
+    "observation",
 ]
 
 def _split_lines_or_csv(value: str) -> list[str]:
@@ -896,7 +899,7 @@ class TwitterBot:
                 print("OpenAI client disabled or missing key.")
 
         # Initialize Twitter client if credentials present
-        if all(k in self.credentials for k in [
+        if all((self.credentials.get(k) or "").strip() for k in [
             "twitter_api_key",
             "twitter_api_secret",
             "twitter_access_token",
@@ -1647,7 +1650,7 @@ class TwitterBot:
 
             # Twitter client if all credentials provided
             needed = {"twitter_api_key", "twitter_api_secret", "twitter_access_token", "twitter_access_token_secret"}
-            if needed.issubset(set(credentials.keys())):
+            if all((credentials.get(k) or "").strip() for k in needed):
                 print("Initializing Twitter client...")
                 self.twitter_client = tweepy.Client(
                     consumer_key=credentials["twitter_api_key"],
@@ -1929,7 +1932,8 @@ class TwitterBot:
         if isinstance(phrases, str):
             phrases = _split_lines_or_csv(phrases)
         if isinstance(phrases, (list, tuple)):
-            return [str(phrase).strip() for phrase in phrases if str(phrase).strip()]
+            configured = [str(phrase).strip() for phrase in phrases if str(phrase).strip()]
+            return list(dict.fromkeys(configured + _default_banned_phrases()))
         return _default_banned_phrases()
 
     def _sanitize_outbound_text(self, text: str, max_len: int | None = None) -> str:
@@ -2433,6 +2437,10 @@ class TwitterBot:
                 tweet_text = (self.generate_tweet(tweet_or_character, topic) or "").strip()
 
             cleaned = self._sanitize_outbound_text(tweet_text, 280)
+            banned_re = _compile_banned_phrase_re(self._configured_banned_phrases())
+            if banned_re and banned_re.search(cleaned):
+                print("⚠ Outbound X text still contained a banned phrase after sanitization; skipping send.")
+                return False
             if not cleaned:
                 print("⚠ Empty tweet text after sanitization; skipping send.")
                 return False
@@ -2758,6 +2766,10 @@ class TwitterBot:
         """Send a sanitized tweet with media attached."""
         try:
             cleaned = self._sanitize_outbound_text(tweet_text, 280)
+            banned_re = _compile_banned_phrase_re(self._configured_banned_phrases())
+            if banned_re and banned_re.search(cleaned):
+                print("⚠ Outbound media X text still contained a banned phrase after sanitization; skipping send.")
+                return False
             if not cleaned:
                 print("⚠ Empty media tweet text after sanitization; skipping send.")
                 return False

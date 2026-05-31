@@ -34,6 +34,25 @@ function hasEnvValue(name: string): boolean {
   return Boolean((process.env[name] || '').trim());
 }
 
+function parseEnvBool(value: string | undefined, fallback: boolean): boolean {
+  const raw = (value || '').trim();
+  if (!raw) return fallback;
+  const normalized = raw.replace(/^(\"|')?(.*)\1$/, '$2').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+function resolveDryRun(): boolean {
+  const armed = parseEnvBool(process.env.ARMED, false);
+  const paper = parseEnvBool(process.env.PAPER, !armed);
+  const hasLegacyDryRun = hasEnvValue('DRY_RUN');
+  const legacyDryRun = parseEnvBool(process.env.DRY_RUN, true);
+  const liveRequested = hasLegacyDryRun ? !legacyDryRun : !paper;
+
+  return !(armed && liveRequested);
+}
+
 function loadConfig(): AgentConfig {
   const hasWalletPrivateKey = hasEnvValue('WALLET_PRIVATE_KEY');
   const hasMorkWalletSecretKey = hasEnvValue('MORK_WALLET_SECRET_KEY');
@@ -51,7 +70,7 @@ function loadConfig(): AgentConfig {
     process.exit(1);
   }
 
-  const dryRun = process.env.DRY_RUN !== 'false';
+  const dryRun = resolveDryRun();
   const enableMomentum = process.env.ENABLE_MOMENTUM === 'true';
   const enableAmmImbalance = process.env.ENABLE_AMM_IMBALANCE === 'true';
   const enableDriftFunding = process.env.ENABLE_DRIFT_FUNDING === 'true';
@@ -159,7 +178,7 @@ async function main(): Promise<void> {
   });
 
   if (config.dryRun) {
-    logger.warn('*** DRY RUN MODE — no real txs sent. Set DRY_RUN=false to go live. ***');
+    logger.warn('*** DRY RUN MODE — no real txs sent. Set ARMED=true and PAPER=false to go live. ***');
   }
 
   // Wallet

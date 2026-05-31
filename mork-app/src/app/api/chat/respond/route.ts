@@ -11,6 +11,7 @@ import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupite
 import { createSolanaConnection } from "@/lib/core/solanaRpc";
 import { ensurePlannerAutopilotStarted } from "@/lib/core/plannerAutopilot";
 import { POST as runPlannerTickRoute } from "@/app/planner/tick/route";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -49,6 +50,58 @@ const WORD_NUMBER_USD: Record<string, number> = {
   one: 1, two: 2, three: 3, four: 4, five: 5,
   six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
 };
+
+const HARD_OUTBOUND_BANNED_PHRASES = [
+  "reflection",
+  "observation",
+];
+
+function phraseToPattern(phrase: string): string {
+  return phrase
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\\ /g, "\\s+")
+    .replace(/\\-/g, "\\s*-\\s*");
+}
+
+function sanitizeOutboundSocialText(text: string): string {
+  const parts = HARD_OUTBOUND_BANNED_PHRASES.map(phraseToPattern).filter(Boolean);
+  const banned = parts.length ? new RegExp(`\\b(?:${parts.join("|")})\\b`, "gi") : null;
+  return (banned ? text.replace(banned, " ") : text)
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function firstExistingSherpaDir(): string {
+  const candidates = [
+    path.join(process.cwd(), "..", "services", "sherpa"),
+    path.join(process.cwd(), "services", "sherpa"),
+  ];
+
+  let cursor = process.cwd();
+  for (let i = 0; i < 6; i++) {
+    candidates.push(path.join(cursor, "services", "sherpa"));
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
+function sherpaQueueFilePath(): string {
+  return path.join(firstExistingSherpaDir(), "current_topic_from_app.txt");
+}
+
+function extractCommandText(trimmed: string, firstLine: string, pattern: RegExp): string {
+  const firstLineMatch = firstLine.match(pattern);
+  if (!firstLineMatch) return "";
+  const inlineText = firstLineMatch[1]?.trim();
+  if (inlineText) return inlineText;
+  return trimmed.split(/\r?\n/).slice(1).join("\n").trim();
+}
 
 function parseUsdAmount(raw: string): number | null {
   const numeric = Number(raw);
@@ -124,11 +177,12 @@ function parseCommand(message: string): RoutedCommand | null {
   if (!trimmed) return null;
   const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() ?? "";
 
-  const tweetMatch =
-    firstLine.match(/^hey\s+tweet\s+this\s*:\s*(.+)$/i) ||
-    firstLine.match(/^(?:tweet|post)\s+this\s+(?:on\s+)?x\s*:\s*(.+)$/i) ||
-    firstLine.match(/^x\s+post\s*:\s*(.+)$/i);
-  if (tweetMatch?.[1]?.trim()) return { type: "tweet", text: tweetMatch[1].trim() };
+  const tweetText =
+    extractCommandText(trimmed, firstLine, /^(?:hey\s+)?(?:tweet|post)\s+this\s*:\s*(.*)$/i) ||
+    extractCommandText(trimmed, firstLine, /^(?:tweet|post)\s+this\s+(?:on\s+)?x\s*:\s*(.*)$/i) ||
+    extractCommandText(trimmed, firstLine, /^x\s+post\s*:\s*(.*)$/i) ||
+    extractCommandText(trimmed, firstLine, /^(?:tweet|post)\s+(?:on\s+)?x\s*:\s*(.*)$/i);
+  if (tweetText) return { type: "tweet", text: tweetText };
 
   const telegramMatch =
     firstLine.match(/^(?:post\s+to\s+telegram|post\s+this\s+in\s+telegram|telegram\s+post|send\s+to\s+telegram)\s*:\s*(.+)$/i) ||
@@ -497,14 +551,16 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
 
     if (command.platform === "x" || command.platform === "sherpa") {
       const queuedTopic = command.caption || cleanFilename;
-      const queueFile = path.join(process.cwd(), "..", "services", "sherpa", "current_topic_from_app.txt");
+      const queueFile = sherpaQueueFilePath();
+      const sanitizedTopic = sanitizeOutboundSocialText(queuedTopic);
+      if (!sanitizedTopic) return { ok: false, status: 400, error: "Queued X caption is empty after outbound sanitization." };
       try {
         await mkdir(path.dirname(queueFile), { recursive: true });
-        await writeFile(queueFile, queuedTopic, "utf8");
+        await writeFile(queueFile, sanitizedTopic, "utf8");
       } catch {
         return { ok: false, status: 500, error: "Could not queue topic for Sherpa. Verify services/sherpa is writable." };
       }
-      return { ok: true, status: 200, routed: "sherpa/x", command: "media.share", response: `Loaded ${cleanFilename} into Sherpa Current Topic/Story. Caption queued: ${command.caption || "(none)"}.` };
+      return { ok: true, status: 200, routed: "sherpa/x", command: "media.share", response: `Loaded ${cleanFilename} into Sherpa Current Topic/Story. Caption queued: ${sanitizedTopic}.` };
     }
 
     const botToken = normalizeBotToken(process.env.TELEGRAM_BOT_TOKEN || "");
@@ -563,9 +619,9 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
   }
 
   if (command.type === "tweet") {
-    const draft = await respondToChat({ channel: "x", handle: "app-user", message: `Draft an X post using this user-provided text. Keep intent and key wording intact unless it violates policy: ${command.text}`, maxChars: 20000 });
-    const tweetText = String(draft.response || command.text).trim();
-    const queueFile = path.join(process.cwd(), "..", "services", "sherpa", "current_topic_from_app.txt");
+    const tweetText = sanitizeOutboundSocialText(command.text);
+    if (!tweetText) return { ok: false, status: 400, error: "X post is empty after outbound sanitization." };
+    const queueFile = sherpaQueueFilePath();
     await mkdir(path.dirname(queueFile), { recursive: true });
     await writeFile(queueFile, tweetText, "utf8");
     return {
