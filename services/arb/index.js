@@ -1376,6 +1376,7 @@ async function main() {
         );
         printWalletSnapshot(snap);
 
+        // ⛔ BBQ gate — keep this where it belongs.
         const knownBbqBalance = bbqBalanceFromSnapshot(snap);
         const bbqBal = await withRetry("reserve token gate", () =>
           enforceBbqGateOrExit(connection, wallet.publicKey, { knownBbqBalance })

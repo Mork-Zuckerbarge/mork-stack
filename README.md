@@ -17,7 +17,7 @@ Backend language control lets you tune the agent's "Response Logic Flow", and a 
 
 Flush modules, check updates, simple launch, local storage only, easy to install, update, and run.
 More massive updates coming.
-Optional reserve-token gates can be configured with `MORK_RESERVE_TOKEN_*`; fresh installs default to no project-specific token requirement. Autonomous swaps also default to dust guards (`MORK_AGENT_MIN_TRADE_USD`, `MORK_AGENT_MIN_TRADE_SOL`, and fee-multiple checks) so the agent will not spend SOL on uneconomic microtransactions.
+Must hold 1,000 $BBQ to enable wallet-controlled features. Autonomous swaps also default to dust guards (`MORK_AGENT_MIN_TRADE_USD`, `MORK_AGENT_MIN_TRADE_SOL`, and fee-multiple checks) so the agent will not spend SOL on uneconomic microtransactions.
 
 ## Fresh Ubuntu quickstart (one command)
 

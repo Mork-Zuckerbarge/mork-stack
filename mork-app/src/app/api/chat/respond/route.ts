@@ -734,7 +734,7 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
       return { ok: false, status: 500, error: error instanceof Error ? error.message : "Could not read wallet balance for sell all." };
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      const minimumNote = BBQ_MINT && inputToken.mint === BBQ_MINT ? ` above the required ${BBQ_TOKEN.requiredBalance} ${BBQ_TOKEN.symbol} reserve` : "";
+      const minimumNote = inputToken.mint === BBQ_MINT ? ` above the required ${BBQ_TOKEN.requiredBalance} BBQ threshold` : "";
       return { ok: false, status: 400, error: `No ${inputToken.symbol} balance available to sell${minimumNote}.` };
     }
   }

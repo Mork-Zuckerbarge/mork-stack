@@ -248,11 +248,11 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function sanitizeExecutionAllowlist(values: Array<string | null | undefined>): string[] {
   const normalized = normalizeMintList(values, STARTUP_ALLOWLIST_LIMIT);
-  const reserveMint = BBQ_TOKEN.mint.trim();
+  const bbqMint = BBQ_TOKEN.mint.trim();
   if (normalized.some((mint) => mint.toUpperCase() === ALL_ALLOWLIST_SENTINEL)) {
-    return reserveMint ? [ALL_ALLOWLIST_SENTINEL, reserveMint] : [ALL_ALLOWLIST_SENTINEL];
+    return [ALL_ALLOWLIST_SENTINEL, bbqMint];
   }
-  return normalizeMintList([...normalized, reserveMint], STARTUP_ALLOWLIST_LIMIT);
+  return normalizeMintList([...normalized, bbqMint], STARTUP_ALLOWLIST_LIMIT);
 }
 
 function shouldBootstrapAllowlist(values: string[]): boolean {
