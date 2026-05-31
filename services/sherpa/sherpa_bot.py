@@ -896,7 +896,7 @@ class TwitterBot:
                 print("OpenAI client disabled or missing key.")
 
         # Initialize Twitter client if credentials present
-        if all(k in self.credentials for k in [
+        if all((self.credentials.get(k) or "").strip() for k in [
             "twitter_api_key",
             "twitter_api_secret",
             "twitter_access_token",
@@ -1647,7 +1647,7 @@ class TwitterBot:
 
             # Twitter client if all credentials provided
             needed = {"twitter_api_key", "twitter_api_secret", "twitter_access_token", "twitter_access_token_secret"}
-            if needed.issubset(set(credentials.keys())):
+            if all((credentials.get(k) or "").strip() for k in needed):
                 print("Initializing Twitter client...")
                 self.twitter_client = tweepy.Client(
                     consumer_key=credentials["twitter_api_key"],
