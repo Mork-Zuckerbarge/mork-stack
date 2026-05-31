@@ -98,20 +98,32 @@ function pickHeaderIndex(headers: string[], candidates: string[]): number {
   return -1;
 }
 
+function candidateWhitelistPaths(): string[] {
+  return [
+    path.resolve(process.cwd(), "../services/arb/whitelist.json"),
+    path.resolve(process.cwd(), "services/arb/whitelist.json"),
+  ];
+}
+
+function mintFromWhitelistItem(item: unknown): string {
+  if (typeof item === "string") return item;
+  if (!item || typeof item !== "object") return "";
+
+  const record = item as Record<string, unknown>;
+  for (const key of ["inMint", "mint", "address"]) {
+    const value = record[key];
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
+
 function readWhitelistMints(limit: number): string[] {
-  const whitelistPath = path.resolve(process.cwd(), "../services/arb/whitelist.json");
-  if (!fs.existsSync(whitelistPath)) return [];
+  const whitelistPath = candidateWhitelistPaths().find((candidate) => fs.existsSync(candidate));
+  if (!whitelistPath) return [];
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(whitelistPath, "utf8"));
     if (!Array.isArray(parsed)) return [];
-    return normalizeMintList(
-      parsed.map((item) => {
-        if (typeof item === "string") return item;
-        if (item && typeof item === "object" && "inMint" in item && typeof item.inMint === "string") return item.inMint;
-        return "";
-      }),
-      limit,
-    );
+    return normalizeMintList(parsed.map(mintFromWhitelistItem), limit);
   } catch {
     return [];
   }
@@ -278,21 +290,23 @@ async function rankPolicyMints(allowlist: string[]): Promise<string[]> {
   return [...scoreMap.entries()].sort((a, b) => b[1] - a[1]).map(([mint]) => mint);
 }
 
-async function isMintTradableFromSol(outputMint: string): Promise<boolean> {
+async function isMintTradableFromSol(outputMint: string, amountLamports: number): Promise<boolean> {
   const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
   quoteUrl.searchParams.set("inputMint", SOL_MINT);
   quoteUrl.searchParams.set("outputMint", outputMint);
-  quoteUrl.searchParams.set("amount", "1000000");
+  quoteUrl.searchParams.set("amount", String(Math.max(1, Math.floor(amountLamports))));
   quoteUrl.searchParams.set("slippageBps", "50");
   const res = await fetch(quoteUrl.toString(), { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
   return Boolean(res?.ok);
 }
 
-async function pickBestTradableMint(allowlist: string[]): Promise<string | null> {
+async function pickBestTradableMint(allowlist: string[], amountSol: number): Promise<string | null> {
   const ranked = await rankPolicyMints(allowlist);
+  const probeLamports = Math.max(1_000_000, Math.floor(amountSol * 1_000_000_000));
   for (const mint of ranked) {
-    if (await isMintTradableFromSol(mint)) return mint;
+    if (await isMintTradableFromSol(mint, probeLamports)) return mint;
   }
+  console.warn(`[planner] no tradable mint found after probing ${ranked.length} allowlisted mints with ${(probeLamports / 1_000_000_000).toFixed(6)} SOL`);
   return null;
 }
 
@@ -420,6 +434,7 @@ type PlannerReasonCode =
   | "fallback_trade_retry"
   | "no_positive_policy_signal"
   | "quote_failed"
+  | "no_tradable_mint"
   | "swap_failed"
   | "cooldown_active"
   | "below_min_trade_usd"
@@ -665,13 +680,6 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
 
   console.log(`[planner] decision: ${decision.reason} runId=${runId}`);
 
-  const outputMint = await pickBestTradableMint(allowlist);
-  if (!outputMint) {
-    logSkip("no_tradable_mint");
-    return NextResponse.json({ ok: true, status: "skipped", reason: "no_tradable_mint", runId });
-  }
-  const targetHasPositiveSignal = await hasPositivePolicySignalForMint(outputMint);
-
   let amountSol: number;
   try { amountSol = await estimateSolForUsd(decision.usd); }
   catch { return NextResponse.json({ ok: false, status: "error", reason: "quote_failed", runId, decisionMeta: { reasonCode: "quote_failed" } }); }
@@ -718,6 +726,25 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
       },
     });
   }
+
+  const outputMint = await pickBestTradableMint(allowlist, amountSol);
+  if (!outputMint) {
+    logSkip(`no_tradable_mint allowlistSize=${allowlist.length} probeSol=${amountSol.toFixed(6)}`);
+    return NextResponse.json({
+      ok: true,
+      status: "skipped",
+      reason: "no_tradable_mint",
+      runId,
+      decisionMeta: {
+        reasonCode: "no_tradable_mint",
+        allowlistSize: allowlist.length,
+        probeSol: amountSol,
+        feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount },
+        exitPlan: null,
+      },
+    });
+  }
+  const targetHasPositiveSignal = await hasPositivePolicySignalForMint(outputMint);
 
   // ── ROTATE: use a held token as input instead of SOL ─────────────────────
   // Selling a held token is only allowed as part of a rotation when the exit is
