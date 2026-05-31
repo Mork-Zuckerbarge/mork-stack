@@ -161,6 +161,10 @@ sync_persistent_state
 
 if [[ -f "$APP_DIR/.env.local" ]]; then
   log "Loading environment from mork-app/.env.local"
+  if ! bash -n "$APP_DIR/.env.local"; then
+    echo "[error] mork-app/.env.local has invalid shell syntax. Check for an unmatched quote near the line bash reported above." >&2
+    exit 1
+  fi
   set -a
   # shellcheck disable=SC1090
   source "$APP_DIR/.env.local"
