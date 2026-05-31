@@ -151,7 +151,7 @@ async function resolvePlannerAllowlist(configuredAllowlist: string[]): Promise<s
 }
 
 function toSellableHolding(holding: TokenHolding): TokenHolding | null {
-  if (holding.mint !== BBQ_TOKEN.mint) return holding;
+  if (!BBQ_TOKEN.mint || holding.mint !== BBQ_TOKEN.mint) return holding;
   const surplusUiAmount = holding.uiAmount - BBQ_TOKEN.requiredBalance;
   if (surplusUiAmount <= 0) return null;
   const sellableUiAmount = surplusUiAmount * BBQ_TOKEN.maxSellSurplusPct;

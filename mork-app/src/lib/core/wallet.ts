@@ -175,7 +175,7 @@ async function fetchWalletState(): Promise<WalletState> {
   const solLamports = await withRpcRetry("getBalance", () => connection.getBalance(owner));
   const sol = solLamports / 1e9;
 
-  const bbq = await getSplBalance(connection, owner, BBQ_MINT);
+  const bbq = BBQ_MINT ? await getSplBalance(connection, owner, BBQ_MINT) : 0;
   const usdc = await getSplBalance(connection, owner, USDC_MINT);
 
   return {
@@ -183,7 +183,7 @@ async function fetchWalletState(): Promise<WalletState> {
     sol,
     bbq,
     usdc,
-    requirementMet: bbq >= BBQ_TOKEN.requiredBalance,
+    requirementMet: !BBQ_MINT || bbq >= BBQ_TOKEN.requiredBalance,
   };
 }
 
@@ -227,7 +227,7 @@ export async function refreshWalletMemory() {
   await prisma.memory.create({
     data: {
       type: "event",
-      content: `Wallet state: address=${wallet.address} SOL=${wallet.sol} BBQ=${wallet.bbq} USDC=${wallet.usdc} requirementMet=${wallet.requirementMet}`,
+      content: `Wallet state: address=${wallet.address} SOL=${wallet.sol} reserve=${wallet.bbq} USDC=${wallet.usdc} requirementMet=${wallet.requirementMet}`,
       entities: ["wallet", `wallet:${wallet.address}`],
       importance: 0.4,
       source: "wallet",

@@ -460,7 +460,7 @@ app.post("/wallet/balances", async (req, res) => {
     await prisma.memory.create({
       data: {
         type: "event",
-        content: `Balances ${pubkey}: SOL=${sol.toFixed(4)} USDC=${usdc.toFixed(4)} BBQ=${bbq.toFixed(4)}`,
+        content: `Balances ${pubkey}: SOL=${sol.toFixed(4)} USDC=${usdc.toFixed(4)} reserve=${bbq.toFixed(4)}`,
         entities: ["wallet:balances", `wallet:${pubkey}`],
         importance: 0.45,
         source,

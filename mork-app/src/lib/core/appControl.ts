@@ -260,7 +260,7 @@ function shouldBootstrapAllowlist(values: string[]): boolean {
   if (values.some((mint) => mint.toUpperCase() === ALL_ALLOWLIST_SENTINEL)) return false;
   if (values.length >= MIN_BOOTSTRAP_ALLOWLIST_SIZE) return false;
 
-  const starterOnly = new Set([SOL_MINT, BBQ_TOKEN.mint]);
+  const starterOnly = new Set([SOL_MINT, BBQ_TOKEN.mint.trim()].filter(Boolean));
   return values.every((mint) => starterOnly.has(mint));
 }
 

@@ -249,7 +249,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    if (inputMint === BBQ_TOKEN.mint) {
+    if (BBQ_TOKEN.mint && inputMint === BBQ_TOKEN.mint) {
       const bbqBalance = await getSplBalanceUi(connection, signer.publicKey, BBQ_TOKEN.mint);
       const bbqSurplus = Math.max(0, bbqBalance - BBQ_TOKEN.requiredBalance);
       const maxBbqSellAmount = bbqSurplus * BBQ_TOKEN.maxSellSurplusPct;
@@ -257,7 +257,7 @@ export async function POST(req: Request) {
         return NextResponse.json(
           {
             ok: false,
-            error: `BBQ sale blocked: this wallet must retain at least ${BBQ_TOKEN.requiredBalance} BBQ after the swap.`,
+            error: `${BBQ_TOKEN.symbol} sale blocked: this wallet must retain at least ${BBQ_TOKEN.requiredBalance} ${BBQ_TOKEN.symbol} after the swap.`,
           },
           { status: 400 },
         );
@@ -266,7 +266,7 @@ export async function POST(req: Request) {
         return NextResponse.json(
           {
             ok: false,
-            error: `BBQ sale blocked: use DCA tranches of ${maxBbqSellAmount.toFixed(6)} BBQ or less to reduce price impact.`,
+            error: `${BBQ_TOKEN.symbol} sale blocked: use DCA tranches of ${maxBbqSellAmount.toFixed(6)} ${BBQ_TOKEN.symbol} or less to reduce price impact.`,
           },
           { status: 400 },
         );
