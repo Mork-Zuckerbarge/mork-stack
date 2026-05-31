@@ -28,12 +28,13 @@ export async function GET(req: NextRequest) {
       wallet,
       preflight,
     });
-  } catch {
-    updateHealth("wallet", "degraded", "wallet query failed");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "wallet query failed";
+    updateHealth("wallet", "degraded", message);
     return NextResponse.json({
       agent: {
         name: APP_DEFAULTS.agentName,
-        status: "offline",
+        status: agentStatus,
         model: process.env.OLLAMA_MODEL || APP_DEFAULTS.ollamaModel,
       },
       app: orchestrator.app,
@@ -42,13 +43,8 @@ export async function GET(req: NextRequest) {
         runtimeFlagOwner: orchestrator.runtimeFlagOwner,
       },
       preflight,
-      wallet: {
-        address: null,
-        sol: 0,
-        bbq: 0,
-        usdc: 0,
-        requirementMet: false,
-      },
+      wallet: null,
+      walletError: message,
     });
   }
 }

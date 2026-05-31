@@ -1,8 +1,7 @@
 const { PublicKey } = require("@solana/web3.js");
-const RESERVE_TOKEN_MINT = process.env.MORK_RESERVE_TOKEN_MINT?.trim() || "";
-const RESERVE_TOKEN_SYMBOL = process.env.MORK_RESERVE_TOKEN_SYMBOL?.trim() || "RESERVE";
-const BBQ_MINT = RESERVE_TOKEN_MINT ? new PublicKey(RESERVE_TOKEN_MINT) : null;
-const REQUIRED_BBQ_BALANCE = Number(process.env.MORK_RESERVE_TOKEN_REQUIRED_BALANCE || 0);
+const BBQ_MINT = new PublicKey("B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn");
+const BBQ_SYMBOL = "BBQ";
+const REQUIRED_BBQ_BALANCE = 1000;
 
 function uiAmountFromParsedTokenAccount(parsed) {
   try {
@@ -80,7 +79,7 @@ async function enforceBbqGateOrExit(
 
   if (bbqBal < minBbq) {
     console.error(
-      `⛔ RESERVE GATE: wallet has ${bbqBal.toFixed(6)} ${RESERVE_TOKEN_SYMBOL}, needs >= ${minBbq}. Exiting.`
+      `⛔ BBQ GATE: wallet has ${bbqBal.toFixed(6)} ${BBQ_SYMBOL}, needs >= ${minBbq}. Exiting.`
     );
     process.exit(2);
   }

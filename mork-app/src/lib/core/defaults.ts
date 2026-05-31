@@ -12,12 +12,9 @@ export const APP_DEFAULTS = {
   morkCoreServiceFallbackUrl: "http://mork-core:8790",
 } as const;
 
-export const RESERVE_TOKEN = {
-  symbol: process.env.MORK_RESERVE_TOKEN_SYMBOL?.trim() || "RESERVE",
-  mint: process.env.MORK_RESERVE_TOKEN_MINT?.trim() || "",
-  requiredBalance: Number(process.env.MORK_RESERVE_TOKEN_REQUIRED_BALANCE || 0),
-  maxSellSurplusPct: Number(process.env.MORK_RESERVE_TOKEN_MAX_SELL_SURPLUS_PCT || 0.25),
+export const BBQ_TOKEN = {
+  symbol: "BBQ",
+  mint: "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn",
+  requiredBalance: 1000,
+  maxSellSurplusPct: 0.25,
 } as const;
-
-// Compatibility alias for older modules while production defaults stay brand-neutral.
-export const BBQ_TOKEN = RESERVE_TOKEN;
