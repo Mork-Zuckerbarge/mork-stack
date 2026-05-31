@@ -17,6 +17,8 @@ const DEFAULT_AGENT_BANNED_PHRASES = [
   "gleek",
   "ork",
   "mork and mindy",
+  "reflection",
+  "observation",
 ];
 const AGENT_BANNED_PHRASES_STORAGE_KEY = "agent.banned-phrases.v1";
 
@@ -30,12 +32,12 @@ function splitLinesOrCsv(value: string): string[] {
 function configuredBannedPhrases(): string[] {
   if (typeof window !== "undefined") {
     const saved = window.localStorage.getItem(AGENT_BANNED_PHRASES_STORAGE_KEY);
-    if (saved) return splitLinesOrCsv(saved);
+    if (saved) return Array.from(new Set([...splitLinesOrCsv(saved), ...DEFAULT_AGENT_BANNED_PHRASES]));
   }
 
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
     ?.NEXT_PUBLIC_AGENT_BANNED_PHRASES;
-  return env ? splitLinesOrCsv(env) : DEFAULT_AGENT_BANNED_PHRASES;
+  return env ? Array.from(new Set([...splitLinesOrCsv(env), ...DEFAULT_AGENT_BANNED_PHRASES])) : DEFAULT_AGENT_BANNED_PHRASES;
 }
 
 function phraseToPattern(phrase: string): string {
