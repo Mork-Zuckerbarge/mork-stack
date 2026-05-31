@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const JUP_TIMEOUT_MS = getJupiterTimeoutMs();
 const RPC = process.env.SOLANA_RPC_URL || process.env.RPC_URL || APP_DEFAULTS.solanaRpcUrl;
+const AGENT_MIN_TRADE_SOL = Math.max(0, Number(process.env.MORK_AGENT_MIN_TRADE_SOL || 0.0005));
 
 type SwapBody = {
   amountSol?: number;
@@ -225,6 +226,16 @@ export async function POST(req: Request) {
     if (inputMint === SOL_MINT && amountIn > maxSol) {
       return NextResponse.json(
         { ok: false, error: `amountIn exceeds configured max of ${maxSol} SOL` },
+        { status: 400 }
+      );
+    }
+
+    if (agentInitiated && !userCommanded && inputMint === SOL_MINT && amountIn < AGENT_MIN_TRADE_SOL) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Autonomous swap blocked: ${amountIn} SOL is below the minimum economic trade size of ${AGENT_MIN_TRADE_SOL} SOL.`,
+        },
         { status: 400 }
       );
     }

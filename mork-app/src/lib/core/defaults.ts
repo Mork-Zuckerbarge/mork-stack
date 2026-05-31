@@ -1,6 +1,6 @@
 export const APP_DEFAULTS = {
   name: "Mork App",
-  agentName: "Custom BBQ Agent",
+  agentName: "Custom Agent",
   primeDirective: "Prime directives: accuracy, honesty, safety, and clear user control.",
   ollamaModel: "llama3.2:3b",
   ollamaHost: "http://127.0.0.1:11434",

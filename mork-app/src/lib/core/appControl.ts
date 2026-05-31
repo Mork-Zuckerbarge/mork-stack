@@ -110,7 +110,7 @@ const state: AppControlState = {
     selectedOllamaModel: process.env.OLLAMA_MODEL || APP_DEFAULTS.ollamaModel,
     startupCompleted: false,
     executionAuthority: {
-      mode: "agent_assisted",
+      mode: "user_only",
       maxTradeUsd: 50,
       mintAllowlist: [],
       cooldownMinutes: 15,
@@ -120,7 +120,7 @@ const state: AppControlState = {
       allowUrls: false,
       allowUserMessageQuotes: false,
       behaviorGuidelines:
-        "Default to a helpful, customizable BBQ/Mork-aware assistant canvas. Do not impersonate Mork Zuckerbarge unless this deployment explicitly configures that persona.\nDo NOT act like the TV character from Mork & Mindy.\nNever say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\nDo not create false information.\nIf you do not know something, say so plainly.",
+        "Default to a helpful, customizable assistant canvas. Use only the behavior/persona details configured by this user. Do not import prior deployment lore, private agent history, or unconfigured character traits.\nDo not roleplay unless the user explicitly configures that behavior.\nDo not create false information.\nIf you do not know something, say so plainly.",
     },
     activePanel: "arb",
     strategyEngines: {
@@ -248,10 +248,11 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function sanitizeExecutionAllowlist(values: Array<string | null | undefined>): string[] {
   const normalized = normalizeMintList(values, STARTUP_ALLOWLIST_LIMIT);
+  const bbqMint = BBQ_TOKEN.mint.trim();
   if (normalized.some((mint) => mint.toUpperCase() === ALL_ALLOWLIST_SENTINEL)) {
-    return [ALL_ALLOWLIST_SENTINEL, BBQ_TOKEN.mint];
+    return [ALL_ALLOWLIST_SENTINEL, bbqMint];
   }
-  return normalizeMintList([...normalized, BBQ_TOKEN.mint], STARTUP_ALLOWLIST_LIMIT);
+  return normalizeMintList([...normalized, bbqMint], STARTUP_ALLOWLIST_LIMIT);
 }
 
 function shouldBootstrapAllowlist(values: string[]): boolean {
@@ -446,14 +447,6 @@ async function ensureStateLoaded() {
       state.sherpa.updatedAt = nowIso();
       shouldPersist = true;
     }
-    if (!state.controls.startupCompleted) {
-      state.controls.startupCompleted = true;
-      shouldPersist = true;
-    }
-    if (state.controls.executionAuthority.mode === "user_only") {
-      state.controls.executionAuthority.mode = "agent_assisted";
-      shouldPersist = true;
-    }
     if (state.controls.activePanel !== "arb") {
       state.controls.activePanel = "arb";
       shouldPersist = true;
@@ -468,7 +461,7 @@ async function ensureStateLoaded() {
     const startupMints = readWhitelistMints(STARTUP_ALLOWLIST_LIMIT);
     const fallbackMints = startupMints.length > 0 ? startupMints : await fetchFallbackMints(STARTUP_ALLOWLIST_LIMIT);
     if (fallbackMints.length > 0) {
-      state.controls.executionAuthority.mintAllowlist = sanitizeExecutionAllowlist([...fallbackMints, BBQ_TOKEN.mint]);
+      state.controls.executionAuthority.mintAllowlist = sanitizeExecutionAllowlist(fallbackMints);
       await persistState();
     }
   }

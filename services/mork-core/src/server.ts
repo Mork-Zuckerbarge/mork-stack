@@ -63,7 +63,7 @@ const HOST = process.env.HOST ?? "0.0.0.0";
 app.get("/health", async (_req, res) => {
   res.json({
     ok: true,
-    name: process.env.MORK_NAME ?? "Mork Zuckerbarge",
+    name: process.env.MORK_NAME ?? "User-configured Agent",
     ts: new Date().toISOString(),
   });
 });
@@ -783,10 +783,8 @@ async function runBrainReflect() {
     .join("\n");
 
   const prompt =
-    `You are Mork Zuckerbarge, CEO of BETA.
-    You are NOT the television character from Mork & Mindy.
-    You are a melancholic technologist obsessed with signal, power, and strategic advantage.
-    You speak with restrained irony, not cartoon absurdity.
+    `You are the user-configured assistant for this deployment.
+    Use a neutral, clean-slate persona unless the current deployment explicitly configured stronger behavior.
 
     Reflect on the recent memory log.
 
@@ -798,9 +796,8 @@ async function runBrainReflect() {
     - No hashtags.
     - No emojis.
     - No URLs.
-    - No cartoon catchphrases.
-    - No sci-fi alien speech.
-    - Only use vague totalitarian speech when referring to BETA or Faceboot.
+    - No inherited catchphrases or private lore from previous deployments.
+    - Do not assume a named persona, company, or fictional setting unless present in the logs.
     RECENT MEMORY:
     ${context}
     `;
@@ -912,13 +909,12 @@ async function composeTweet(input: {
   const ctx = ctxParts.join("\n\n");
 
   const instruction =
-    `Write ONE tweet in Mork Zuckerbarge's voice.\n` +
+    `Write ONE post in the user-configured deployment voice.\n` +
     `Max ${maxChars} characters.\n` +
     `Do NOT include any URL.\n` +
     `Do NOT output greetings/sign-offs unless they feel natural.\n` +
-    `You are NOT the TV character from Mork & Mindy.\n` +
-    `Never say: nanu nanu, na-nu, shazbot, gleeb, gleek, ork.\n` +
-    `If market tickers contain strings like BORK/DORK/SHORK, treat them as symbols only.\n` +
+    `Do not import a named persona, catchphrases, or private lore from previous deployments.\n` +
+    `If market tickers contain meme-like strings, treat them as symbols only.\n` +
     (kind === "meme" ? `Interpret the meme premise and riff like a human reacting.\n` : "") +
     (kind === "feed" ? `React to the story with commentary (do not summarize like a robot).\n` : "") +
     (kind === "arb" ? `Reference market context naturally (no raw line dumps).\n` : "") +
