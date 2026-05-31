@@ -223,8 +223,7 @@ ENABLE_DRIFT_FUNDING=true
 # Stablecoin depeg: trade USDC/USDT/PYUSD when they deviate from $1.00
 ENABLE_STABLECOIN_DEPEG=true
 
-# Momentum: requires BIRDEYE_API_KEY; if the key is missing, MomentumRunner stays disabled
-# to avoid Birdeye 401 log spam.
+# Momentum: requires BIRDEYE_API_KEY for Birdeye trend/price feeds.
 ENABLE_MOMENTUM=true
 BIRDEYE_API_KEY=your_birdeye_key
 
@@ -233,15 +232,9 @@ ENABLE_TRIANGULAR_ROUTES=true
 ```
 
 
-### Live execution coverage
+### App strategy controls
 
-With `DRY_RUN=false`, only strategies with complete live transaction paths are allowed to run:
-
-- `ENABLE_ARB` / `ENABLE_TRIANGULAR_ARB`: Jupiter swap instructions submitted through Jito bundles.
-- `ENABLE_LIQUIDATION_ARB`: live Jupiter/Jito entry and exit swaps.
-- `ENABLE_STABLECOIN_DEPEG`: live Jupiter/Jito buy/sell swaps.
-
-`ENABLE_MOMENTUM`, `ENABLE_AMM_IMBALANCE`, and `ENABLE_DRIFT_FUNDING` remain dry-run/research only until their live execution is fully wired. In live mode they are disabled at startup instead of logging placeholder successes or sending an unhedged partial trade.
+Use the app's Strategy engines panel to turn strategies on/off and tune thresholds. Saving controls persists the app state and writes the runtime toggles consumed by the arb services on restart. The live-capable Jupiter/Jito swap paths now cover cross-DEX arb, triangular arb, pool imbalance, momentum entries/exits, liquidation entries/exits, and stablecoin depeg swaps. Drift funding runs as an opportunity monitor, but it will not send an unhedged spot-only trade until Drift perp execution is wired.
 
 ### Dynamic Jito tip sizing
 

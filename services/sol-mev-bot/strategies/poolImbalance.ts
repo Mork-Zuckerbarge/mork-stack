@@ -5,7 +5,8 @@ import { logger } from '../utils/logger';
 import { FeeSimulator } from '../utils/feeSimulator';
 import { JitoClient } from '../utils/jitoClient';
 import { HeliusListener } from '../utils/heliusListener';
-import { AgentConfig, Opportunity, StrategyType, ExecutionResult } from '../types';
+import { AgentConfig, Opportunity, StrategyType, ExecutionResult, JupiterQuote } from '../types';
+import { sendJupiterSwapViaJito } from '../utils/jupiterSwap';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const JUPITER_API = 'https://quote-api.jup.ag/v6';
@@ -22,9 +23,6 @@ interface PoolInfo {
   lastUpdated: number;
 }
 
-interface JupiterQuote {
-  outAmount: string;
-}
 
 /**
  * PoolImbalanceDetector monitors on-chain swap events via Helius Geyser.
@@ -272,7 +270,7 @@ export class PoolImbalanceDetector {
       });
       const outAmount = res.data?.outAmount;
       if (typeof outAmount !== 'string') return null;
-      return { outAmount };
+      return res.data as JupiterQuote;
     } catch {
       return null;
     }
@@ -335,9 +333,24 @@ export class PoolImbalanceDetector {
       return { opportunityId: opp.id, success: true, dryRun: true };
     }
 
-    // Build swap transaction via Jupiter swap-instructions endpoint
-    // then wrap in Jito bundle — same pattern as ArbScanner.execute()
+    const quote = opp.meta.quote as JupiterQuote | undefined;
+    if (!quote) return { opportunityId: opp.id, success: false, dryRun: false, errorMessage: 'Missing Jupiter quote' };
+
     logger.info('Executing pool imbalance trade', { id: opp.id });
-    return { opportunityId: opp.id, success: true, dryRun: false };
+    const result = await sendJupiterSwapViaJito({
+      quote,
+      connection: this.connection,
+      wallet: this.wallet,
+      jitoClient: this.jitoClient,
+      urgency: 'high',
+    });
+
+    return {
+      opportunityId: opp.id,
+      success: result.status === 'landed',
+      dryRun: false,
+      signature: result.bundleId || undefined,
+      errorMessage: result.status === 'landed' ? undefined : `Bundle status: ${result.status}`,
+    };
   }
 }

@@ -59,15 +59,6 @@ function loadConfig(): AgentConfig {
   if (enableMomentum && !momentumHasBirdeyeKey) {
     logger.warn('ENABLE_MOMENTUM=true but BIRDEYE_API_KEY is missing; MomentumRunner disabled to avoid Birdeye 401 noise.');
   }
-  if (!dryRun && enableMomentum) {
-    logger.warn('ENABLE_MOMENTUM=true but live MomentumRunner swap execution is not wired; MomentumRunner disabled in live mode.');
-  }
-  if (!dryRun && enableAmmImbalance) {
-    logger.warn('ENABLE_AMM_IMBALANCE=true but live pool-imbalance swap execution is not wired; PoolImbalanceDetector disabled in live mode.');
-  }
-  if (!dryRun && enableDriftFunding) {
-    logger.warn('ENABLE_DRIFT_FUNDING=true but Drift perp-side execution is not wired; DriftFundingArb disabled in live mode to avoid unhedged spot trades.');
-  }
 
   return {
     walletPrivateKey: process.env.WALLET_PRIVATE_KEY!,
@@ -80,9 +71,9 @@ function loadConfig(): AgentConfig {
     minProfitLamports: parseInt(process.env.MIN_PROFIT_LAMPORTS ?? '5000'),
     maxPositionSol: parseFloat(process.env.MAX_POSITION_SOL ?? '0.5'),
     priorityFeeMicrolamports: parseInt(process.env.PRIORITY_FEE_MICROLAMPORTS ?? '50000'),
-    enableAmmImbalance: enableAmmImbalance && dryRun,
+    enableAmmImbalance,
     enableArb: process.env.ENABLE_ARB === 'true',
-    enableMomentum: enableMomentum && momentumHasBirdeyeKey && dryRun,
+    enableMomentum: enableMomentum && momentumHasBirdeyeKey,
     ammMinImbalancePct: parseFloat(process.env.AMM_MIN_IMBALANCE_PCT ?? '5'),
     arbTokenMints: (process.env.ARB_TOKEN_MINTS ?? [
       'So11111111111111111111111111111111111111112',
@@ -97,7 +88,7 @@ function loadConfig(): AgentConfig {
     // New strategies
     enableTriangularArb: process.env.ENABLE_TRIANGULAR_ARB === 'true',
     enableLiquidationArb: process.env.ENABLE_LIQUIDATION_ARB === 'true',
-    enableDriftFunding: enableDriftFunding && dryRun,
+    enableDriftFunding,
     enableStablecoinDepeg: process.env.ENABLE_STABLECOIN_DEPEG === 'true',
     enableCrossDexArb: false, // handled by arb/index.js + UI toggle
     // Dynamic Jito tip
@@ -163,12 +154,7 @@ async function main(): Promise<void> {
     circularArb: config.enableArb,
     triangularArb: config.enableTriangularArb,
     momentumBlockedByMissingBirdeyeKey: process.env.ENABLE_MOMENTUM === 'true' && !hasEnvValue('BIRDEYE_API_KEY'),
-    liveOnlyImplementedStrategies: ['arb', 'triangularArb', 'liquidationArb', 'stablecoinDepeg'],
-    liveDisabledIncompleteStrategies: config.dryRun ? [] : [
-      process.env.ENABLE_MOMENTUM === 'true' ? 'momentum' : null,
-      process.env.ENABLE_AMM_IMBALANCE === 'true' ? 'ammImbalance' : null,
-      process.env.ENABLE_DRIFT_FUNDING === 'true' ? 'driftFunding' : null,
-    ].filter(Boolean),
+    appControllableStrategies: ['arb', 'triangularArb', 'ammImbalance', 'momentum', 'liquidationArb', 'driftFunding', 'stablecoinDepeg'],
     liveTxsEnabled: !config.dryRun,
   });
 

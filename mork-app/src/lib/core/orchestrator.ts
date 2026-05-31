@@ -140,16 +140,19 @@ export async function setRuntimeActivePanel(panel: "arb" | "trade") {
 
 export async function setRuntimeStrategyEngines(input: {
   poolImbalance: {
+    enabled: boolean;
     minImbalancePct: number;
     poolsWatched: "all_available";
     useJitoBundle: boolean;
   };
   crossDexArb: {
+    enabled: boolean;
     minNetProfitSol: number;
     routeVia: "jupiter" | "direct";
     enableTriangularRoutes: boolean;
   };
   momentumRunner: {
+    enabled: boolean;
     entryVolSpikeMultiplier: number;
     exitTrailingStopPct: number;
     maxHoldMinutes: number;
@@ -157,6 +160,9 @@ export async function setRuntimeStrategyEngines(input: {
     watchPumpFunLaunches: boolean;
     useBirdeyeTrendingFeed: boolean;
   };
+  liquidationArb: { enabled: boolean };
+  driftFunding: { enabled: boolean };
+  stablecoinDepeg: { enabled: boolean };
 }) {
   await setStrategyEngines(input);
   return getOrchestratorState();

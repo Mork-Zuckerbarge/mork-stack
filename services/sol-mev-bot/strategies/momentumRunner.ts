@@ -7,6 +7,7 @@ import { JitoClient } from '../utils/jitoClient';
 import { HeliusListener } from '../utils/heliusListener';
 import { CorrelationFilter } from '../utils/correlationFilter';
 import { AgentConfig, Opportunity, StrategyType, ExecutionResult } from '../types';
+import { getJupiterQuote, getTokenBalanceRaw, sendJupiterSwapViaJito } from '../utils/jupiterSwap';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -230,8 +231,20 @@ export class MomentumRunner {
         spike: spikeMultiplier.toFixed(1) + 'x',
       });
     } else {
-      // Execute buy via Jupiter + Jito bundle
       logger.info('Entering momentum position', { mint: mint.slice(0, 8), sol: positionSol });
+      const liveQuote = await getJupiterQuote(SOL_MINT, mint, amountInLamports);
+      if (!liveQuote) return;
+      const result = await sendJupiterSwapViaJito({
+        quote: liveQuote,
+        connection: this.connection,
+        wallet: this.wallet,
+        jitoClient: this.jitoClient,
+        urgency: 'high',
+      });
+      if (result.status !== 'landed') {
+        logger.warn('Momentum entry bundle did not land', { mint: mint.slice(0, 8), status: result.status });
+        return;
+      }
     }
 
     // Record position for monitoring
@@ -295,9 +308,29 @@ export class MomentumRunner {
       return;
     }
 
-    // Get token balance and sell all via Jupiter
-    // Build exit transaction and send as Jito bundle
-    logger.info('Executing exit', { mint: mint.slice(0, 8) });
+    const balance = await getTokenBalanceRaw(this.connection, this.wallet.publicKey, mint);
+    if (!balance || balance.amount <= 0n) {
+      logger.warn('Momentum exit skipped: no token balance', { mint: mint.slice(0, 8) });
+      return;
+    }
+
+    const quote = await getJupiterQuote(mint, SOL_MINT, balance.amount);
+    if (!quote) {
+      logger.warn('Momentum exit skipped: no Jupiter quote', { mint: mint.slice(0, 8) });
+      return;
+    }
+
+    logger.info('Executing momentum exit', { mint: mint.slice(0, 8), tokenUiAmount: balance.uiAmount });
+    const result = await sendJupiterSwapViaJito({
+      quote,
+      connection: this.connection,
+      wallet: this.wallet,
+      jitoClient: this.jitoClient,
+      urgency: 'high',
+    });
+    if (result.status !== 'landed') {
+      logger.warn('Momentum exit bundle did not land', { mint: mint.slice(0, 8), status: result.status });
+    }
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────

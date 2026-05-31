@@ -46,16 +46,19 @@ export type AppControlState = {
     activePanel: "arb" | "trade";
     strategyEngines: {
       poolImbalance: {
+        enabled: boolean;
         minImbalancePct: number;
         poolsWatched: "all_available";
         useJitoBundle: boolean;
       };
       crossDexArb: {
+        enabled: boolean;
         minNetProfitSol: number;
         routeVia: "jupiter" | "direct";
         enableTriangularRoutes: boolean;
       };
       momentumRunner: {
+        enabled: boolean;
         entryVolSpikeMultiplier: number;
         exitTrailingStopPct: number;
         maxHoldMinutes: number;
@@ -63,6 +66,9 @@ export type AppControlState = {
         watchPumpFunLaunches: boolean;
         useBirdeyeTrendingFeed: boolean;
       };
+      liquidationArb: { enabled: boolean };
+      driftFunding: { enabled: boolean };
+      stablecoinDepeg: { enabled: boolean };
     };
   };
   walletProvisioning: {
@@ -125,16 +131,19 @@ const state: AppControlState = {
     activePanel: "arb",
     strategyEngines: {
       poolImbalance: {
+        enabled: false,
         minImbalancePct: 5,
         poolsWatched: "all_available",
         useJitoBundle: true,
       },
       crossDexArb: {
+        enabled: false,
         minNetProfitSol: 0.001,
         routeVia: "jupiter",
         enableTriangularRoutes: true,
       },
       momentumRunner: {
+        enabled: false,
         entryVolSpikeMultiplier: 5,
         exitTrailingStopPct: 15,
         maxHoldMinutes: 30,
@@ -142,6 +151,9 @@ const state: AppControlState = {
         watchPumpFunLaunches: false,
         useBirdeyeTrendingFeed: true,
       },
+      liquidationArb: { enabled: false },
+      driftFunding: { enabled: false },
+      stablecoinDepeg: { enabled: false },
     },
   },
   walletProvisioning: {
@@ -370,6 +382,9 @@ function applyPersistedState(raw: unknown) {
     if (isObjectRecord(strategyEngines)) {
       const poolImbalance = strategyEngines.poolImbalance;
       if (isObjectRecord(poolImbalance)) {
+        if (typeof poolImbalance.enabled === "boolean") {
+          state.controls.strategyEngines.poolImbalance.enabled = poolImbalance.enabled;
+        }
         if (typeof poolImbalance.minImbalancePct === "number") {
           state.controls.strategyEngines.poolImbalance.minImbalancePct = poolImbalance.minImbalancePct;
         }
@@ -384,6 +399,9 @@ function applyPersistedState(raw: unknown) {
       }
       const crossDexArb = strategyEngines.crossDexArb;
       if (isObjectRecord(crossDexArb)) {
+        if (typeof crossDexArb.enabled === "boolean") {
+          state.controls.strategyEngines.crossDexArb.enabled = crossDexArb.enabled;
+        }
         if (typeof crossDexArb.minNetProfitSol === "number") {
           state.controls.strategyEngines.crossDexArb.minNetProfitSol = crossDexArb.minNetProfitSol;
         }
@@ -396,6 +414,9 @@ function applyPersistedState(raw: unknown) {
       }
       const momentumRunner = strategyEngines.momentumRunner;
       if (isObjectRecord(momentumRunner)) {
+        if (typeof momentumRunner.enabled === "boolean") {
+          state.controls.strategyEngines.momentumRunner.enabled = momentumRunner.enabled;
+        }
         if (typeof momentumRunner.entryVolSpikeMultiplier === "number") {
           state.controls.strategyEngines.momentumRunner.entryVolSpikeMultiplier = momentumRunner.entryVolSpikeMultiplier;
         }
@@ -413,6 +434,12 @@ function applyPersistedState(raw: unknown) {
         }
         if (typeof momentumRunner.useBirdeyeTrendingFeed === "boolean") {
           state.controls.strategyEngines.momentumRunner.useBirdeyeTrendingFeed = momentumRunner.useBirdeyeTrendingFeed;
+        }
+      }
+      for (const key of ["liquidationArb", "driftFunding", "stablecoinDepeg"] as const) {
+        const value = strategyEngines[key];
+        if (isObjectRecord(value) && typeof value.enabled === "boolean") {
+          state.controls.strategyEngines[key].enabled = value.enabled;
         }
       }
     }
@@ -675,16 +702,19 @@ export async function setStrategyEngines(input: AppControlState["controls"]["str
   await ensureStateLoaded();
   state.controls.strategyEngines = {
     poolImbalance: {
+      enabled: input.poolImbalance.enabled,
       minImbalancePct: Math.max(0, input.poolImbalance.minImbalancePct),
       poolsWatched: input.poolImbalance.poolsWatched,
       useJitoBundle: input.poolImbalance.useJitoBundle,
     },
     crossDexArb: {
+      enabled: input.crossDexArb.enabled,
       minNetProfitSol: Math.max(0, input.crossDexArb.minNetProfitSol),
       routeVia: input.crossDexArb.routeVia,
       enableTriangularRoutes: input.crossDexArb.enableTriangularRoutes,
     },
     momentumRunner: {
+      enabled: input.momentumRunner.enabled,
       entryVolSpikeMultiplier: Math.max(0, input.momentumRunner.entryVolSpikeMultiplier),
       exitTrailingStopPct: Math.max(0, input.momentumRunner.exitTrailingStopPct),
       maxHoldMinutes: Math.max(1, input.momentumRunner.maxHoldMinutes),
@@ -692,6 +722,9 @@ export async function setStrategyEngines(input: AppControlState["controls"]["str
       watchPumpFunLaunches: input.momentumRunner.watchPumpFunLaunches,
       useBirdeyeTrendingFeed: input.momentumRunner.useBirdeyeTrendingFeed,
     },
+    liquidationArb: { enabled: input.liquidationArb.enabled },
+    driftFunding: { enabled: input.driftFunding.enabled },
+    stablecoinDepeg: { enabled: input.stablecoinDepeg.enabled },
   };
   await persistState();
   return structuredClone(state.controls.strategyEngines);
