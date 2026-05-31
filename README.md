@@ -207,7 +207,11 @@ On first startup, if `services/arb/whitelist.json` is missing, `start.sh` runs t
 All new strategies are **off by default** — flip to `true` to enable each one independently.
 
 ```bash
+# Circular arb: SOL → TOKEN → SOL (sol-mev-bot)
+ENABLE_ARB=true
+
 # Triangular arb: SOL → B → TOKEN → SOL (sol-mev-bot)
+# This now starts ArbScanner even when ENABLE_ARB=false.
 ENABLE_TRIANGULAR_ARB=true
 
 # Liquidation arb: buy dips caused by MarginFi/Kamino/Solend forced sells
@@ -219,9 +223,18 @@ ENABLE_DRIFT_FUNDING=true
 # Stablecoin depeg: trade USDC/USDT/PYUSD when they deviate from $1.00
 ENABLE_STABLECOIN_DEPEG=true
 
+# Momentum: requires BIRDEYE_API_KEY for Birdeye trend/price feeds.
+ENABLE_MOMENTUM=true
+BIRDEYE_API_KEY=your_birdeye_key
+
 # Triangular routes in the arb service (backs the “enable triangular routes” UI toggle)
 ENABLE_TRIANGULAR_ROUTES=true
 ```
+
+
+### App strategy controls
+
+Use the app's Strategy engines panel to turn strategies on/off and tune thresholds. Saving controls persists the app state and writes the runtime toggles consumed by the arb services on restart. The live-capable Jupiter/Jito swap paths now cover cross-DEX arb, triangular arb, pool imbalance, momentum entries/exits, liquidation entries/exits, and stablecoin depeg swaps. Drift funding runs as an opportunity monitor, but it will not send an unhedged spot-only trade until Drift perp execution is wired.
 
 ### Dynamic Jito tip sizing
 

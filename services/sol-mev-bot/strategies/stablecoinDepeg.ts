@@ -5,9 +5,9 @@ import { logger } from '../utils/logger';
 import { FeeSimulator } from '../utils/feeSimulator';
 import { JitoClient } from '../utils/jitoClient';
 import { AgentConfig, Opportunity, StrategyType, ExecutionResult } from '../types';
+import { getJupiterQuote, getTokenBalanceRaw, sendJupiterSwapViaJito } from '../utils/jupiterSwap';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
-const JUPITER_API = 'https://quote-api.jup.ag/v6';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 // Monitored stablecoins with their on-chain Solana mint addresses
@@ -115,16 +115,33 @@ export class StablecoinDepeg {
   ): Promise<ExecutionResult> {
     const amountSol = this.config.maxPositionSol * 0.5;
     const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
+    const solPrice = await this.fetchSolPrice();
 
-    const [inputMint, outputMint, amountIn] = isBuy
-      ? [SOL_MINT, stable.mint, amountLamports]
-      : [stable.mint, SOL_MINT, amountLamports]; // approximate; real sell would use token balance
+    let inputMint = SOL_MINT;
+    let outputMint = stable.mint;
+    let amountIn: number | bigint = amountLamports;
+
+    if (!isBuy) {
+      const stableBalance = await getTokenBalanceRaw(this.connection, this.wallet.publicKey, stable.mint);
+      if (!stableBalance || stableBalance.amount <= 0n) {
+        return { opportunityId: uuidv4(), success: false, dryRun: this.config.dryRun, errorMessage: `No ${stable.symbol} balance to sell` };
+      }
+
+      if (!solPrice) {
+        return { opportunityId: uuidv4(), success: false, dryRun: this.config.dryRun, errorMessage: 'Missing SOL price for stable sell sizing' };
+      }
+
+      const desiredUi = (amountSol * solPrice) / currentPrice;
+      const desiredRaw = BigInt(Math.max(1, Math.floor(desiredUi * 10 ** stableBalance.decimals)));
+      amountIn = desiredRaw < stableBalance.amount ? desiredRaw : stableBalance.amount;
+      inputMint = stable.mint;
+      outputMint = SOL_MINT;
+    }
 
     const id = uuidv4();
 
     // Simple profitability check: expected repeg profit vs fees
     // For a 0.5 SOL buy of a 0.5%-depegged stable, gross ≈ 0.5% * 0.5 SOL = 0.0025 SOL
-    const solPrice = await this.fetchSolPrice();
     const grossEstimateLamports = solPrice
       ? Math.floor((Math.abs(currentPrice - PEG) / currentPrice) * amountLamports)
       : 0;
@@ -164,11 +181,29 @@ export class StablecoinDepeg {
       return { opportunityId: id, success: true, dryRun: true };
     }
 
+    const quote = await getJupiterQuote(inputMint, outputMint, amountIn);
+    if (!quote) return { opportunityId: id, success: false, dryRun: false, errorMessage: 'No Jupiter quote' };
+
     logger.info('Executing stablecoin depeg trade', {
       symbol: stable.symbol,
       side: isBuy ? 'buy' : 'sell',
     });
-    return { opportunityId: id, success: true, dryRun: false };
+
+    const result = await sendJupiterSwapViaJito({
+      quote,
+      connection: this.connection,
+      wallet: this.wallet,
+      jitoClient: this.jitoClient,
+      urgency: 'high',
+    });
+
+    return {
+      opportunityId: id,
+      success: result.status === 'landed',
+      dryRun: false,
+      signature: result.bundleId || undefined,
+      errorMessage: result.status === 'landed' ? undefined : `Bundle status: ${result.status}`,
+    };
   }
 
   private async fetchSolPrice(): Promise<number | null> {

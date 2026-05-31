@@ -187,17 +187,16 @@ export class DriftFundingArb {
       return { opportunityId: opp.id, success: true, dryRun: true };
     }
 
-    // Spot execution via Jupiter
-    logger.info('Executing Drift basis trade — spot side', {
+    logger.warn('Drift live execution blocked: perp side is not wired, so no unhedged spot order was sent.', {
       market: rate.symbol,
-      side: buySide ? 'buy' : 'sell',
+      side: buySide ? 'buy spot + short perp' : 'sell spot + long perp',
     });
 
-    // TODO: perp side — requires Drift SDK:
-    //   const driftClient = new DriftClient({ connection, wallet, env: 'mainnet-beta' });
-    //   await driftClient.placePerpOrder({ marketIndex: rate.marketIndex, direction: buySide ? SHORT : LONG, ... });
-    logger.warn('Drift perp side not yet wired — spot hedge only. Integrate @drift-labs/sdk for full basis trade.');
-
-    return { opportunityId: opp.id, success: true, dryRun: false };
+    return {
+      opportunityId: opp.id,
+      success: false,
+      dryRun: false,
+      errorMessage: 'Drift perp-side execution is not wired; live basis trade blocked',
+    };
   }
 }

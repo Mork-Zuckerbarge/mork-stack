@@ -6,9 +6,9 @@ import { FeeSimulator } from '../utils/feeSimulator';
 import { JitoClient } from '../utils/jitoClient';
 import { HeliusListener } from '../utils/heliusListener';
 import { AgentConfig, Opportunity, StrategyType, ExecutionResult } from '../types';
+import { getJupiterQuote, getTokenBalanceRaw, sendJupiterSwapViaJito } from '../utils/jupiterSwap';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
-const JUPITER_API = 'https://quote-api.jup.ag/v6';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const PRICE_CACHE_TTL_MS = 30_000;
 // Minimum price drop from cached baseline to trigger a recovery buy
@@ -146,7 +146,7 @@ export class LiquidationArb {
     const amountSol = Math.min(this.config.maxPositionSol * 0.5, this.config.maxPositionSol);
     const amountLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
 
-    const quote = await this.getQuote(SOL_MINT, mint, amountLamports);
+    const quote = await getJupiterQuote(SOL_MINT, mint, amountLamports);
     if (!quote) return;
 
     const opp: Opportunity = {
@@ -169,20 +169,25 @@ export class LiquidationArb {
         mint: mint.slice(0, 8),
         sol: amountSol.toFixed(3),
       });
-    } else {
-      logger.info('Entering liquidation recovery position', { mint: mint.slice(0, 8), sol: amountSol });
+      this.recordActivePosition(mint, entryPriceUsd, amountSol);
+      return;
     }
 
-    this.activePositions.set(mint, {
-      mint,
-      entryPriceUsd,
-      peakPriceUsd: entryPriceUsd,
-      entryTime: Date.now(),
-      amountSol,
+    logger.info('Entering liquidation recovery position', { mint: mint.slice(0, 8), sol: amountSol });
+    const result = await sendJupiterSwapViaJito({
+      quote,
+      connection: this.connection,
+      wallet: this.wallet,
+      jitoClient: this.jitoClient,
+      urgency: 'high',
     });
 
-    // Update price cache with entry price
-    this.priceCache.set(mint, { price: entryPriceUsd, cachedAt: Date.now() });
+    if (result.status !== 'landed') {
+      logger.warn('Liquidation entry bundle did not land', { mint: mint.slice(0, 8), status: result.status });
+      return;
+    }
+
+    this.recordActivePosition(mint, entryPriceUsd, amountSol);
   }
 
   private async monitorPositions(): Promise<void> {
@@ -231,8 +236,42 @@ export class LiquidationArb {
       return { opportunityId: uuidv4(), success: true, dryRun: true };
     }
 
-    logger.info('Executing liquidation exit', { mint: mint.slice(0, 8) });
-    return { opportunityId: uuidv4(), success: true, dryRun: false };
+    const balance = await getTokenBalanceRaw(this.connection, this.wallet.publicKey, mint);
+    if (!balance || balance.amount <= 0n) {
+      return { opportunityId: uuidv4(), success: false, dryRun: false, errorMessage: 'No token balance to exit' };
+    }
+
+    const quote = await getJupiterQuote(mint, SOL_MINT, balance.amount);
+    if (!quote) return { opportunityId: uuidv4(), success: false, dryRun: false, errorMessage: 'No Jupiter quote for exit' };
+
+    logger.info('Executing liquidation exit', { mint: mint.slice(0, 8), tokenUiAmount: balance.uiAmount });
+    const result = await sendJupiterSwapViaJito({
+      quote,
+      connection: this.connection,
+      wallet: this.wallet,
+      jitoClient: this.jitoClient,
+      urgency: 'high',
+    });
+
+    return {
+      opportunityId: uuidv4(),
+      success: result.status === 'landed',
+      dryRun: false,
+      signature: result.bundleId || undefined,
+      errorMessage: result.status === 'landed' ? undefined : `Bundle status: ${result.status}`,
+    };
+  }
+
+  private recordActivePosition(mint: string, entryPriceUsd: number, amountSol: number): void {
+    this.activePositions.set(mint, {
+      mint,
+      entryPriceUsd,
+      peakPriceUsd: entryPriceUsd,
+      entryTime: Date.now(),
+      amountSol,
+    });
+
+    this.priceCache.set(mint, { price: entryPriceUsd, cachedAt: Date.now() });
   }
 
   private async fetchJupiterPrice(mint: string): Promise<number | null> {
@@ -246,18 +285,6 @@ export class LiquidationArb {
       const price = res.data?.data?.[mint]?.price ?? null;
       if (price != null) this.priceCache.set(mint, { price, cachedAt: Date.now() });
       return price;
-    } catch {
-      return null;
-    }
-  }
-
-  private async getQuote(inputMint: string, outputMint: string, amount: number): Promise<{ outAmount: string } | null> {
-    try {
-      const res = await axios.get(`${JUPITER_API}/quote`, {
-        params: { inputMint, outputMint, amount, slippageBps: 100 },
-        timeout: 3000,
-      });
-      return res.data;
     } catch {
       return null;
     }

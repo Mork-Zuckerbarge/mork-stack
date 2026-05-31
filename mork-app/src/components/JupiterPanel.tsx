@@ -72,16 +72,19 @@ type PoolWatchMode = "all_available";
 type RouteMode = "jupiter" | "direct";
 type StrategyEngines = {
   poolImbalance: {
+    enabled: boolean;
     minImbalancePct: number;
     poolsWatched: PoolWatchMode;
     useJitoBundle: boolean;
   };
   crossDexArb: {
+    enabled: boolean;
     minNetProfitSol: number;
     routeVia: RouteMode;
     enableTriangularRoutes: boolean;
   };
   momentumRunner: {
+    enabled: boolean;
     entryVolSpikeMultiplier: number;
     exitTrailingStopPct: number;
     maxHoldMinutes: number;
@@ -89,6 +92,9 @@ type StrategyEngines = {
     watchPumpFunLaunches: boolean;
     useBirdeyeTrendingFeed: boolean;
   };
+  liquidationArb: { enabled: boolean };
+  driftFunding: { enabled: boolean };
+  stablecoinDepeg: { enabled: boolean };
 };
 
 function formatTokenAmount(value: number | undefined, maxFractionDigits = 9): string {
@@ -926,6 +932,12 @@ function ExecutionControls({
   );
   const [allowlistLoadStatus, setAllowlistLoadStatus] = useState("");
   const [allowlistPreset, setAllowlistPreset] = useState<"top1000" | "all">("all");
+  const [poolImbalanceEnabled, setPoolImbalanceEnabled] = useState(strategyEngines?.poolImbalance.enabled ?? false);
+  const [crossDexEnabled, setCrossDexEnabled] = useState(strategyEngines?.crossDexArb.enabled ?? false);
+  const [momentumEnabled, setMomentumEnabled] = useState(strategyEngines?.momentumRunner.enabled ?? false);
+  const [liquidationEnabled, setLiquidationEnabled] = useState(strategyEngines?.liquidationArb?.enabled ?? false);
+  const [driftEnabled, setDriftEnabled] = useState(strategyEngines?.driftFunding?.enabled ?? false);
+  const [stablecoinEnabled, setStablecoinEnabled] = useState(strategyEngines?.stablecoinDepeg?.enabled ?? false);
   const [minImbalancePct, setMinImbalancePct] = useState(String(strategyEngines?.poolImbalance.minImbalancePct ?? 5));
   const [poolsWatched] = useState<PoolWatchMode>(strategyEngines?.poolImbalance.poolsWatched ?? "all_available");
   const [jitoBundleEnabled, setJitoBundleEnabled] = useState(strategyEngines?.poolImbalance.useJitoBundle ?? true);
@@ -1014,7 +1026,7 @@ function ExecutionControls({
               <div className="rounded-lg border border-white/10 bg-black/30 p-2">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px]">pool imbalance / AMM rebalancer</span>
-                  <span className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">active</span>
+                  <label className="flex items-center gap-1 text-[10px] text-emerald-200"><input type="checkbox" checked={poolImbalanceEnabled} onChange={(e) => setPoolImbalanceEnabled(e.target.checked)} disabled={arbPaused} /> enabled</label>
                 </div>
                 <label className="block text-[11px] text-white/70">min imbalance threshold (%)</label>
                 <input value={minImbalancePct} onChange={(e) => setMinImbalancePct(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
@@ -1030,7 +1042,7 @@ function ExecutionControls({
               <div className="rounded-lg border border-white/10 bg-black/30 p-2">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px]">cross-DEX arbitrage</span>
-                  <span className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">active</span>
+                  <label className="flex items-center gap-1 text-[10px] text-emerald-200"><input type="checkbox" checked={crossDexEnabled} onChange={(e) => setCrossDexEnabled(e.target.checked)} disabled={arbPaused} /> enabled</label>
                 </div>
                 <label className="block text-[11px] text-white/70">min net profit (SOL)</label>
                 <input value={minNetProfitSol} onChange={(e) => setMinNetProfitSol(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
@@ -1048,7 +1060,7 @@ function ExecutionControls({
               <div className="rounded-lg border border-white/10 bg-black/30 p-2">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px]">momentum runner / exit sniper</span>
-                  <span className="rounded-full border border-emerald-300/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">defaults loaded</span>
+                  <label className="flex items-center gap-1 text-[10px] text-emerald-200"><input type="checkbox" checked={momentumEnabled} onChange={(e) => setMomentumEnabled(e.target.checked)} disabled={arbPaused} /> enabled</label>
                 </div>
                 <label className="block text-[11px] text-white/70">entry: vol spike multiplier</label>
                 <input value={entryVolSpike} onChange={(e) => setEntryVolSpike(e.target.value)} disabled={arbPaused} className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[11px]" />
@@ -1069,6 +1081,16 @@ function ExecutionControls({
                   </label>
                 </div>
               </div>
+
+              <div className="rounded-lg border border-white/10 bg-black/30 p-2 md:col-span-3">
+                <div className="mb-2 text-[11px]">event / funding strategies</div>
+                <div className="flex flex-wrap gap-4 text-[11px]">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={liquidationEnabled} onChange={(e) => setLiquidationEnabled(e.target.checked)} disabled={arbPaused} /> liquidation arb</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={stablecoinEnabled} onChange={(e) => setStablecoinEnabled(e.target.checked)} disabled={arbPaused} /> stablecoin depeg</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={driftEnabled} onChange={(e) => setDriftEnabled(e.target.checked)} disabled={arbPaused} /> Drift funding</label>
+                </div>
+                <p className="mt-2 text-[10px] text-white/50">Saving updates the app control state and writes the runtime toggles used by the arb services on restart.</p>
+              </div>
             </div>
           </div>
           <button
@@ -1076,16 +1098,19 @@ function ExecutionControls({
             onClick={() =>
               onSaveStrategyEngines({
                 poolImbalance: {
+                  enabled: poolImbalanceEnabled,
                   minImbalancePct: Number(minImbalancePct) || 0,
                   poolsWatched,
                   useJitoBundle: jitoBundleEnabled,
                 },
                 crossDexArb: {
+                  enabled: crossDexEnabled,
                   minNetProfitSol: Number(minNetProfitSol) || 0,
                   routeVia,
                   enableTriangularRoutes: triangularRoutes,
                 },
                 momentumRunner: {
+                  enabled: momentumEnabled,
                   entryVolSpikeMultiplier: Number(entryVolSpike) || 0,
                   exitTrailingStopPct: Number(trailingStopPct) || 0,
                   maxHoldMinutes: Number(maxHoldMinutes) || 30,
@@ -1093,6 +1118,9 @@ function ExecutionControls({
                   watchPumpFunLaunches: watchPumpFun,
                   useBirdeyeTrendingFeed: birdEyeTrending,
                 },
+                liquidationArb: { enabled: liquidationEnabled },
+                driftFunding: { enabled: driftEnabled },
+                stablecoinDepeg: { enabled: stablecoinEnabled },
               })
             }
             disabled={busy || arbPaused}

@@ -80,12 +80,12 @@ async function envFileExists(filePath: string): Promise<boolean> {
   }
 }
 
-async function writeEnvToggle(envKey: string, enabled: boolean): Promise<void> {
+async function writeEnvValue(envKey: string, value: string): Promise<void> {
   const filePath = envFilePath();
   const existing = (await envFileExists(filePath)) ? await readFile(filePath, "utf8") : "";
   const lines = existing ? existing.split(/\r?\n/) : [];
   const output = [...lines];
-  const nextLine = `${envKey}=${JSON.stringify(enabled ? "1" : "0")}`;
+  const nextLine = `${envKey}=${JSON.stringify(value)}`;
   const existingIdx = output.findIndex((line) => line.trim().startsWith(`${envKey}=`));
 
   if (existingIdx >= 0) output[existingIdx] = nextLine;
@@ -93,6 +93,10 @@ async function writeEnvToggle(envKey: string, enabled: boolean): Promise<void> {
 
   const finalContent = `${output.join("\n").replace(/\n+$/g, "")}\n`;
   await writeFile(filePath, finalContent, "utf8");
+}
+
+async function writeEnvToggle(envKey: string, enabled: boolean): Promise<void> {
+  await writeEnvValue(envKey, enabled ? "true" : "false");
 }
 
 export async function GET() {
@@ -260,18 +264,24 @@ export async function POST(req: NextRequest) {
         !pool ||
         !cross ||
         !momentum ||
+        typeof pool.enabled !== "boolean" ||
         typeof pool.minImbalancePct !== "number" ||
         pool.poolsWatched !== "all_available" ||
         typeof pool.useJitoBundle !== "boolean" ||
+        typeof cross.enabled !== "boolean" ||
         typeof cross.minNetProfitSol !== "number" ||
         (cross.routeVia !== "jupiter" && cross.routeVia !== "direct") ||
         typeof cross.enableTriangularRoutes !== "boolean" ||
+        typeof momentum.enabled !== "boolean" ||
         typeof momentum.entryVolSpikeMultiplier !== "number" ||
         typeof momentum.exitTrailingStopPct !== "number" ||
         typeof momentum.maxHoldMinutes !== "number" ||
         typeof momentum.hardStopLossPct !== "number" ||
         typeof momentum.watchPumpFunLaunches !== "boolean" ||
-        typeof momentum.useBirdeyeTrendingFeed !== "boolean"
+        typeof momentum.useBirdeyeTrendingFeed !== "boolean" ||
+        typeof strategyEngines?.liquidationArb?.enabled !== "boolean" ||
+        typeof strategyEngines?.driftFunding?.enabled !== "boolean" ||
+        typeof strategyEngines?.stablecoinDepeg?.enabled !== "boolean"
       ) {
         return NextResponse.json(
           { ok: false, error: "strategy.engines.set requires valid strategy engine fields" },
@@ -280,16 +290,19 @@ export async function POST(req: NextRequest) {
       }
       await setRuntimeStrategyEngines({
         poolImbalance: {
+          enabled: pool.enabled,
           minImbalancePct: pool.minImbalancePct,
           poolsWatched: pool.poolsWatched,
           useJitoBundle: pool.useJitoBundle,
         },
         crossDexArb: {
+          enabled: cross.enabled,
           minNetProfitSol: cross.minNetProfitSol,
           routeVia: cross.routeVia,
           enableTriangularRoutes: cross.enableTriangularRoutes,
         },
         momentumRunner: {
+          enabled: momentum.enabled,
           entryVolSpikeMultiplier: momentum.entryVolSpikeMultiplier,
           exitTrailingStopPct: momentum.exitTrailingStopPct,
           maxHoldMinutes: momentum.maxHoldMinutes,
@@ -297,7 +310,33 @@ export async function POST(req: NextRequest) {
           watchPumpFunLaunches: momentum.watchPumpFunLaunches,
           useBirdeyeTrendingFeed: momentum.useBirdeyeTrendingFeed,
         },
+        liquidationArb: { enabled: strategyEngines.liquidationArb.enabled },
+        driftFunding: { enabled: strategyEngines.driftFunding.enabled },
+        stablecoinDepeg: { enabled: strategyEngines.stablecoinDepeg.enabled },
       });
+      await Promise.all([
+        writeEnvToggle("ENABLE_ARB", cross.enabled),
+        writeEnvToggle("ENABLE_TRIANGULAR_ARB", cross.enableTriangularRoutes),
+        writeEnvToggle("ENABLE_TRIANGULAR_ROUTES", cross.enableTriangularRoutes),
+        writeEnvToggle("ENABLE_AMM_IMBALANCE", pool.enabled),
+        writeEnvToggle("ENABLE_MOMENTUM", momentum.enabled),
+        writeEnvToggle("WATCH_PUMP_FUN", momentum.watchPumpFunLaunches),
+        writeEnvToggle("ENABLE_LIQUIDATION_ARB", strategyEngines.liquidationArb.enabled),
+        writeEnvToggle("ENABLE_DRIFT_FUNDING", strategyEngines.driftFunding.enabled),
+        writeEnvToggle("ENABLE_STABLECOIN_DEPEG", strategyEngines.stablecoinDepeg.enabled),
+        writeEnvValue("AMM_MIN_IMBALANCE_PCT", String(pool.minImbalancePct)),
+        writeEnvValue("MOMENTUM_VOL_SPIKE_MULTIPLIER", String(momentum.entryVolSpikeMultiplier)),
+        writeEnvValue("MOMENTUM_TRAILING_STOP_PCT", String(momentum.exitTrailingStopPct)),
+      ]);
+      process.env.ENABLE_ARB = cross.enabled ? "true" : "false";
+      process.env.ENABLE_TRIANGULAR_ARB = cross.enableTriangularRoutes ? "true" : "false";
+      process.env.ENABLE_TRIANGULAR_ROUTES = cross.enableTriangularRoutes ? "true" : "false";
+      process.env.ENABLE_AMM_IMBALANCE = pool.enabled ? "true" : "false";
+      process.env.ENABLE_MOMENTUM = momentum.enabled ? "true" : "false";
+      process.env.WATCH_PUMP_FUN = momentum.watchPumpFunLaunches ? "true" : "false";
+      process.env.ENABLE_LIQUIDATION_ARB = strategyEngines.liquidationArb.enabled ? "true" : "false";
+      process.env.ENABLE_DRIFT_FUNDING = strategyEngines.driftFunding.enabled ? "true" : "false";
+      process.env.ENABLE_STABLECOIN_DEPEG = strategyEngines.stablecoinDepeg.enabled ? "true" : "false";
     } else if (action === "openai.mode.set") {
       const enabled = body?.enabled;
       if (typeof enabled !== "boolean") {
