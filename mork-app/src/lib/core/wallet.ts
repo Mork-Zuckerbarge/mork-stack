@@ -227,7 +227,7 @@ export async function refreshWalletMemory() {
   await prisma.memory.create({
     data: {
       type: "event",
-      content: `Wallet state: address=${wallet.address} SOL=${wallet.sol} reserve=${wallet.bbq} USDC=${wallet.usdc} requirementMet=${wallet.requirementMet}`,
+      content: `Wallet state: address=${wallet.address} SOL=${wallet.sol} BBQ=${wallet.bbq} USDC=${wallet.usdc} requirementMet=${wallet.requirementMet}`,
       entities: ["wallet", `wallet:${wallet.address}`],
       importance: 0.4,
       source: "wallet",

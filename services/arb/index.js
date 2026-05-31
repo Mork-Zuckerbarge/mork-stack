@@ -66,8 +66,8 @@ const TRIANGULAR_INTERMEDIARIES = [
   { mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", symbol: "BONK" },
   { mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  symbol: "USDT" },
 ];
-const BBQ_MINT = process.env.MORK_RESERVE_TOKEN_MINT?.trim() || "";
-const RESERVE_TOKEN_SYMBOL = process.env.MORK_RESERVE_TOKEN_SYMBOL?.trim() || "RESERVE";
+const BBQ_MINT = "B59tYSWnDNTDbTsDXvhmXghJXsyunPsXfYFr7KfXBqYn";
+const BBQ_SYMBOL = "BBQ";
 
 function parseEnvBool(value, fallback) {
   const raw = String(value ?? "").trim();
@@ -1378,11 +1378,11 @@ async function main() {
 
         // ⛔ BBQ gate — keep this where it belongs.
         const knownBbqBalance = bbqBalanceFromSnapshot(snap);
-        const bbqBal = await withRetry("reserve token gate", () =>
+        const bbqBal = await withRetry("BBQ token gate", () =>
           enforceBbqGateOrExit(connection, wallet.publicKey, { knownBbqBalance })
         );
         if (BBQ_MINT) {
-          console.log(`✅ Reserve gate passed. ${RESERVE_TOKEN_SYMBOL}=${Number(bbqBal).toFixed(6)}`);
+          console.log(`✅ BBQ gate passed. ${BBQ_SYMBOL}=${Number(bbqBal).toFixed(6)}`);
         }
 
         sendWalletSnapshotToMork(snap)

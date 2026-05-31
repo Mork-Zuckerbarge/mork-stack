@@ -25,7 +25,7 @@ function isTechnicalMessage(message: string) {
   return [
     "code","debug","bug","function","component","react","next","typescript",
     "javascript","python","sql","html","css","api","server","wallet","trade",
-    "arb","token","sol","reserve","error","fix","build","compile","query","math",
+    "arb","token","sol","bbq","error","fix","build","compile","query","math",
     "calculate","sqrt",
   ].some((x) => m.includes(x));
 }
