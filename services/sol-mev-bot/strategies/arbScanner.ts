@@ -69,6 +69,8 @@ export class ArbScanner {
     if (this.scanning) return;
     this.scanning = true;
     logger.info('ArbScanner started', {
+      circularRoutes: this.config.enableArb,
+      triangularRoutes: this.config.enableTriangularArb,
       configuredTokens: this.config.arbTokenMints.length,
       openUniverse: this.config.arbTokenMints.includes('ALL') || this.config.arbTokenMints.includes('*'),
     });
@@ -95,7 +97,13 @@ export class ArbScanner {
     const mintsToScan = await this.getScanMints();
     const tokenMints = mintsToScan.filter((mint: string) => mint !== SOL_MINT);
 
-    const scans: Promise<void>[] = tokenMints.map((mint: string) => this.scanCircularRoute(mint));
+    const scans: Promise<void>[] = [];
+
+    if (this.config.enableArb) {
+      for (const mint of tokenMints) {
+        scans.push(this.scanCircularRoute(mint));
+      }
+    }
 
     if (this.config.enableTriangularArb) {
       for (const mint of tokenMints) {

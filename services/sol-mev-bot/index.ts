@@ -30,9 +30,13 @@ function loadEnvFiles(): void {
   }
 }
 
+function hasEnvValue(name: string): boolean {
+  return Boolean((process.env[name] || '').trim());
+}
+
 function loadConfig(): AgentConfig {
-  const hasWalletPrivateKey = Boolean((process.env.WALLET_PRIVATE_KEY || '').trim());
-  const hasMorkWalletSecretKey = Boolean((process.env.MORK_WALLET_SECRET_KEY || '').trim());
+  const hasWalletPrivateKey = hasEnvValue('WALLET_PRIVATE_KEY');
+  const hasMorkWalletSecretKey = hasEnvValue('MORK_WALLET_SECRET_KEY');
   const required = ['HELIUS_API_KEY', 'HELIUS_RPC_URL', 'HELIUS_WS_URL'];
   const missing = required.filter((k) => !process.env[k]);
   if (!hasWalletPrivateKey && !hasMorkWalletSecretKey) {
@@ -47,6 +51,24 @@ function loadConfig(): AgentConfig {
     process.exit(1);
   }
 
+  const dryRun = process.env.DRY_RUN !== 'false';
+  const enableMomentum = process.env.ENABLE_MOMENTUM === 'true';
+  const enableAmmImbalance = process.env.ENABLE_AMM_IMBALANCE === 'true';
+  const enableDriftFunding = process.env.ENABLE_DRIFT_FUNDING === 'true';
+  const momentumHasBirdeyeKey = hasEnvValue('BIRDEYE_API_KEY');
+  if (enableMomentum && !momentumHasBirdeyeKey) {
+    logger.warn('ENABLE_MOMENTUM=true but BIRDEYE_API_KEY is missing; MomentumRunner disabled to avoid Birdeye 401 noise.');
+  }
+  if (!dryRun && enableMomentum) {
+    logger.warn('ENABLE_MOMENTUM=true but live MomentumRunner swap execution is not wired; MomentumRunner disabled in live mode.');
+  }
+  if (!dryRun && enableAmmImbalance) {
+    logger.warn('ENABLE_AMM_IMBALANCE=true but live pool-imbalance swap execution is not wired; PoolImbalanceDetector disabled in live mode.');
+  }
+  if (!dryRun && enableDriftFunding) {
+    logger.warn('ENABLE_DRIFT_FUNDING=true but Drift perp-side execution is not wired; DriftFundingArb disabled in live mode to avoid unhedged spot trades.');
+  }
+
   return {
     walletPrivateKey: process.env.WALLET_PRIVATE_KEY!,
     heliusApiKey: process.env.HELIUS_API_KEY!,
@@ -54,13 +76,13 @@ function loadConfig(): AgentConfig {
     heliusWsUrl: process.env.HELIUS_WS_URL!,
     jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL ?? 'https://mainnet.block-engine.jito.wtf',
     jitoTipLamports: parseInt(process.env.JITO_TIP_LAMPORTS ?? '10000'),
-    dryRun: process.env.DRY_RUN !== 'false',
+    dryRun,
     minProfitLamports: parseInt(process.env.MIN_PROFIT_LAMPORTS ?? '5000'),
     maxPositionSol: parseFloat(process.env.MAX_POSITION_SOL ?? '0.5'),
     priorityFeeMicrolamports: parseInt(process.env.PRIORITY_FEE_MICROLAMPORTS ?? '50000'),
-    enableAmmImbalance: process.env.ENABLE_AMM_IMBALANCE === 'true',
+    enableAmmImbalance: enableAmmImbalance && dryRun,
     enableArb: process.env.ENABLE_ARB === 'true',
-    enableMomentum: process.env.ENABLE_MOMENTUM === 'true',
+    enableMomentum: enableMomentum && momentumHasBirdeyeKey && dryRun,
     ammMinImbalancePct: parseFloat(process.env.AMM_MIN_IMBALANCE_PCT ?? '5'),
     arbTokenMints: (process.env.ARB_TOKEN_MINTS ?? [
       'So11111111111111111111111111111111111111112',
@@ -75,7 +97,7 @@ function loadConfig(): AgentConfig {
     // New strategies
     enableTriangularArb: process.env.ENABLE_TRIANGULAR_ARB === 'true',
     enableLiquidationArb: process.env.ENABLE_LIQUIDATION_ARB === 'true',
-    enableDriftFunding: process.env.ENABLE_DRIFT_FUNDING === 'true',
+    enableDriftFunding: enableDriftFunding && dryRun,
     enableStablecoinDepeg: process.env.ENABLE_STABLECOIN_DEPEG === 'true',
     enableCrossDexArb: false, // handled by arb/index.js + UI toggle
     // Dynamic Jito tip
@@ -136,6 +158,19 @@ async function main(): Promise<void> {
     stablecoinDepeg: config.enableStablecoinDepeg,
     dynamicJitoTip: config.dynamicJitoTip,
   });
+  logger.info('Strategy readiness', {
+    arbScanner: config.enableArb || config.enableTriangularArb,
+    circularArb: config.enableArb,
+    triangularArb: config.enableTriangularArb,
+    momentumBlockedByMissingBirdeyeKey: process.env.ENABLE_MOMENTUM === 'true' && !hasEnvValue('BIRDEYE_API_KEY'),
+    liveOnlyImplementedStrategies: ['arb', 'triangularArb', 'liquidationArb', 'stablecoinDepeg'],
+    liveDisabledIncompleteStrategies: config.dryRun ? [] : [
+      process.env.ENABLE_MOMENTUM === 'true' ? 'momentum' : null,
+      process.env.ENABLE_AMM_IMBALANCE === 'true' ? 'ammImbalance' : null,
+      process.env.ENABLE_DRIFT_FUNDING === 'true' ? 'driftFunding' : null,
+    ].filter(Boolean),
+    liveTxsEnabled: !config.dryRun,
+  });
 
   if (config.dryRun) {
     logger.warn('*** DRY RUN MODE — no real txs sent. Set DRY_RUN=false to go live. ***');
@@ -162,7 +197,15 @@ async function main(): Promise<void> {
   logger.info('Balance', { sol: balanceSol.toFixed(4) });
   logger.info('Trade gates', {
     dryRun: config.dryRun,
-    strategyEnabledCount: [config.enableArb, config.enableAmmImbalance, config.enableMomentum].filter(Boolean).length,
+    strategyEnabledCount: [
+      config.enableArb,
+      config.enableAmmImbalance,
+      config.enableMomentum,
+      config.enableTriangularArb,
+      config.enableLiquidationArb,
+      config.enableDriftFunding,
+      config.enableStablecoinDepeg,
+    ].filter(Boolean).length,
     lowBalanceBlocksLiveTrading: balance < 0.05 * LAMPORTS_PER_SOL && !config.dryRun,
   });
 
@@ -204,7 +247,7 @@ async function main(): Promise<void> {
   // Strategies
   const stoppables: Array<{ stop(): void; name: string }> = [];
 
-  if (config.enableArb) {
+  if (config.enableArb || config.enableTriangularArb) {
     const arb = new ArbScanner(config, connection, wallet, feeSimulator, jitoClient);
     arb.start();
     stoppables.push({ name: 'ArbScanner', stop: () => arb.stop() });

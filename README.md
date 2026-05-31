@@ -207,7 +207,11 @@ On first startup, if `services/arb/whitelist.json` is missing, `start.sh` runs t
 All new strategies are **off by default** — flip to `true` to enable each one independently.
 
 ```bash
+# Circular arb: SOL → TOKEN → SOL (sol-mev-bot)
+ENABLE_ARB=true
+
 # Triangular arb: SOL → B → TOKEN → SOL (sol-mev-bot)
+# This now starts ArbScanner even when ENABLE_ARB=false.
 ENABLE_TRIANGULAR_ARB=true
 
 # Liquidation arb: buy dips caused by MarginFi/Kamino/Solend forced sells
@@ -219,9 +223,25 @@ ENABLE_DRIFT_FUNDING=true
 # Stablecoin depeg: trade USDC/USDT/PYUSD when they deviate from $1.00
 ENABLE_STABLECOIN_DEPEG=true
 
+# Momentum: requires BIRDEYE_API_KEY; if the key is missing, MomentumRunner stays disabled
+# to avoid Birdeye 401 log spam.
+ENABLE_MOMENTUM=true
+BIRDEYE_API_KEY=your_birdeye_key
+
 # Triangular routes in the arb service (backs the “enable triangular routes” UI toggle)
 ENABLE_TRIANGULAR_ROUTES=true
 ```
+
+
+### Live execution coverage
+
+With `DRY_RUN=false`, only strategies with complete live transaction paths are allowed to run:
+
+- `ENABLE_ARB` / `ENABLE_TRIANGULAR_ARB`: Jupiter swap instructions submitted through Jito bundles.
+- `ENABLE_LIQUIDATION_ARB`: live Jupiter/Jito entry and exit swaps.
+- `ENABLE_STABLECOIN_DEPEG`: live Jupiter/Jito buy/sell swaps.
+
+`ENABLE_MOMENTUM`, `ENABLE_AMM_IMBALANCE`, and `ENABLE_DRIFT_FUNDING` remain dry-run/research only until their live execution is fully wired. In live mode they are disabled at startup instead of logging placeholder successes or sending an unhedged partial trade.
 
 ### Dynamic Jito tip sizing
 
