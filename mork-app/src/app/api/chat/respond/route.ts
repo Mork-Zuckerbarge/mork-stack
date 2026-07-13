@@ -123,7 +123,10 @@ async function fetchJsonWithJupiterFallback(path: string, query: Record<string, 
       const url = new URL(`${base}${path}`);
       Object.entries(query).forEach(([k, v]) => url.searchParams.set(k, v));
       const res = await fetch(url.toString(), {
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          ...(process.env.JUP_API_KEY ? { "x-api-key": process.env.JUP_API_KEY } : {}),
+        },
         cache: "no-store",
         signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
       });
@@ -404,7 +407,7 @@ async function resolveTokenMint(symbolOrMint: string): Promise<{ mint: string; s
 
   let allRes: Response;
   try {
-    allRes = await fetch("https://token.jup.ag/all", { headers: { Accept: "application/json" }, cache: "no-store" });
+    allRes = new Response(JSON.stringify(await fetchJsonWithJupiterFallback("/tokens/v1/all", {})), { status: 200 });
   } catch (error) {
     throw toUserFacingFetchError(error, "Token lookup failed");
   }
@@ -426,11 +429,8 @@ async function getTokenDecimals(mint: string): Promise<number> {
     if (Number.isFinite(decimals) && decimals >= 0) return decimals;
   } catch { /* fallback below */ }
 
-  const allRes = await fetch("https://token.jup.ag/all", {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-    signal: AbortSignal.timeout(JUP_TIMEOUT_MS),
-  }).catch(() => null);
+  const allTokensFallback = await fetchJsonWithJupiterFallback("/tokens/v1/all", {}).catch(() => null);
+  const allRes = allTokensFallback ? new Response(JSON.stringify(allTokensFallback), { status: 200 }) : null;
   if (allRes?.ok) {
     const allTokens = (await allRes.json()) as JupiterAllToken[];
     const token = allTokens.find((item) => item.address === mint);

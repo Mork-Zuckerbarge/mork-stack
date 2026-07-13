@@ -13,6 +13,14 @@ import {
 } from '../types';
 
 const JUPITER_API = 'https://quote-api.jup.ag/v6';
+const JUPITER_TOKENS_API = process.env.JUPITER_TOKENS_API || 'https://api.jup.ag/tokens/v1/all';
+const DEFAULT_ARB_TOKEN_MINTS = [
+  'So11111111111111111111111111111111111111112',
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',
+  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+  'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+];
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -318,14 +326,21 @@ export class ArbScanner {
 
   private async fetchTradableMints(): Promise<string[]> {
     try {
-      const res = await axios.get('https://token.jup.ag/all', { timeout: 5000 });
+      const res = await axios.get(JUPITER_TOKENS_API, {
+        timeout: 5000,
+        headers: process.env.JUP_API_KEY ? { 'x-api-key': process.env.JUP_API_KEY } : undefined,
+      });
       const tokens = Array.isArray(res.data) ? res.data : [];
       return tokens
         .map((t: { address?: string }) => t.address)
         .filter((mint: string | undefined): mint is string => Boolean(mint));
     } catch (err) {
-      logger.warn('Failed to fetch Jupiter token universe', { err });
-      return this.dynamicUniverseMints;
+      const error = err instanceof Error ? err.message : String(err);
+      logger.warn('Failed to fetch Jupiter token universe; using configured/default mints', {
+        url: JUPITER_TOKENS_API,
+        error,
+      });
+      return this.dynamicUniverseMints.length > 0 ? this.dynamicUniverseMints : DEFAULT_ARB_TOKEN_MINTS;
     }
   }
 

@@ -452,7 +452,8 @@ async function ensureFeeBalance(connection, wallet) {
 }
 
 const JUP_BASE_URL = process.env.JUP_BASE_URL || "https://api.jup.ag";
-const QUOTE_URL = "https://api.jup.ag/swap/v1/quote";
+const QUOTE_URL = `${JUP_BASE_URL}/swap/v1/quote`;
+const JUP_QUOTE_TIMEOUT_MS = Number(process.env.JUP_QUOTE_TIMEOUT_MS || Math.min(10000, Number(process.env.SCAN_TIMEOUT_MS || 12000)));
 
 const USDC = {
   symbol: "USDC",
@@ -841,10 +842,23 @@ async function getQuote(inputMint, outputMint, amount, slippageBps = SLIPPAGE_BP
   await sleep(80 + Math.floor(Math.random() * 180));
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetchFn(url.toString(), {
-      method: "GET",
-      headers: jupHeaders({ "Content-Type": undefined }), // GET doesn't need JSON content-type
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), JUP_QUOTE_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetchFn(url.toString(), {
+        method: "GET",
+        headers: jupHeaders({ "Content-Type": undefined }), // GET doesn't need JSON content-type
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw new Error(`Jupiter quote timeout after ${JUP_QUOTE_TIMEOUT_MS}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (res.status === 429) {
       const ra = res.headers.get("retry-after");
