@@ -32,6 +32,35 @@ function associatedTokenAddress(owner: PublicKey, mint: PublicKey) {
   )[0];
 }
 
+async function getMintDecimals(mint: PublicKey) {
+  const connection = createSolanaConnection(RPC, "confirmed");
+  const mintInfo = await connection.getParsedAccountInfo(mint, "confirmed");
+  const decimals = Number((mintInfo.value?.data as { parsed?: { info?: { decimals?: number } } })?.parsed?.info?.decimals);
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 12) throw new Error("Could not resolve token decimals");
+  return decimals;
+}
+
+export async function getTransferableWalletTokenAmount(mintAddress: string) {
+  const signer = signerFromEnv();
+  const connection = createSolanaConnection(RPC, "confirmed");
+  if (mintAddress === SOL_MINT) {
+    const balance = await connection.getBalance(signer.publicKey, "confirmed");
+    return Math.max(0, (balance - 10_000_000) / 1_000_000_000);
+  }
+
+  const mint = new PublicKey(mintAddress);
+  const decimals = await getMintDecimals(mint);
+  const source = associatedTokenAddress(signer.publicKey, mint);
+  const sourceBalance = await connection.getTokenAccountBalance(source, "confirmed").catch(() => null);
+  const sourceUnits = BigInt(sourceBalance?.value.amount || "0");
+  const reservedUnits =
+    BBQ_TOKEN.mint && mintAddress === BBQ_TOKEN.mint
+      ? BigInt(Math.ceil(BBQ_TOKEN.requiredBalance * 10 ** decimals))
+      : BigInt(0);
+  const transferableUnits = sourceUnits > reservedUnits ? sourceUnits - reservedUnits : BigInt(0);
+  return Number(transferableUnits) / 10 ** decimals;
+}
+
 function createAssociatedTokenAccountInstruction(payer: PublicKey, owner: PublicKey, mint: PublicKey, ata: PublicKey) {
   return new TransactionInstruction({
     programId: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -70,11 +99,11 @@ function transferCheckedInstruction(
   });
 }
 
-export async function sendWalletToken(input: { recipient: string; mint: string; amount: number }) {
+export async function sendWalletToken(input: { recipient: string; mint: string; amount: number; sendAll?: boolean }) {
   if (process.env.MORK_AGENT_TRANSFER_ENABLED !== "1") {
     throw new Error("Wallet transfers are disabled (set MORK_AGENT_TRANSFER_ENABLED=1 to enable explicit send commands)");
   }
-  if (!Number.isFinite(input.amount) || input.amount <= 0) throw new Error("Transfer amount must be greater than zero");
+  if (!Number.isFinite(input.amount) || input.amount <= 0) throw new Error("No transferable token balance is available");
 
   const signer = signerFromEnv();
   const recipient = new PublicKey(input.recipient);
@@ -84,24 +113,29 @@ export async function sendWalletToken(input: { recipient: string; mint: string; 
 
   if (input.mint === SOL_MINT) {
     const maxSol = Math.max(0, Number(process.env.MORK_AGENT_TRANSFER_MAX_SOL || 0.25));
-    if (input.amount > maxSol) throw new Error(`SOL transfer exceeds configured maximum of ${maxSol} SOL`);
-    const lamports = Math.floor(input.amount * 1_000_000_000);
     const balance = await connection.getBalance(signer.publicKey, "confirmed");
+    const lamports = input.sendAll ? Math.max(0, balance - 10_000_000) : Math.floor(input.amount * 1_000_000_000);
+    if (lamports > Math.floor(maxSol * 1_000_000_000)) {
+      throw new Error(`SOL transfer exceeds configured maximum of ${maxSol} SOL`);
+    }
     if (balance - lamports < 10_000_000) throw new Error("SOL transfer blocked: wallet must retain at least 0.01 SOL for fees");
     transaction.add(SystemProgram.transfer({ fromPubkey: signer.publicKey, toPubkey: recipient, lamports }));
   } else {
     const mint = new PublicKey(input.mint);
-    const mintInfo = await connection.getParsedAccountInfo(mint, "confirmed");
-    const decimals = Number((mintInfo.value?.data as { parsed?: { info?: { decimals?: number } } })?.parsed?.info?.decimals);
-    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 12) throw new Error("Could not resolve token decimals");
+    const decimals = await getMintDecimals(mint);
     const source = associatedTokenAddress(signer.publicKey, mint);
     const destination = associatedTokenAddress(recipient, mint);
     const sourceBalance = await connection.getTokenAccountBalance(source, "confirmed").catch(() => null);
     const sourceUnits = BigInt(sourceBalance?.value.amount || "0");
-    const amountUnits = BigInt(Math.floor(input.amount * 10 ** decimals));
+    const requiredUnits =
+      BBQ_TOKEN.mint && input.mint === BBQ_TOKEN.mint
+        ? BigInt(Math.ceil(BBQ_TOKEN.requiredBalance * 10 ** decimals))
+        : BigInt(0);
+    const amountUnits = input.sendAll
+      ? sourceUnits > requiredUnits ? sourceUnits - requiredUnits : BigInt(0)
+      : BigInt(Math.floor(input.amount * 10 ** decimals));
     if (amountUnits <= BigInt(0) || amountUnits > sourceUnits) throw new Error("Transfer amount exceeds the wallet token balance");
     if (BBQ_TOKEN.mint && input.mint === BBQ_TOKEN.mint) {
-      const requiredUnits = BigInt(Math.ceil(BBQ_TOKEN.requiredBalance * 10 ** decimals));
       if (sourceUnits - amountUnits < requiredUnits) {
         throw new Error(
           `${BBQ_TOKEN.symbol} transfer blocked: wallet must retain at least ${BBQ_TOKEN.requiredBalance} ${BBQ_TOKEN.symbol}`,

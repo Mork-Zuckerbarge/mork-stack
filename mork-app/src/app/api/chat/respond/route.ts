@@ -10,7 +10,7 @@ import { APP_DEFAULTS, BBQ_TOKEN } from "@/lib/core/defaults";
 import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
 import { createSolanaConnection } from "@/lib/core/solanaRpc";
 import { ensurePlannerAutopilotStarted } from "@/lib/core/plannerAutopilot";
-import { sendWalletToken } from "@/lib/core/tokenTransfer";
+import { getTransferableWalletTokenAmount, sendWalletToken } from "@/lib/core/tokenTransfer";
 import { POST as runPlannerTickRoute } from "@/app/planner/tick/route";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -27,7 +27,7 @@ type RoutedCommand =
   | { type: "trade.sellAll"; inputSymbol: string; outputSymbol: string }
   | { type: "trade.autosearch" }
   | { type: "trade.autonomyCheck" }
-  | { type: "wallet.send"; quantity: number; token: string; recipient: string }
+  | { type: "wallet.send"; quantity: number | "all"; token: string; recipient: string }
   | { type: "services.status" }
   | { type: "service.start"; service: "arb" | "sherpa" }
   | { type: "service.stop"; service: "arb" | "sherpa" };
@@ -218,6 +218,18 @@ function parseCommand(message: string): RoutedCommand | null {
       filename: sendMediaMatch[1].trim(),
       platform: sendMediaMatch[2].toLowerCase() as "telegram" | "x" | "sherpa",
       caption: sendMediaMatch[3]?.trim() || "",
+    };
+  }
+
+  const walletSendAllMatch = firstLine.match(
+    /^(?:send|transfer)\s+all\s+\$?([a-z0-9._-]+)\s+to\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s*$/i,
+  );
+  if (walletSendAllMatch) {
+    return {
+      type: "wallet.send",
+      quantity: "all",
+      token: normalizeTokenRef(walletSendAllMatch[1]),
+      recipient: walletSendAllMatch[2],
     };
   }
 
@@ -628,17 +640,22 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
     let token: { mint: string; symbol: string };
     try {
       token = await resolveTokenMint(command.token);
-      const usdNotional = token.mint === USDC_MINT ? command.quantity : await estimateUsdNotional(token.mint, command.quantity);
+      const sendAll = command.quantity === "all";
+      const quantity = sendAll ? await getTransferableWalletTokenAmount(token.mint) : Number(command.quantity);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return { ok: false, status: 400, error: `No transferable $${token.symbol} balance is available.` };
+      }
+      const usdNotional = token.mint === USDC_MINT ? quantity : await estimateUsdNotional(token.mint, quantity);
       const authority = await enforceTradeAuthority(usdNotional);
       if (!authority.ok) return authority;
-      const sent = await sendWalletToken({ recipient: command.recipient, mint: token.mint, amount: command.quantity });
+      const sent = await sendWalletToken({ recipient: command.recipient, mint: token.mint, amount: quantity, sendAll });
       await noteTradeExecution();
       return {
         ok: true,
         status: 200,
         routed: "wallet",
         command: "wallet.send",
-        response: `Sent ${command.quantity} $${token.symbol} to ${sent.recipient}. Signature: ${sent.signature}`,
+        response: `Sent ${sendAll ? "all transferable" : quantity} $${token.symbol} to ${sent.recipient}. Signature: ${sent.signature}`,
       };
     } catch (error) {
       return { ok: false, status: 400, error: error instanceof Error ? error.message : "Wallet transfer failed." };
