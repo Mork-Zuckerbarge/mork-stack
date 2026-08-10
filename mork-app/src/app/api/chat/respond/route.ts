@@ -10,6 +10,7 @@ import { APP_DEFAULTS, BBQ_TOKEN } from "@/lib/core/defaults";
 import { getJupiterBaseCandidates, getJupiterTimeoutMs } from "@/lib/core/jupiter";
 import { createSolanaConnection } from "@/lib/core/solanaRpc";
 import { ensurePlannerAutopilotStarted } from "@/lib/core/plannerAutopilot";
+import { sendWalletToken } from "@/lib/core/tokenTransfer";
 import { POST as runPlannerTickRoute } from "@/app/planner/tick/route";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -26,6 +27,7 @@ type RoutedCommand =
   | { type: "trade.sellAll"; inputSymbol: string; outputSymbol: string }
   | { type: "trade.autosearch" }
   | { type: "trade.autonomyCheck" }
+  | { type: "wallet.send"; quantity: number; token: string; recipient: string }
   | { type: "services.status" }
   | { type: "service.start"; service: "arb" | "sherpa" }
   | { type: "service.stop"; service: "arb" | "sherpa" };
@@ -216,6 +218,18 @@ function parseCommand(message: string): RoutedCommand | null {
       filename: sendMediaMatch[1].trim(),
       platform: sendMediaMatch[2].toLowerCase() as "telegram" | "x" | "sherpa",
       caption: sendMediaMatch[3]?.trim() || "",
+    };
+  }
+
+  const walletSendMatch = firstLine.match(
+    /^(?:send|transfer)\s+(\d+(?:\.\d+)?)\s+\$?([a-z0-9._-]+)\s+to\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s*$/i,
+  );
+  if (walletSendMatch) {
+    return {
+      type: "wallet.send",
+      quantity: Number(walletSendMatch[1]),
+      token: normalizeTokenRef(walletSendMatch[2]),
+      recipient: walletSendMatch[3],
     };
   }
 
@@ -604,6 +618,31 @@ async function executeCommand(req: NextRequest, command: RoutedCommand) {
         `- trade authority: ${authority.mode} (maxTradeUsd=${authority.maxTradeUsd}, cooldownMinutes=${authority.cooldownMinutes})`,
       status: 200,
     };
+  }
+
+  if (command.type === "wallet.send") {
+    const control = await getAppControlState();
+    if (control.controls.executionAuthority.mode === "emergency_stop") {
+      return { ok: false, status: 403, error: "Wallet transfer blocked: emergency_stop mode is active." };
+    }
+    let token: { mint: string; symbol: string };
+    try {
+      token = await resolveTokenMint(command.token);
+      const usdNotional = token.mint === USDC_MINT ? command.quantity : await estimateUsdNotional(token.mint, command.quantity);
+      const authority = await enforceTradeAuthority(usdNotional);
+      if (!authority.ok) return authority;
+      const sent = await sendWalletToken({ recipient: command.recipient, mint: token.mint, amount: command.quantity });
+      await noteTradeExecution();
+      return {
+        ok: true,
+        status: 200,
+        routed: "wallet",
+        command: "wallet.send",
+        response: `Sent ${command.quantity} $${token.symbol} to ${sent.recipient}. Signature: ${sent.signature}`,
+      };
+    } catch (error) {
+      return { ok: false, status: 400, error: error instanceof Error ? error.message : "Wallet transfer failed." };
+    }
   }
 
   if (command.type === "service.start") {

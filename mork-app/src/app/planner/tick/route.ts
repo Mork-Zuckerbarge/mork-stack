@@ -272,41 +272,41 @@ async function estimateSolForUsd(usd: number): Promise<number> {
   return outLamports / 1_000_000_000;
 }
 
-async function rankPolicyMints(allowlist: string[]): Promise<string[]> {
+async function rankPolicyMints(allowlist: string[]): Promise<Array<{ mint: string; policy: PolicyScore }>> {
   const now = Date.now();
   const policies = await prisma.arbPolicy.findMany({ where: { mint: { in: allowlist } } });
 
-  const scoreMap = new Map<string, number>();
+  const scoreMap = new Map<string, PolicyScore>();
   for (const row of policies) {
     const p = row.policy as Record<string, unknown>;
     const blacklistTs = Number((p?.tempBlacklistUntilMs as number | undefined) ?? 0);
     if (blacklistTs > now) continue;
-    const stats = p?.stats as Record<string, unknown> | undefined;
-    scoreMap.set(row.mint, Number(stats?.score ?? 0));
+    scoreMap.set(row.mint, policyScoreFromRow(p));
   }
   for (const mint of allowlist) {
-    if (!scoreMap.has(mint)) scoreMap.set(mint, 0);
+    if (!scoreMap.has(mint)) scoreMap.set(mint, { score: 0, ok: 0, fail: 0 });
   }
-  return [...scoreMap.entries()].sort((a, b) => b[1] - a[1]).map(([mint]) => mint);
+  return [...scoreMap.entries()]
+    .sort((a, b) => b[1].score - a[1].score)
+    .map(([mint, policy]) => ({ mint, policy }));
 }
 
-async function isMintTradableFromSol(outputMint: string, amountLamports: number): Promise<boolean> {
-  const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
-  quoteUrl.searchParams.set("inputMint", SOL_MINT);
-  quoteUrl.searchParams.set("outputMint", outputMint);
-  quoteUrl.searchParams.set("amount", String(Math.max(1, Math.floor(amountLamports))));
-  quoteUrl.searchParams.set("slippageBps", "50");
-  const res = await fetch(quoteUrl.toString(), { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
-  return Boolean(res?.ok);
-}
-
-async function pickBestTradableMint(allowlist: string[], amountSol: number): Promise<string | null> {
+async function pickBestTradableMint(allowlist: string[], amountSol: number): Promise<CandidateQuote | null> {
   const ranked = await rankPolicyMints(allowlist);
   const probeLamports = Math.max(1_000_000, Math.floor(amountSol * 1_000_000_000));
-  for (const mint of ranked) {
-    if (await isMintTradableFromSol(mint, probeLamports)) return mint;
+  const probeLimit = Math.min(ranked.length, Math.max(3, numberFromEnv(process.env.MORK_PLANNER_CANDIDATE_PROBE_LIMIT, 12)));
+  const candidates: CandidateQuote[] = [];
+  for (const item of ranked.slice(0, probeLimit)) {
+    const quote = await quoteBuyCandidate(item.mint, probeLamports, item.policy);
+    if (quote) candidates.push(quote);
   }
-  console.warn(`[planner] no tradable mint found after probing ${ranked.length} allowlisted mints with ${(probeLamports / 1_000_000_000).toFixed(6)} SOL`);
+  candidates.sort((a, b) => b.executionScore - a.executionScore);
+  const best = candidates[0] ?? null;
+  if (best) {
+    console.log(`[planner] selected mint=${best.mint} executionScore=${best.executionScore.toFixed(4)} policyScore=${best.policy.score.toFixed(4)} priceImpactPct=${best.priceImpactPct.toFixed(4)} routeHops=${best.routeHopCount}`);
+    return best;
+  }
+  console.warn(`[planner] no tradable mint found after probing ${probeLimit}/${ranked.length} allowlisted mints with ${(probeLamports / 1_000_000_000).toFixed(6)} SOL`);
   return null;
 }
 
@@ -441,6 +441,63 @@ type PlannerReasonCode =
   | "below_min_economic_size";
 
 type PlannerDecision = { go: boolean; usd: number; reason: string; reasonCode: PlannerReasonCode };
+
+type PolicyScore = { score: number; ok: number; fail: number };
+type CandidateQuote = {
+  mint: string;
+  policy: PolicyScore;
+  outAmount: number;
+  priceImpactPct: number;
+  routeHopCount: number;
+  executionScore: number;
+};
+
+function policyScoreFromRow(policy: Record<string, unknown> | null | undefined): PolicyScore {
+  const stats = (policy?.stats as Record<string, unknown> | undefined) ?? {};
+  const score = Number(stats.score ?? 0);
+  const ok = Number(stats.ok ?? 0);
+  const fail = Number(stats.fail ?? 0);
+  return {
+    score: Number.isFinite(score) ? score : 0,
+    ok: Number.isFinite(ok) ? ok : 0,
+    fail: Number.isFinite(fail) ? fail : 0,
+  };
+}
+
+function scoreCandidateQuote(quote: CandidateQuote): number {
+  const reliability = quote.policy.ok + quote.policy.fail > 0
+    ? quote.policy.ok / Math.max(1, quote.policy.ok + quote.policy.fail)
+    : 0.5;
+  const liquidityScore = Math.log10(Math.max(1, quote.outAmount));
+  const impactPenalty = Math.max(0, quote.priceImpactPct) * 20;
+  const routePenalty = Math.max(0, quote.routeHopCount - 2) * 0.15;
+  return quote.policy.score + reliability + liquidityScore - impactPenalty - routePenalty;
+}
+
+async function quoteBuyCandidate(outputMint: string, amountLamports: number, policy: PolicyScore): Promise<CandidateQuote | null> {
+  const quoteUrl = new URL(`${JUP_BASE}/swap/v1/quote`);
+  quoteUrl.searchParams.set("inputMint", SOL_MINT);
+  quoteUrl.searchParams.set("outputMint", outputMint);
+  quoteUrl.searchParams.set("amount", String(Math.max(1, Math.floor(amountLamports))));
+  quoteUrl.searchParams.set("slippageBps", "50");
+  const res = await fetch(quoteUrl.toString(), { headers: { Accept: "application/json" }, cache: "no-store" }).catch(() => null);
+  if (!res?.ok) return null;
+  const json = (await res.json().catch(() => null)) as { outAmount?: string; priceImpactPct?: string; routePlan?: unknown[] } | null;
+  const outAmount = Number(json?.outAmount ?? 0);
+  const priceImpactPct = Number(json?.priceImpactPct ?? 0);
+  if (!Number.isFinite(outAmount) || outAmount <= 0) return null;
+  const routeHopCount = Array.isArray(json?.routePlan) ? json.routePlan.length : 0;
+  const candidate = {
+    mint: outputMint,
+    policy,
+    outAmount,
+    priceImpactPct: Number.isFinite(priceImpactPct) ? priceImpactPct : 0,
+    routeHopCount,
+    executionScore: 0,
+  };
+  candidate.executionScore = scoreCandidateQuote(candidate);
+  return candidate;
+}
 
 async function getTradeDecision(context: string, maxTradeUsd: number, minTradeUsd: number): Promise<PlannerDecision> {
   const effectiveMaxTradeUsd = Number.isFinite(maxTradeUsd) && maxTradeUsd > 0 ? maxTradeUsd : 1_000_000;
@@ -727,7 +784,8 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
     });
   }
 
-  const outputMint = await pickBestTradableMint(allowlist, amountSol);
+  const selectedCandidate = await pickBestTradableMint(allowlist, amountSol);
+  const outputMint = selectedCandidate?.mint ?? null;
   if (!outputMint) {
     logSkip(`no_tradable_mint allowlistSize=${allowlist.length} probeSol=${amountSol.toFixed(6)}`);
     return NextResponse.json({
@@ -809,5 +867,5 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
     update: { value: new Date().toISOString(), source: "agent", weight: 8 },
   });
 
-  return NextResponse.json({ ok: true, status: "executed", mode: swapMode, runId, usd: decision.usd, amountSol: rotateFrom ? rotateSolEstimate : amountSol, outputMint, rotateFromMint: rotateFrom?.mint ?? null, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, targetHasPositiveSignal, rotateBasisSol, cappedToMaxSol: !rotateFrom && amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: strategySnapshot.exitTrailingStopPct, maxHoldMinutes: strategySnapshot.maxHoldMinutes, hardStopLossPct: strategySnapshot.hardStopLossPct } } });
+  return NextResponse.json({ ok: true, status: "executed", mode: swapMode, runId, usd: decision.usd, amountSol: rotateFrom ? rotateSolEstimate : amountSol, outputMint, rotateFromMint: rotateFrom?.mint ?? null, signature: swapJson.signature ?? null, reason: decision.reason, decisionMeta: { reasonCode: decision.reasonCode, fallbackApplied, targetHasPositiveSignal, selectedCandidate: selectedCandidate ? { executionScore: selectedCandidate.executionScore, policyScore: selectedCandidate.policy.score, policyOk: selectedCandidate.policy.ok, policyFail: selectedCandidate.policy.fail, priceImpactPct: selectedCandidate.priceImpactPct, routeHopCount: selectedCandidate.routeHopCount } : null, rotateBasisSol, cappedToMaxSol: !rotateFrom && amountSol >= maxSol, feeds: { signalCount: context.signalCount, feedCount: context.feedCount, policyCount: context.policyCount }, exitPlan: { tp: null, sl: null, trailingStopPct: strategySnapshot.exitTrailingStopPct, maxHoldMinutes: strategySnapshot.maxHoldMinutes, hardStopLossPct: strategySnapshot.hardStopLossPct } } });
 }
