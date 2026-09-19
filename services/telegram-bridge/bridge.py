@@ -49,9 +49,12 @@ TELEGRAM_MEMORY_MAX = max(1, int(os.getenv("TELEGRAM_MEMORY_MAX", "10")))
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2").strip()
-VOICE_DEFAULT_ON = os.getenv("VOICE_DEFAULT_ON", "0").strip().lower() in ("1", "true", "yes", "on")
+VOICE_DEFAULT_ON = os.getenv(
+    "VOICE_DEFAULT_ON",
+    "1" if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID else "0",
+).strip().lower() in ("1", "true", "yes", "on")
 VOICE_MAX_CHARS = int(os.getenv("VOICE_MAX_CHARS", "700"))
-VOICE_REPLY_PROBABILITY = min(1.0, max(0.0, float(os.getenv("VOICE_REPLY_PROBABILITY", "0.2"))))
+VOICE_REPLY_PROBABILITY = min(1.0, max(0.0, float(os.getenv("VOICE_REPLY_PROBABILITY", "1"))))
 
 if not BOT_TOKEN:
     raise SystemExit("Missing TELEGRAM_BOT_TOKEN in .env")
@@ -386,15 +389,27 @@ def send_voice(chat_id: int, text: str, reply_to: int | None = None):
 def get_me():
     r = requests.get(f"{API}/getMe", timeout=20)
     if r.status_code == 404:
-        preview = f"{BOT_TOKEN[:8]}..." if BOT_TOKEN else "<empty>"
         raise RuntimeError(
             "Telegram getMe returned 404. TELEGRAM_BOT_TOKEN appears invalid "
-            f"(value starts with: {preview}). "
             "Use the HTTP API bot token from @BotFather (format like 123456:ABC...). "
             "Do not use a chat id."
         )
     r.raise_for_status()
     return r.json()["result"]
+
+
+def prepare_long_polling():
+    # Telegram will not return updates to getUpdates while a webhook is configured.
+    # Removing it here makes switching an existing BotFather token to this local
+    # bridge deterministic, while preserving any pending messages.
+    telegram_post("deleteWebhook", data={"drop_pending_updates": "false"}, timeout=20)
+    telegram_post(
+        "setMyCommands",
+        data={
+            "commands": '[{"command":"voice","description":"Voice replies: on, off, or status"},{"command":"memory","description":"Memory: on, off, or clear"}]'
+        },
+        timeout=20,
+    )
 
 
 def main():
@@ -408,6 +423,10 @@ def main():
 
     bot_username = me.get("username", "") or ""
     bot_id = int(me.get("id"))
+    try:
+        prepare_long_polling()
+    except Exception as e:
+        print("[bridge] polling setup error:", repr(e))
     print(
         f"[bridge] bot=@{bot_username} id={bot_id} core={CORE_URL} endpoint={CHAT_ENDPOINT} mode={REPLY_MODE}"
     )
@@ -422,7 +441,11 @@ def main():
     try:
         while True:
             try:
-                r = requests.get(f"{API}/getUpdates", params={"timeout": 30, "offset": offset}, timeout=35)
+                r = requests.get(
+                    f"{API}/getUpdates",
+                    params={"timeout": 30, "offset": offset, "allowed_updates": '["message","edited_message"]'},
+                    timeout=35,
+                )
                 r.raise_for_status()
                 updates = r.json().get("result", [])
 

@@ -104,7 +104,7 @@ export default function MoltbookStatusCard() {
               const res = await fetch("/api/moltbook/tick", { method: "POST" });
               const data = await res.json();
               if (!res.ok) throw new Error(data?.reason || "tick failed");
-              setStatus(`Server tick ok. postedFromSherpa=${Boolean(data?.postedFromSherpa)} signals=${Number(data?.tradeSignalCount || 0)}`);
+              setStatus(`Server tick ok. sherpaPost=${Boolean(data?.postedFromSherpa)} originalPost=${Boolean(data?.postedOriginal)} followed=${Number(data?.followed || 0)} signals=${Number(data?.tradeSignalCount || 0)}`);
             } catch (error) {
               setStatus(`Server tick failed: ${error instanceof Error ? error.message : "unknown error"}`);
             }

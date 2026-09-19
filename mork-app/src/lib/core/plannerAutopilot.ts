@@ -24,13 +24,16 @@ async function runTick(state: PlannerAutopilotState) {
   state.running = true;
   try {
     const app = await getAppControlState();
-    const shouldRun =
+    const shouldRunPlanner =
       app.controls.startupCompleted &&
       app.arb.status === "running" &&
       app.controls.plannerEnabled &&
       app.controls.executionAuthority.mode === "agent_assisted";
-    if (!shouldRun) return;
-    await Promise.allSettled([runPlannerTickRoute(), runMoltbookTickRoute()]);
+    const shouldRunSocial = app.controls.startupCompleted && app.controls.plannerEnabled;
+    const jobs: Promise<unknown>[] = [];
+    if (shouldRunPlanner) jobs.push(runPlannerTickRoute());
+    if (shouldRunSocial) jobs.push(runMoltbookTickRoute());
+    if (jobs.length > 0) await Promise.allSettled(jobs);
   } catch {
     // Keep scheduler alive even when a tick fails.
   } finally {
