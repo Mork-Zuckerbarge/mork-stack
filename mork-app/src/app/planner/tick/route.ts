@@ -292,7 +292,11 @@ async function rankPolicyMints(allowlist: string[]): Promise<Array<{ mint: strin
 }
 
 async function pickBestTradableMint(allowlist: string[], amountSol: number): Promise<CandidateQuote | null> {
-  const ranked = await rankPolicyMints(allowlist);
+  // Autonomous directional buys need evidence for the *selected* mint. Merely
+  // having a positive signal for some other allowlisted mint is not sufficient.
+  const ranked = (await rankPolicyMints(allowlist)).filter(
+    ({ policy }) => policy.score > 0 && policy.ok >= policy.fail,
+  );
   const probeLamports = Math.max(1_000_000, Math.floor(amountSol * 1_000_000_000));
   const probeLimit = Math.min(ranked.length, Math.max(3, numberFromEnv(process.env.MORK_PLANNER_CANDIDATE_PROBE_LIMIT, 12)));
   const candidates: CandidateQuote[] = [];
@@ -468,10 +472,11 @@ function scoreCandidateQuote(quote: CandidateQuote): number {
   const reliability = quote.policy.ok + quote.policy.fail > 0
     ? quote.policy.ok / Math.max(1, quote.policy.ok + quote.policy.fail)
     : 0.5;
-  const liquidityScore = Math.log10(Math.max(1, quote.outAmount));
   const impactPenalty = Math.max(0, quote.priceImpactPct) * 20;
   const routePenalty = Math.max(0, quote.routeHopCount - 2) * 0.15;
-  return quote.policy.score + reliability + liquidityScore - impactPenalty - routePenalty;
+  // Never compare raw outAmount across tokens: token decimals and unit prices
+  // made cheap/dead tokens look artificially superior to liquid assets.
+  return quote.policy.score + reliability - impactPenalty - routePenalty;
 }
 
 async function quoteBuyCandidate(outputMint: string, amountLamports: number, policy: PolicyScore): Promise<CandidateQuote | null> {
@@ -487,6 +492,10 @@ async function quoteBuyCandidate(outputMint: string, amountLamports: number, pol
   const priceImpactPct = Number(json?.priceImpactPct ?? 0);
   if (!Number.isFinite(outAmount) || outAmount <= 0) return null;
   const routeHopCount = Array.isArray(json?.routePlan) ? json.routePlan.length : 0;
+  const maxPriceImpactPct = Math.max(0, numberFromEnv(process.env.MORK_PLANNER_MAX_PRICE_IMPACT_PCT, 1));
+  if (!Number.isFinite(priceImpactPct) || priceImpactPct < 0 || priceImpactPct > maxPriceImpactPct || routeHopCount === 0) {
+    return null;
+  }
   const candidate = {
     mint: outputMint,
     policy,
@@ -712,7 +721,7 @@ async function _plannerPost(runId: string, logSkip: (reason: string) => void) {
 
     if (positiveSignal) {
       decision.go = true;
-      decision.usd = Math.max(AGENT_MIN_TRADE_USD, effectiveMaxUsd);
+      decision.usd = Math.min(effectiveMaxUsd, AGENT_MIN_TRADE_USD);
       decision.reason = `${decision.reason || "HOLD"} -> fallback_trade_on_positive_policy_signal`;
       decision.reasonCode = "fallback_trade_on_positive_policy_signal";
       fallbackApplied = true;

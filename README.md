@@ -83,7 +83,7 @@ Yes — the stack already supports external enrichment providers and can activel
   - Sherpa routes responses through local/core/OpenAI paths depending on availability and mode.
 
 - **Pollinations connection (media enrichment):**
-  - **Images:** `https://image.pollinations.ai/prompt/{prompt}`
+  - **Images:** `https://gen.pollinations.ai/image/{prompt}`
   - **Video (+ optional audio mode):** `https://gen.pollinations.ai/image/{prompt}` with media query/model controls
   - The app’s media runtime supports style/reference conditioning and provider-aware fallbacks.
 
@@ -99,6 +99,7 @@ USE_OPENAI="1"
 MEDIA_VIDEO_ENDPOINT=""            # empty => use Pollinations default
 MEDIA_VIDEO_MODEL="veo"            # or another supported Pollinations model
 MEDIA_VIDEO_TOKEN=""               # optional, if your Pollinations route requires a token
+POLLINATIONS_API_KEY=""             # preferred Pollinations key; MEDIA_VIDEO_TOKEN remains an alias
 MEDIA_STYLE_IMAGE_URLS="https://...png,https://...png"
 ```
 
