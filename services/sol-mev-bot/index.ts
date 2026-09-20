@@ -313,8 +313,12 @@ async function main(): Promise<void> {
       dryRunTrades: session.dryRunTrades,
       strategyEnabled: {
         arb: config.enableArb,
+        triangularArb: config.enableTriangularArb,
         ammImbalance: config.enableAmmImbalance,
         momentum: config.enableMomentum,
+        liquidationArb: config.enableLiquidationArb,
+        driftFundingMonitor: config.enableDriftFunding,
+        stablecoinDepeg: config.enableStablecoinDepeg,
       },
       dryRun: config.dryRun,
     });

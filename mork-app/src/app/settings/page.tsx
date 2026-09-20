@@ -10,6 +10,7 @@ type Settings = {
   moltbookApiKey: string;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
+  pollinationsApiKey: string;
   ollamaHost: string;
   ollamaModel: string;
 };
@@ -22,6 +23,7 @@ const emptySettings: Settings = {
   moltbookApiKey: "",
   elevenLabsApiKey: "",
   elevenLabsVoiceId: "",
+  pollinationsApiKey: "",
   ollamaHost: "http://127.0.0.1:11434",
   ollamaModel: "llama3.2:3b",
 };
@@ -74,6 +76,7 @@ export default function SettingsPage() {
           <Field label="Moltbook API Key" value={settings.moltbookApiKey} onChange={(v) => update("moltbookApiKey", v)} secret />
           <Field label="ElevenLabs API Key" value={settings.elevenLabsApiKey} onChange={(v) => update("elevenLabsApiKey", v)} secret />
           <Field label="ElevenLabs Voice ID" value={settings.elevenLabsVoiceId} onChange={(v) => update("elevenLabsVoiceId", v)} />
+          <Field label="Pollinations API Key" value={settings.pollinationsApiKey} onChange={(v) => update("pollinationsApiKey", v)} secret />
           <Field label="Ollama Host" value={settings.ollamaHost} onChange={(v) => update("ollamaHost", v)} />
           <Field label="Ollama Model" value={settings.ollamaModel} onChange={(v) => update("ollamaModel", v)} />
         </div>

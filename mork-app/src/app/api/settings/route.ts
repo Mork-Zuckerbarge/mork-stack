@@ -12,6 +12,7 @@ type SettingsPayload = {
   moltbookApiKey: string;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
+  pollinationsApiKey: string;
   ollamaHost: string;
   ollamaModel: string;
 };
@@ -24,6 +25,7 @@ const DEFAULT_SETTINGS: SettingsPayload = {
   moltbookApiKey: "",
   elevenLabsApiKey: "",
   elevenLabsVoiceId: "",
+  pollinationsApiKey: "",
   ollamaHost: "http://127.0.0.1:11434",
   ollamaModel: "llama3.2:3b",
 };
@@ -36,6 +38,7 @@ const SETTINGS_TO_ENV: Array<[keyof SettingsPayload, string]> = [
   ["moltbookApiKey", "MOLTBOOK_API_KEY"],
   ["elevenLabsApiKey", "ELEVENLABS_API_KEY"],
   ["elevenLabsVoiceId", "ELEVENLABS_VOICE_ID"],
+  ["pollinationsApiKey", "POLLINATIONS_API_KEY"],
   ["ollamaHost", "OLLAMA_HOST"],
   ["ollamaModel", "OLLAMA_MODEL"],
 ];

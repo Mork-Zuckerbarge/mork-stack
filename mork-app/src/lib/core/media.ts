@@ -87,16 +87,30 @@ async function persistBytes(
   return { filename, url: `/generated/${filename}` };
 }
 
-async function fetchBinary(url: string, context: string): Promise<{ bytes: Uint8Array<ArrayBufferLike>; mimeType: string }> {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`${context} failed (${res.status})`);
+function pollinationsToken(): string {
+  return (process.env.POLLINATIONS_API_KEY || process.env.MEDIA_VIDEO_TOKEN || "").trim();
+}
+
+async function fetchPollinationsBinary(
+  url: URL,
+  context: string,
+  expectedType: "image" | "video" | "audio",
+): Promise<{ bytes: Uint8Array<ArrayBufferLike>; mimeType: string }> {
+  const token = pollinationsToken();
+  if (token) url.searchParams.set("key", token);
+  const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+  const response = await fetch(url, { headers, cache: "no-store" });
+  const mimeType = (response.headers.get("content-type") || "").toLowerCase();
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).slice(0, 500);
+    throw new Error(`${context} failed (${response.status})${detail ? `: ${detail}` : ""}`);
   }
-  const mimeType = res.headers.get("content-type") || "application/octet-stream";
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (!bytes.length) {
-    throw new Error(`${context} returned empty bytes`);
+  if (!mimeType.startsWith(`${expectedType}/`)) {
+    const detail = (await response.text().catch(() => "")).slice(0, 500);
+    throw new Error(`${context} returned ${mimeType || "an unknown content type"}${detail ? `: ${detail}` : ""}`);
   }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length) throw new Error(`${context} returned empty bytes`);
   return { bytes, mimeType };
 }
 
@@ -148,7 +162,7 @@ async function normalizeVideoStyleReferences(model: string, refs: string[]): Pro
 }
 
 export async function generateImage(prompt: string): Promise<GeneratedMedia> {
-  const imageUrl = new URL(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`);
+  const imageUrl = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}`);
   imageUrl.searchParams.set("nologo", "true");
   imageUrl.searchParams.set("enhance", "true");
   const seed = Number(process.env.MEDIA_IMAGE_SEED || "");
@@ -166,7 +180,19 @@ export async function generateImage(prompt: string): Promise<GeneratedMedia> {
     imageUrl.searchParams.set("image", styleRefs.join(","));
   }
 
-  const { bytes, mimeType } = await fetchBinary(imageUrl.toString(), "Image generation");
+  let generated: { bytes: Uint8Array<ArrayBufferLike>; mimeType: string };
+  try {
+    generated = await fetchPollinationsBinary(imageUrl, "Image generation", "image");
+  } catch (error) {
+    // Models and optional parameters change independently at Pollinations. Retry
+    // once with the stable prompt-only contract before surfacing the error.
+    if (!(error instanceof Error) || !/\((400|404|422)\)/.test(error.message)) throw error;
+    imageUrl.searchParams.delete("model");
+    imageUrl.searchParams.delete("image");
+    imageUrl.searchParams.delete("enhance");
+    generated = await fetchPollinationsBinary(imageUrl, "Image generation fallback", "image");
+  }
+  const { bytes, mimeType } = generated;
   const persisted = await persistBytes(bytes, prompt, mimeType);
   return {
     kind: "image",
@@ -223,7 +249,7 @@ export async function generateVideo(prompt: string): Promise<GeneratedMedia> {
   const baseHeaders: HeadersInit = {
     ...(!usePollinationsDefault ? { "Content-Type": "application/json" } : {}),
   };
-  const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
+  const token = pollinationsToken();
   if (usePollinationsDefault && token) {
     // Pollinations docs support API keys in either Authorization bearer header or `?key=` query params.
     // Setting both increases compatibility for proxies/gateways that strip auth headers.
@@ -312,7 +338,7 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
   if (!audioModel) audioModel = "elevenmusic";
   if (audioModel) endpoint.searchParams.set("model", audioModel);
   endpoint.searchParams.set("instrumental", "true");
-  const token = (process.env.MEDIA_VIDEO_TOKEN || "").trim();
+  const token = pollinationsToken();
   if (token) endpoint.searchParams.set("key", token);
   const headers: HeadersInit = token ? { Authorization: `Bearer ${token}`, accept: "audio/mpeg" } : { accept: "audio/mpeg" };
   const requestAudio = async (url: URL) => fetch(url.toString(), { method: "GET", headers, cache: "no-store" });
@@ -325,6 +351,15 @@ export async function generateAudio(prompt: string): Promise<GeneratedMedia> {
     } else {
       throw new Error(`Audio generation failed (${res.status})${detail ? `: ${detail}` : ""}`);
     }
+  }
+  if (!res.ok && (res.status === 404 || res.status === 405)) {
+    // Some Pollinations deployments expose audio-capable generation through
+    // the unified image route rather than /audio.
+    const unified = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}`);
+    unified.searchParams.set("audio", "true");
+    unified.searchParams.set("model", audioModel);
+    if (token) unified.searchParams.set("key", token);
+    res = await requestAudio(unified);
   }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");

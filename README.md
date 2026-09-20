@@ -19,6 +19,24 @@ Flush modules, check updates, simple launch, local storage only, easy to install
 More massive updates coming.
 Must hold 1,000 $BBQ to enable wallet-controlled features. Autonomous swaps also default to dust guards (`MORK_AGENT_MIN_TRADE_USD`, `MORK_AGENT_MIN_TRADE_SOL`, and fee-multiple checks) so the agent will not spend SOL on uneconomic microtransactions.
 
+## Telegram and ElevenLabs troubleshooting
+
+The Telegram integration uses long polling. On startup it removes any existing webhook from the configured bot, because Telegram does not deliver `getUpdates` while a webhook is active. Direct messages are always answered; in groups the default `REPLY_MODE=mentions` answers mentions and replies to the bot. Set `REPLY_MODE=all` only if the bot should respond to every group message.
+
+Configure both `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` to enable voice. Voice defaults on when both values are present and `/voice on`, `/voice off`, and `/voice status` override it for the current user until restart. `VOICE_REPLY_PROBABILITY` defaults to `1`; lower it for occasional voice replies. Restart `./start.sh` after editing settings, then inspect `.logs/telegram-bridge.log` without sharing its secrets.
+
+## Strategy activation and safety
+
+Strategy engines are intentionally disabled by default. Enable them in the app's Strategy engines panel and restart the stack so the separately running trading process reads the saved environment. The available engines are circular/cross-DEX arbitrage, triangular arbitrage, AMM pool imbalance, momentum, liquidation-dislocation, Drift funding monitoring, and stablecoin depeg. Momentum also needs `BIRDEYE_API_KEY`; the MEV runner needs its documented Helius and wallet configuration. Keep `PAPER=true` and `ARMED=false` while validating all engines. Drift funding remains monitor-only until a hedged perp leg exists, so it must not be treated as a live complete strategy.
+
+## Moltbook autonomy
+
+Moltbook ticks now run with the enabled planner even when trading is not in agent-assisted/running mode. Each tick can upvote, comment, follow authors, ingest feed context, publish a new Sherpa memory, or generate a rate-limited original post when Sherpa has nothing new. Configure `MOLTBOOK_API_KEY`; tune original-post cadence with `MOLTBOOK_ORIGINAL_POST_INTERVAL_HOURS` (default `12`) and destination with `MOLTBOOK_DEFAULT_SUBMOLT` (default `general`). `MOLTBOOK_KILL_SWITCH=1` stops all Moltbook actions.
+
+## Can the program evolve and write to GitHub itself?
+
+Yes, but it should not push directly to the protected default branch or deploy its own unreviewed output. A safe in-process evolution loop is: collect an issue and diagnostics; create a short-lived branch in a restricted checkout; let a coding agent propose a minimal patch; run lint, type-checks, tests, secret scanning, and a dry-run policy suite; then use a narrowly scoped GitHub App token to open a pull request. Require human approval and branch protection before merge, and never expose trading keys, wallet secrets, or broad repository credentials to the coding process. Add bounded files/directories, command allowlists, time/budget limits, an audit log, a kill switch, and rollback before considering automated merges. This keeps evolution user-controlled rather than allowing the runtime to rewrite itself silently.
+
 ## Fresh Ubuntu quickstart (one command)
 
 Use this single command on a fresh Ubuntu machine to install dependencies, clone the repo, bootstrap, build, and launch:
@@ -65,7 +83,7 @@ Yes — the stack already supports external enrichment providers and can activel
   - Sherpa routes responses through local/core/OpenAI paths depending on availability and mode.
 
 - **Pollinations connection (media enrichment):**
-  - **Images:** `https://image.pollinations.ai/prompt/{prompt}`
+  - **Images:** `https://gen.pollinations.ai/image/{prompt}`
   - **Video (+ optional audio mode):** `https://gen.pollinations.ai/image/{prompt}` with media query/model controls
   - The app’s media runtime supports style/reference conditioning and provider-aware fallbacks.
 
@@ -81,6 +99,7 @@ USE_OPENAI="1"
 MEDIA_VIDEO_ENDPOINT=""            # empty => use Pollinations default
 MEDIA_VIDEO_MODEL="veo"            # or another supported Pollinations model
 MEDIA_VIDEO_TOKEN=""               # optional, if your Pollinations route requires a token
+POLLINATIONS_API_KEY=""             # preferred Pollinations key; MEDIA_VIDEO_TOKEN remains an alias
 MEDIA_STYLE_IMAGE_URLS="https://...png,https://...png"
 ```
 
